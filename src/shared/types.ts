@@ -1315,6 +1315,15 @@ export type StatusBarItem =
   | 'ssh'
   | 'sessions'
   | 'memory'
+
+export type TaskResumeState = {
+  githubMode?: 'items' | 'project'
+  githubItemsPreset?: TaskViewPresetId | null
+  githubItemsQuery?: string
+  linearPreset?: 'assigned' | 'created' | 'all' | 'completed'
+  linearQuery?: string
+}
+
 export type PersistedUIState = {
   lastActiveRepoId: string | null
   lastActiveWorktreeId: string | null
@@ -1403,6 +1412,10 @@ export type PersistedUIState = {
    *  this field is the metadata index so custom sidekicks ride the existing
    *  PersistedUIState save pipeline. */
   customSidekicks?: CustomSidekick[]
+  /** Page-position state for Tasks. Source/repo/team/project selections keep
+   *  using their existing settings paths; this only restores transient tabs
+   *  and applied searches. */
+  taskResumeState?: TaskResumeState
 }
 
 /** Metadata for a user-uploaded sidekick image. `id` is the stable identifier;
