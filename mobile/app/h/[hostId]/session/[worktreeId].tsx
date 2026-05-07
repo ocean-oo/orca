@@ -260,13 +260,16 @@ export default function SessionScreen() {
           if (subscribeSeqRef.current.get(handle) !== seq) return
           const data = result as Record<string, unknown>
           // Why: stale-event filter. Server-side state machine bumps a
-          // monotonic seq on every applyLayout. Drop scrollback/resized
-          // events whose seq is strictly older than what we've already
-          // observed for this handle — they're late-arriving from a
-          // superseded layout. >20-event regress = treat as server
-          // restart (fresh state machine), reset the high-water mark.
+          // monotonic seq on every applyLayout. Drop `resized` events
+          // whose seq is strictly older than what we've already observed
+          // for this handle — they're late-arriving from a superseded
+          // layout. `scrollback` is the response to a fresh subscribe,
+          // so it always resets the high-water mark regardless of seq
+          // (post-WS-reconnect or post-resubscribe the server may emit
+          // scrollback at a seq lower than what we'd seen pre-reconnect;
+          // dropping it would leave the user with a blank terminal).
           const eventSeq = typeof data.seq === 'number' ? data.seq : null
-          if (eventSeq != null && (data.type === 'scrollback' || data.type === 'resized')) {
+          if (eventSeq != null && data.type === 'resized') {
             const last = layoutSeqRef.current.get(handle)
             if (last != null && eventSeq < last && last - eventSeq <= 20) {
               console.log('[fit][session] DROP-stale-seq', {
@@ -281,6 +284,8 @@ export default function SessionScreen() {
               return
             }
             layoutSeqRef.current.set(handle, eventSeq)
+          } else if (eventSeq != null && data.type === 'scrollback') {
+            layoutSeqRef.current.set(handle, eventSeq)
           }
           if (data.type === 'scrollback' || data.type === 'resized') {
             console.log('[fit][session] event', {
@@ -294,7 +299,14 @@ export default function SessionScreen() {
             })
           }
           if (data.type === 'scrollback') {
-            if (initializedHandlesRef.current.has(handle)) return
+            if (initializedHandlesRef.current.has(handle)) {
+              console.log('[fit][session] scrollback IGNORED (already initialized)', {
+                handle: handle.slice(-8),
+                cols: data.cols,
+                rows: data.rows
+              })
+              return
+            }
             const cols = (data.cols as number) || 80
             const rows = (data.rows as number) || 24
             const scrollbackCols = cols
@@ -303,7 +315,21 @@ export default function SessionScreen() {
               typeof data.serialized === 'string' && data.serialized.length > 0
                 ? data.serialized
                 : ''
-            getTerminalRef(handle)?.init(cols, rows, initialData)
+            const ref = getTerminalRef(handle)
+            // Why: previously we set `initializedHandlesRef` even when the
+            // WebView wasn't mounted yet (ref=null). The init message went
+            // nowhere, but the flag stayed true, so any subsequent scrollback
+            // for THIS handle was silently dropped → blank terminal. Only
+            // mark initialized if init() actually reached the WebView.
+            if (!ref) {
+              console.log('[fit][session] scrollback DROPPED — no terminal ref', {
+                handle: handle.slice(-8),
+                cols,
+                rows
+              })
+              return
+            }
+            ref.init(cols, rows, initialData)
             initializedHandlesRef.current.add(handle)
             if (data.displayMode) {
               setTerminalModes((prev) =>
@@ -374,7 +400,27 @@ export default function SessionScreen() {
               })()
             }
           } else if (data.type === 'data') {
-            getTerminalRef(handle)?.write(data.chunk as string)
+            // Why: log when data arrives but the WebView ref is missing
+            // — this is the most likely cause of "blank but input works":
+            // server stream is alive, sends flow, but writes are dropped
+            // because the WebView ref disappeared (unmount mid-flight) or
+            // the scrollback never landed (so xterm has no buffer).
+            const dataRef = getTerminalRef(handle)
+            if (!dataRef) {
+              console.log('[fit][session] data DROPPED — no terminal ref', {
+                handle: handle.slice(-8),
+                chunkLen: typeof data.chunk === 'string' ? data.chunk.length : 0,
+                initialized: initializedHandlesRef.current.has(handle)
+              })
+              return
+            }
+            if (!initializedHandlesRef.current.has(handle)) {
+              console.log('[fit][session] data RECEIVED before scrollback', {
+                handle: handle.slice(-8),
+                chunkLen: typeof data.chunk === 'string' ? data.chunk.length : 0
+              })
+            }
+            dataRef.write(data.chunk as string)
           } else if (data.type === 'resized') {
             // Why: inline resize event — the server changed the PTY dimensions
             // (mode toggle or desktop restore). Reinitialize xterm at the new
