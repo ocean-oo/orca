@@ -293,6 +293,59 @@ export function useDiffCommentDecorator({
     // the Monaco batch, then unmount afterwards.
     const rootsToUnmount: Root[] = []
 
+    // Why: re-measure the zone DOM and tell Monaco to grow/shrink the zone
+    // so the inline editor can expand without clipping the next editor line.
+    // Called from the card whenever it toggles edit mode or the textarea
+    // grows. Monaco's `_layoutZone` re-reads `delegate.heightInPx`, so we
+    // mutate the delegate first, then trigger a re-layout. Bails out if the
+    // zone has been removed since enqueuing. Defined outside changeViewZones
+    // so a future caller cannot mistakenly reach into the outer accessor —
+    // resizeZone always opens its own changeViewZones batch.
+    const resizeZone = (commentId: string): void => {
+      const entry = zones.get(commentId)
+      if (!entry) {
+        return
+      }
+      const measured = entry.domNode.scrollHeight
+      if (measured <= 0) {
+        return
+      }
+      if (entry.delegate.heightInPx === measured) {
+        return
+      }
+      entry.delegate.heightInPx = measured
+      editor.changeViewZones((acc) => {
+        acc.layoutZone(entry.zoneId)
+      })
+    }
+
+    // Why: render helper used by BOTH the new-zone branch and the patch-
+    // existing-zone branch so the card's prop wiring stays in lockstep — any
+    // future prop is added once.
+    const renderCard = (root: Root, comment: DiffComment): void => {
+      root.render(
+        <DiffCommentCard
+          lineNumber={comment.lineNumber}
+          body={comment.body}
+          onDelete={() => onDeleteCommentRef.current(comment.id)}
+          onSubmitEdit={
+            onUpdateCommentRef.current
+              ? async (body) => {
+                  const fn = onUpdateCommentRef.current
+                  if (!fn) {
+                    return false
+                  }
+                  return fn(comment.id, body)
+                }
+              : undefined
+          }
+          onContentResize={() => resizeZone(comment.id)}
+          pendingEdit={pendingEditCommentId === comment.id}
+          onPendingEditConsumed={() => onPendingEditConsumedRef.current?.()}
+        />
+      )
+    }
+
     editor.changeViewZones((accessor) => {
       // Why: remove only the zones whose comments are gone. Rebuilding all
       // zones on every change caused flicker and dropped focus/selection in
@@ -303,30 +356,6 @@ export function useDiffCommentDecorator({
           rootsToUnmount.push(entry.root)
           zones.delete(commentId)
         }
-      }
-
-      // Why: re-measure the zone DOM and tell Monaco to grow/shrink the zone
-      // so the inline editor can expand without clipping the next editor line.
-      // Called from the card whenever it toggles edit mode or the textarea
-      // grows. Monaco's `_layoutZone` re-reads `delegate.heightInPx`, so we
-      // mutate the delegate first, then trigger a re-layout. Bails out if the
-      // zone has been removed since enqueuing.
-      const resizeZone = (commentId: string): void => {
-        const entry = zones.get(commentId)
-        if (!entry) {
-          return
-        }
-        const measured = entry.domNode.scrollHeight
-        if (measured <= 0) {
-          return
-        }
-        if (entry.delegate.heightInPx === measured) {
-          return
-        }
-        entry.delegate.heightInPx = measured
-        editor.changeViewZones((acc) => {
-          acc.layoutZone(entry.zoneId)
-        })
       }
 
       // Add zones for newly-added comments.
@@ -343,30 +372,7 @@ export function useDiffCommentDecorator({
         dom.addEventListener('mousedown', (ev) => ev.stopPropagation())
 
         const root = createRoot(dom)
-        const renderCard = (comment: DiffComment): void => {
-          root.render(
-            <DiffCommentCard
-              lineNumber={comment.lineNumber}
-              body={comment.body}
-              onDelete={() => onDeleteCommentRef.current(comment.id)}
-              onSubmitEdit={
-                onUpdateCommentRef.current
-                  ? async (body) => {
-                      const fn = onUpdateCommentRef.current
-                      if (!fn) {
-                        return false
-                      }
-                      return fn(comment.id, body)
-                    }
-                  : undefined
-              }
-              onContentResize={() => resizeZone(comment.id)}
-              pendingEdit={pendingEditCommentId === comment.id}
-              onPendingEditConsumed={() => onPendingEditConsumedRef.current?.()}
-            />
-          )
-        }
-        renderCard(c)
+        renderCard(root, c)
 
         // Why: estimate height from line count so the zone is close to the
         // right size on first paint. Monaco sets heightInPx authoritatively at
@@ -415,27 +421,7 @@ export function useDiffCommentDecorator({
         if (entry.lastBody === c.body && entry.lastPendingEdit === nextPendingEdit) {
           continue
         }
-        entry.root.render(
-          <DiffCommentCard
-            lineNumber={c.lineNumber}
-            body={c.body}
-            onDelete={() => onDeleteCommentRef.current(c.id)}
-            onSubmitEdit={
-              onUpdateCommentRef.current
-                ? async (body) => {
-                    const fn = onUpdateCommentRef.current
-                    if (!fn) {
-                      return false
-                    }
-                    return fn(c.id, body)
-                  }
-                : undefined
-            }
-            onContentResize={() => resizeZone(c.id)}
-            pendingEdit={nextPendingEdit}
-            onPendingEditConsumed={() => onPendingEditConsumedRef.current?.()}
-          />
-        )
+        renderCard(entry.root, c)
         entry.lastBody = c.body
         entry.lastPendingEdit = nextPendingEdit
       }

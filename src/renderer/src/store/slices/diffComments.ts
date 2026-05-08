@@ -215,21 +215,40 @@ export const createDiffCommentsSlice: StateCreator<AppState, [], [], DiffComment
     if (!trimmed) {
       return false
     }
-    const result = mutateComments(set, worktreeId, (existing) => {
-      const idx = existing.findIndex((c) => c.id === commentId)
+
+    // Why: look up the current state OUTSIDE mutateComments so we can
+    // distinguish "comment missing" (return false — likely an edit-while-
+    // deleted race; the card should keep its draft and not silently close)
+    // from "body unchanged" (return true — benign no-op; the card can close
+    // the editor without surfacing an error).
+    const repoId = getRepoIdFromWorktreeId(worktreeId)
+    const repoList = get().worktreesByRepo[repoId]
+    const target = repoList?.find((w) => w.id === worktreeId)
+    const existing = target?.diffComments ?? []
+    const existingIdx = existing.findIndex((c) => c.id === commentId)
+    if (existingIdx === -1) {
+      return false
+    }
+    if (existing[existingIdx].body === trimmed) {
+      return true
+    }
+
+    const result = mutateComments(set, worktreeId, (current) => {
+      const idx = current.findIndex((c) => c.id === commentId)
       if (idx === -1) {
         return null
       }
-      if (existing[idx].body === trimmed) {
+      if (current[idx].body === trimmed) {
         return null
       }
-      const next = existing.slice()
-      next[idx] = { ...existing[idx], body: trimmed }
+      const next = current.slice()
+      next[idx] = { ...current[idx], body: trimmed }
       return next
     })
     if (!result) {
-      // Why: no-op (id missing or body unchanged) — treat as success so the
-      // caller can close its editor without surfacing a spurious error.
+      // Why: between the pre-check and the set updater, the comment vanished
+      // or another mutation already wrote the same body. Treat as success so
+      // the caller closes its editor.
       return true
     }
     try {

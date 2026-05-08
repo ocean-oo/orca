@@ -15,10 +15,6 @@ import { Button } from '@/components/ui/button'
 type Props = {
   lineNumber: number
   body: string
-  // Why: when the card is rendered without an `onEdit` callback (e.g. a
-  // future read-only diff surface) the pencil button is hidden so consumers
-  // can opt out of inline editing.
-  onEdit?: () => void
   onDelete: () => void
   // Why: Monaco view zones have a fixed `heightInPx` set at insertion time
   // and aren't auto-measured. While the user is in edit mode the textarea
@@ -37,7 +33,6 @@ type Props = {
 export function DiffCommentCard({
   lineNumber,
   body,
-  onEdit,
   onDelete,
   onContentResize,
   pendingEdit,
@@ -118,17 +113,24 @@ export function DiffCommentCard({
     onContentResizeRef.current?.()
   }, [editing])
 
-  // Why: when the editor opens or closes the card's height changes (textarea
-  // + footer vs single body block). Ping the decorator so it re-measures and
-  // resizes the Monaco view zone — otherwise the card clips the next line.
+  const editingPrevRef = useRef(editing)
   useEffect(() => {
+    if (editingPrevRef.current === editing) {
+      return
+    }
+    editingPrevRef.current = editing
+    // Why: when the editor opens or closes the card's height changes (textarea
+    // + footer vs single body block). Ping the decorator so it re-measures and
+    // resizes the Monaco view zone — otherwise the card clips the next line.
+    // Skip the initial mount: the zone's heightInPx estimate is intentionally
+    // close to actual on first paint to avoid a layout pass before the user
+    // interacts; firing here would re-layout every card on creation.
     onContentResizeRef.current?.()
   }, [editing])
 
   const handleStartEdit = (): void => {
     setDraft(body)
     setEditing(true)
-    onEdit?.()
   }
 
   const handleCancel = (): void => {
@@ -136,17 +138,16 @@ export function DiffCommentCard({
     setDraft(body)
   }
 
+  const trimmedDraft = draft.trim()
+  const canSubmit = !submitting && trimmedDraft.length > 0 && trimmedDraft !== body
+
   const handleSubmit = async (): Promise<void> => {
-    if (submitting || !onSubmitEdit) {
-      return
-    }
-    const trimmed = draft.trim()
-    if (!trimmed) {
+    if (!canSubmit || !onSubmitEdit) {
       return
     }
     setSubmitting(true)
     try {
-      const ok = await onSubmitEdit(trimmed)
+      const ok = await onSubmitEdit(trimmedDraft)
       if (ok) {
         setEditing(false)
       }
@@ -222,16 +223,12 @@ export function DiffCommentCard({
               // Why: plain Enter saves to mirror the new-note popover; Shift
               // +Enter keeps the newline. IME composition is excluded so a
               // CJK conversion-confirm keystroke doesn't submit a half-typed
-              // note. Mirror the Save button's disabled guard — if the draft
-              // is empty or unchanged, no-op so Enter doesn't quietly close
-              // the editor (the user must explicitly Cancel/Escape).
+              // note. Share the canSubmit predicate with the Save button so
+              // Enter doesn't quietly close the editor when empty/unchanged
+              // (the user must explicitly Cancel/Escape).
               if (e.key === 'Enter' && !e.nativeEvent.isComposing && !e.shiftKey) {
                 e.preventDefault()
-                if (submitting) {
-                  return
-                }
-                const trimmed = draft.trim()
-                if (!trimmed || trimmed === body) {
+                if (!canSubmit) {
                   return
                 }
                 void handleSubmit()
@@ -246,11 +243,7 @@ export function DiffCommentCard({
             <Button variant="ghost" size="sm" onClick={handleCancel} disabled={submitting}>
               Cancel
             </Button>
-            <Button
-              size="sm"
-              onClick={() => void handleSubmit()}
-              disabled={submitting || draft.trim().length === 0 || draft.trim() === body}
-            >
+            <Button size="sm" onClick={() => void handleSubmit()} disabled={!canSubmit}>
               {submitting ? 'Saving…' : 'Save'}
             </Button>
           </div>
