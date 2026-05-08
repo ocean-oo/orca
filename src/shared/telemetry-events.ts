@@ -173,14 +173,25 @@ export type SettingsChangedKey = z.infer<typeof settingsChangedKeySchema>
 // unknown keys at parse time. This is the runtime counterpart to the
 // compile-time "unions of string literals, no raw `string`" rule.
 
-const emptySchema = z.object({}).strict()
+// Cohort signal — see docs/onboarding-funnel-cohort-addendum.md. One integer
+// shared across the events listed in `COHORT_EXTENDED` below: the count of
+// repos the user has at emit time, read from `store.getRepos().length`.
+// `.int().nonnegative()` constrains malformed values to the floor;
+// `.optional()` lets the classifier's fail-soft fallback (returning
+// `undefined`) validate cleanly so a read error never crashes a track call.
+const nthRepoAddedSchema = z.number().int().nonnegative().optional()
 
-const repoAddedSchema = z.object({ method: repoMethodSchema }).strict()
+const appOpenedSchema = z.object({ nth_repo_added: nthRepoAddedSchema }).strict()
+
+const repoAddedSchema = z
+  .object({ method: repoMethodSchema, nth_repo_added: nthRepoAddedSchema })
+  .strict()
 
 const workspaceCreatedSchema = z
   .object({
     source: workspaceSourceSchema,
-    from_existing_branch: z.boolean()
+    from_existing_branch: z.boolean(),
+    nth_repo_added: nthRepoAddedSchema
   })
   .strict()
 
@@ -188,7 +199,8 @@ const agentStartedSchema = z
   .object({
     agent_kind: agentKindSchema,
     launch_source: launchSourceSchema,
-    request_kind: requestKindSchema
+    request_kind: requestKindSchema,
+    nth_repo_added: nthRepoAddedSchema
   })
   .strict()
 
@@ -200,7 +212,8 @@ const agentStartedSchema = z
 const agentErrorSchema = z
   .object({
     error_class: errorClassSchema,
-    agent_kind: agentKindSchema
+    agent_kind: agentKindSchema,
+    nth_repo_added: nthRepoAddedSchema
   })
   .strict()
 
@@ -215,7 +228,7 @@ const telemetryOptedInSchema = z.object({ via: optInViaSchema }).strict()
 const telemetryOptedOutSchema = z.object({ via: optInViaSchema }).strict()
 
 const addRepoSetupStepActionEventSchema = z
-  .object({ action: addRepoSetupStepActionSchema })
+  .object({ action: addRepoSetupStepActionSchema, nth_repo_added: nthRepoAddedSchema })
   .strict()
 
 // Why: same enum-only discipline as `agent_error` — `.strict()` rejects raw
@@ -225,7 +238,8 @@ const addRepoSetupStepActionEventSchema = z
 const workspaceCreateFailedSchema = z
   .object({
     source: workspaceSourceSchema,
-    error_class: workspaceCreateErrorClassSchema
+    error_class: workspaceCreateErrorClassSchema,
+    nth_repo_added: nthRepoAddedSchema
   })
   .strict()
 
@@ -243,7 +257,7 @@ const workspaceCreateFailedSchema = z
 // change silently blends pre- and post-change rows under one event name,
 // which cannot be unmixed after the fact.
 export const eventSchemas = {
-  app_opened: emptySchema,
+  app_opened: appOpenedSchema,
 
   repo_added: repoAddedSchema,
   add_repo_setup_step_action: addRepoSetupStepActionEventSchema,
@@ -262,6 +276,35 @@ export const eventSchemas = {
 export type EventMap = { [N in keyof typeof eventSchemas]: z.infer<(typeof eventSchemas)[N]> }
 export type EventName = keyof EventMap
 export type EventProps<N extends EventName> = EventMap[N]
+
+// Events whose schemas declare `nth_repo_added`. The IPC `telemetry:track`
+// handler injects the cohort property only when the incoming event name is
+// in this set: the schemas are `.strict()`, so injecting `nth_repo_added` on
+// an event whose schema does not declare it would fail validation and
+// silently drop the entire event.
+//
+// Schema-additions checklist for adding a new cohort-extended event: (1)
+// add `nth_repo_added: nthRepoAddedSchema` to the event's schema above, and
+// (2) add the event name here. The `as const satisfies readonly EventName[]`
+// catches one drift direction — a name in this list that isn't a real
+// `EventName` is a TypeScript error. It does NOT catch the more dangerous
+// inverse: a schema that declares `nth_repo_added` whose name is missing
+// here would silently ship cohort-less events from the renderer. That
+// direction is caught only by this checklist and by review-time grep.
+export const COHORT_EXTENDED = [
+  'app_opened',
+  'repo_added',
+  'add_repo_setup_step_action',
+  'workspace_created',
+  'workspace_create_failed',
+  'agent_started',
+  'agent_error'
+] as const satisfies readonly EventName[]
+export type CohortExtendedEvent = (typeof COHORT_EXTENDED)[number]
+
+export function isCohortExtendedEvent(name: EventName): name is CohortExtendedEvent {
+  return (COHORT_EXTENDED as readonly EventName[]).includes(name)
+}
 
 // Common props attached by the client — declared here so the validator knows
 // which keys to allow on every outgoing event.

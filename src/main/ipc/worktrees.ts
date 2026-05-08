@@ -39,6 +39,7 @@ import { killAllProcessesForWorktree } from '../runtime/worktree-teardown'
 import { getLocalPtyProvider } from './pty'
 import { removeWorktreeSymlinks } from './worktree-symlinks'
 import { track } from '../telemetry/client'
+import { getCohortAtEmit } from '../telemetry/cohort-classifier'
 import { workspaceSourceSchema, type WorkspaceSource } from '../../shared/telemetry-events'
 import { classifyWorkspaceCreateError } from './worktree-create-error-class'
 
@@ -175,7 +176,8 @@ export function registerWorktreeHandlers(
       } catch (error) {
         track('workspace_create_failed', {
           source,
-          error_class: classifyWorkspaceCreateError(error)
+          error_class: classifyWorkspaceCreateError(error),
+          ...getCohortAtEmit()
         })
         throw error
       }
@@ -190,7 +192,8 @@ export function registerWorktreeHandlers(
       // the branch name itself.
       track('workspace_created', {
         source,
-        from_existing_branch: typeof args.baseBranch === 'string' && args.baseBranch.length > 0
+        from_existing_branch: typeof args.baseBranch === 'string' && args.baseBranch.length > 0,
+        ...getCohortAtEmit()
       })
 
       return result

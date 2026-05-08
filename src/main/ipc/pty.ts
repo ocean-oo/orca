@@ -28,6 +28,7 @@ import { applyTerminalAttributionEnv } from '../attribution/terminal-attribution
 import { registerPty, unregisterPty } from '../memory/pty-registry'
 import { track } from '../telemetry/client'
 import { classifyError } from '../telemetry/classify-error'
+import { getCohortAtEmit } from '../telemetry/cohort-classifier'
 import {
   agentKindSchema,
   launchSourceSchema,
@@ -928,7 +929,8 @@ export function registerPtyHandlers(
           const classified = classifyError(err)
           track('agent_error', {
             agent_kind: errorAgentKind,
-            error_class: classified.error_class
+            error_class: classified.error_class,
+            ...getCohortAtEmit()
           })
         }
         throw err
@@ -1084,7 +1086,8 @@ export function registerPtyHandlers(
           track('agent_started', {
             agent_kind: agentKindParse.data,
             launch_source: launchSourceParse.data,
-            request_kind: requestKindParse.data
+            request_kind: requestKindParse.data,
+            ...getCohortAtEmit()
           })
         }
       }
