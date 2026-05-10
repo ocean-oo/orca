@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- test suite covers snapshot, migration, auth materialization, and error-resilience scenarios */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -181,11 +182,19 @@ describe('CodexRuntimeHomeService', () => {
     new CodexRuntimeHomeService(store as never)
 
     expect(
-      readFileSync(
-        join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'),
-        'utf-8'
+      JSON.parse(
+        readFileSync(
+          join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'),
+          'utf-8'
+        )
       )
-    ).toBe('{"account":"system"}\n')
+    ).toEqual({ authJson: '{"account":"system"}\n' })
+    if (process.platform !== 'win32') {
+      expect(
+        statSync(join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'))
+          .mode & 0o777
+      ).toBe(0o600)
+    }
   })
 
   it('materializes the active managed account auth into ~/.codex on startup', async () => {
@@ -220,11 +229,13 @@ describe('CodexRuntimeHomeService', () => {
 
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"managed"}\n')
     expect(
-      readFileSync(
-        join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'),
-        'utf-8'
+      JSON.parse(
+        readFileSync(
+          join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'),
+          'utf-8'
+        )
       )
-    ).toBe('{"account":"system"}\n')
+    ).toEqual({ authJson: '{"account":"system"}\n' })
   })
 
   it('restores the system-default snapshot when no managed account is selected', async () => {
@@ -261,6 +272,42 @@ describe('CodexRuntimeHomeService', () => {
     service.syncForCurrentSelection()
 
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"system"}\n')
+  })
+
+  it('removes runtime auth when restoring a no-login system default', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    const managedHomePath = createManagedAuth(
+      testState.userDataDir,
+      'account-1',
+      '{"account":"managed"}\n'
+    )
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"managed"}\n')
+
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+
+    expect(existsSync(runtimeAuthPath)).toBe(false)
   })
 
   it('clears an invalid active account selection and restores the system default snapshot', async () => {
@@ -458,6 +505,44 @@ describe('CodexRuntimeHomeService', () => {
 
     const mode = statSync(runtimeAuthPath).mode & 0o777
     expect(mode).toBe(0o600)
+  })
+
+  it('tightens auth.json permissions when unchanged content is already present', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system"}\n', 'utf-8')
+    const managedHomePath = createManagedAuth(
+      testState.userDataDir,
+      'account-1',
+      '{"account":"managed"}\n'
+    )
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+    chmodSync(runtimeAuthPath, 0o644)
+    service.syncForCurrentSelection()
+
+    expect(statSync(runtimeAuthPath).mode & 0o777).toBe(0o600)
   })
 
   it('does not throw when syncForCurrentSelection encounters an error', async () => {
@@ -683,6 +768,81 @@ describe('CodexRuntimeHomeService', () => {
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(selectedAuth)
   })
 
+  it('reads back same-account refreshes for sparse managed metadata using stored auth identity', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system"}\n', 'utf-8')
+    const originalAuth = createCodexAuthJson('user@example.com', 'acct-selected', 'original')
+    const refreshedAuth = createCodexAuthJson('user@example.com', 'acct-selected', 'refreshed')
+    const managedHomePath = createManagedAuth(testState.userDataDir, 'account-1', originalAuth)
+    const managedAuthPath = join(managedHomePath, 'auth.json')
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    writeFileSync(runtimeAuthPath, refreshedAuth, 'utf-8')
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(managedAuthPath, 'utf-8')).toBe(refreshedAuth)
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(refreshedAuth)
+  })
+
+  it('reads back strong account-id refreshes when the runtime auth has no email', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system"}\n', 'utf-8')
+    const originalAuth = createCodexAuthJson('user@example.com', 'acct-1', 'original')
+    const refreshedAuth = `${JSON.stringify({
+      tokens: {
+        account_id: 'acct-1',
+        refresh_token: 'refreshed'
+      }
+    })}\n`
+    const managedHomePath = createManagedAuth(testState.userDataDir, 'account-1', originalAuth)
+    const managedAuthPath = join(managedHomePath, 'auth.json')
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: 'acct-1',
+          workspaceLabel: null,
+          workspaceAccountId: 'acct-1',
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    writeFileSync(runtimeAuthPath, refreshedAuth, 'utf-8')
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(managedAuthPath, 'utf-8')).toBe(refreshedAuth)
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(refreshedAuth)
+  })
+
   it('skips read-back on first sync after restart (lastWrittenAuthJson is null)', async () => {
     const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
     // Pre-populate runtime with different content to simulate a CLI refresh while Orca was down
@@ -776,7 +936,7 @@ describe('CodexRuntimeHomeService', () => {
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"tokens":"account2"}\n')
   })
 
-  it('detects external login on managed→system-default transition', async () => {
+  it('restores system default when unverified runtime auth appears before deselect', async () => {
     const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
     writeFileSync(runtimeAuthPath, '{"account":"system"}\n', 'utf-8')
     const managedHomePath = createManagedAuth(
@@ -805,19 +965,216 @@ describe('CodexRuntimeHomeService', () => {
     const { CodexRuntimeHomeService } = await import('./runtime-home-service')
     const service = new CodexRuntimeHomeService(store as never)
 
-    // External `codex auth login` overwrites runtime auth
+    // A stale or external process overwrites runtime with auth Orca cannot
+    // verify against the outgoing managed account.
     writeFileSync(runtimeAuthPath, '{"account":"external-login"}\n', 'utf-8')
 
     // Deselect managed account
     settings.activeCodexManagedAccountId = null
     service.syncForCurrentSelection()
 
-    // Should keep the external login, not restore stale system snapshot
-    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"external-login"}\n')
-    // Snapshot should be deleted so next capture picks up the external login
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"system"}\n')
     expect(
       existsSync(join(testState.userDataDir, 'codex-runtime-home', 'system-default-auth.json'))
-    ).toBe(false)
+    ).toBe(true)
+  })
+
+  it('restores system default after same-identity managed Codex refresh on deselect', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system-old"}\n', 'utf-8')
+    const managedAuth = createCodexAuthJson('user@example.com', 'acct-1', 'managed')
+    const externalAuth = createCodexAuthJson('user@example.com', 'acct-1', 'external')
+    const managedHomePath = createManagedAuth(testState.userDataDir, 'account-1', managedAuth)
+    const managedAuthPath = join(managedHomePath, 'auth.json')
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: 'acct-1',
+          workspaceLabel: null,
+          workspaceAccountId: 'acct-1',
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    writeFileSync(runtimeAuthPath, externalAuth, 'utf-8')
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(managedAuthPath, 'utf-8')).toBe(externalAuth)
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"system-old"}\n')
+  })
+
+  it('restores system default when stale Codex credentials are rejected on deselect', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system-old"}\n', 'utf-8')
+    const selectedAuth = createCodexAuthJson('selected@example.com', 'acct-selected', 'selected')
+    const staleLivePtyAuth = createCodexAuthJson('stale@example.com', 'acct-stale', 'stale')
+    const managedHomePath = createManagedAuth(testState.userDataDir, 'account-1', selectedAuth)
+    const managedAuthPath = join(managedHomePath, 'auth.json')
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'selected@example.com',
+          managedHomePath,
+          providerAccountId: 'acct-selected',
+          workspaceLabel: null,
+          workspaceAccountId: 'acct-selected',
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    writeFileSync(runtimeAuthPath, staleLivePtyAuth, 'utf-8')
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(managedAuthPath, 'utf-8')).toBe(selectedAuth)
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"system-old"}\n')
+  })
+
+  it('keeps external Codex logout when deselecting managed account', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system-old"}\n', 'utf-8')
+    const managedHomePath = createManagedAuth(
+      testState.userDataDir,
+      'account-1',
+      '{"account":"managed"}\n'
+    )
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    rmSync(runtimeAuthPath, { force: true })
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+
+    expect(existsSync(runtimeAuthPath)).toBe(false)
+  })
+
+  it('captures a fresh system-default snapshot when re-entering managed mode', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system-1"}\n', 'utf-8')
+    const managedHomePath = createManagedAuth(
+      testState.userDataDir,
+      'account-1',
+      '{"account":"managed"}\n'
+    )
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath,
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+    writeFileSync(runtimeAuthPath, '{"account":"system-2"}\n', 'utf-8')
+
+    settings.activeCodexManagedAccountId = 'account-1'
+    service.syncForCurrentSelection()
+    settings.activeCodexManagedAccountId = null
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"system-2"}\n')
+  })
+
+  it('reads back refreshed tokens for the outgoing Codex account before switching', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"system"}\n', 'utf-8')
+    const account1Original = createCodexAuthJson('one@example.com', 'acct-1', 'one-original')
+    const account1Refreshed = createCodexAuthJson('one@example.com', 'acct-1', 'one-refreshed')
+    const account2Auth = createCodexAuthJson('two@example.com', 'acct-2', 'two')
+    const managedHomePath1 = createManagedAuth(testState.userDataDir, 'account-1', account1Original)
+    const managedHomePath2 = createManagedAuth(testState.userDataDir, 'account-2', account2Auth)
+    const managedAuthPath1 = join(managedHomePath1, 'auth.json')
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'one@example.com',
+          managedHomePath: managedHomePath1,
+          providerAccountId: 'acct-1',
+          workspaceLabel: null,
+          workspaceAccountId: 'acct-1',
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        },
+        {
+          id: 'account-2',
+          email: 'two@example.com',
+          managedHomePath: managedHomePath2,
+          providerAccountId: 'acct-2',
+          workspaceLabel: null,
+          workspaceAccountId: 'acct-2',
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    writeFileSync(runtimeAuthPath, account1Refreshed, 'utf-8')
+    settings.activeCodexManagedAccountId = 'account-2'
+    service.syncForCurrentSelection()
+
+    expect(readFileSync(managedAuthPath1, 'utf-8')).toBe(account1Refreshed)
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(account2Auth)
   })
 
   it('does not clobber fresh tokens after clearLastWrittenAuthJson', async () => {

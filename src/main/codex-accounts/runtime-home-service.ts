@@ -5,6 +5,7 @@ semantics from drifting across PTY launch, login, and quota fetch paths. */
 import {
   copyFileSync,
   existsSync,
+  chmodSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -23,6 +24,12 @@ type CodexAuthIdentity = {
   providerAccountId: string | null
   workspaceAccountId: string | null
 }
+
+type CodexSystemDefaultSnapshot = {
+  authJson: string | null
+}
+
+type CodexReadBackResult = 'unchanged' | 'persisted' | 'rejected'
 
 export class CodexRuntimeHomeService {
   // Why: tracks whether auth.json is currently managed by Orca. When null,
@@ -60,25 +67,43 @@ export class CodexRuntimeHomeService {
   }
 
   syncForCurrentSelection(): void {
-    this.captureSystemDefaultSnapshotIfNeeded()
-
     const settings = this.store.getSettings()
+    if (this.lastSyncedAccountId === null) {
+      this.captureSystemDefaultSnapshot({ force: false })
+    }
     const activeAccount = this.getActiveAccount(
       settings.codexManagedAccounts,
       settings.activeCodexManagedAccountId
     )
+    const previousAccount = this.getActiveAccount(
+      settings.codexManagedAccounts,
+      this.lastSyncedAccountId
+    )
+    let outgoingReadBackResult: CodexReadBackResult = 'unchanged'
+    if (previousAccount && previousAccount.id !== activeAccount?.id) {
+      outgoingReadBackResult = this.readBackRefreshedTokensForAccount(previousAccount, {
+        updateLastWrittenAuthJson: true
+      })
+    }
     if (!activeAccount) {
+      if (settings.activeCodexManagedAccountId) {
+        this.store.updateSettings({ activeCodexManagedAccountId: null })
+      }
       // Why: only restore the snapshot when transitioning FROM a managed
       // account back to system default. When no managed account was ever
       // active, auth.json belongs to the user and Orca must not touch it.
       // This prevents overwriting external auth changes (codex login or other
       // tools) on every PTY launch / rate-limit fetch.
       if (this.lastSyncedAccountId !== null) {
-        this.restoreSystemDefaultSnapshot()
+        this.restoreSystemDefaultSnapshot({
+          detectExternalLogin: outgoingReadBackResult !== 'rejected'
+        })
         this.lastSyncedAccountId = null
       }
       return
     }
+
+    this.captureSystemDefaultSnapshot({ force: this.lastSyncedAccountId === null })
 
     const activeAuthPath = join(activeAccount.managedHomePath, 'auth.json')
     if (!existsSync(activeAuthPath)) {
@@ -87,7 +112,7 @@ export class CodexRuntimeHomeService {
       )
       this.store.updateSettings({ activeCodexManagedAccountId: null })
       if (this.lastSyncedAccountId !== null) {
-        this.restoreSystemDefaultSnapshot()
+        this.restoreSystemDefaultSnapshot({ detectExternalLogin: true })
         this.lastSyncedAccountId = null
       }
       return
@@ -98,7 +123,9 @@ export class CodexRuntimeHomeService {
     // last wrote, the CLI must have refreshed — so we preserve those tokens
     // back to managed storage before overwriting runtime with managed state.
     if (this.lastSyncedAccountId === activeAccount.id) {
-      this.readBackRefreshedTokens(activeAccount, activeAuthPath)
+      this.readBackRefreshedTokens(activeAccount, activeAuthPath, {
+        updateLastWrittenAuthJson: true
+      })
     }
 
     this.lastSyncedAccountId = activeAccount.id
@@ -115,34 +142,57 @@ export class CodexRuntimeHomeService {
 
   private readBackRefreshedTokens(
     activeAccount: CodexManagedAccount,
-    managedAuthPath: string
-  ): void {
+    managedAuthPath: string,
+    options: { updateLastWrittenAuthJson: boolean }
+  ): CodexReadBackResult {
     try {
       const runtimeAuthPath = this.getRuntimeAuthPath()
       if (!existsSync(runtimeAuthPath)) {
-        return
+        return 'unchanged'
       }
 
       if (this.lastWrittenAuthJson === null) {
-        return
+        return 'unchanged'
       }
 
       const runtimeContents = readFileSync(runtimeAuthPath, 'utf-8')
       if (runtimeContents === this.lastWrittenAuthJson) {
-        return
+        return 'unchanged'
       }
 
-      if (!this.runtimeAuthMatchesAccount(runtimeContents, activeAccount)) {
-        return
+      if (
+        !this.runtimeAuthMatchesAccount(
+          runtimeContents,
+          activeAccount,
+          readFileSync(managedAuthPath, 'utf-8')
+        )
+      ) {
+        return 'rejected'
       }
 
       writeFileAtomically(managedAuthPath, runtimeContents, { mode: 0o600 })
+      if (options.updateLastWrittenAuthJson) {
+        this.lastWrittenAuthJson = runtimeContents
+      }
+      return 'persisted'
     } catch (error) {
       // Why: read-back is best-effort. A transient fs error must not block the
       // forward sync path — the worst case is one more stale-token cycle, which
       // is strictly better than failing the entire sync.
       console.warn('[codex-runtime-home] Failed to read back refreshed tokens:', error)
+      return 'rejected'
     }
+  }
+
+  private readBackRefreshedTokensForAccount(
+    account: CodexManagedAccount,
+    options: { updateLastWrittenAuthJson: boolean }
+  ): CodexReadBackResult {
+    const managedAuthPath = join(account.managedHomePath, 'auth.json')
+    if (!existsSync(managedAuthPath)) {
+      return 'unchanged'
+    }
+    return this.readBackRefreshedTokens(account, managedAuthPath, options)
   }
 
   private safeSyncForCurrentSelection(): void {
@@ -165,54 +215,60 @@ export class CodexRuntimeHomeService {
 
   private runtimeAuthMatchesAccount(
     runtimeAuthContents: string,
-    activeAccount: CodexManagedAccount
+    activeAccount: CodexManagedAccount,
+    managedAuthContents: string
   ): boolean {
     const identity = this.readIdentityFromAuthContents(runtimeAuthContents)
     if (!identity) {
       return false
     }
+    const managedIdentity = this.readIdentityFromAuthContents(managedAuthContents)
 
     // Why: old live Codex PTYs can still write refreshed tokens into the
     // shared runtime home after the user switches accounts. Never persist
     // that write into the newly active managed account unless the auth claims
     // still match the account Orca believes is selected.
-    const accountEmail = this.normalizeField(activeAccount.email)
-    const accountProviderId = this.normalizeField(activeAccount.providerAccountId)
-    const accountWorkspaceId = this.normalizeField(activeAccount.workspaceAccountId)
-    const emailMatches = Boolean(accountEmail && identity.email && accountEmail === identity.email)
-    let hasStrongIdentity = false
-    if (accountEmail && identity.email && accountEmail !== identity.email) {
+    const selectedEmail = this.firstNonNull(
+      this.normalizeField(activeAccount.email),
+      managedIdentity?.email
+    )
+    const selectedProviderId = this.firstNonNull(
+      this.normalizeField(activeAccount.providerAccountId),
+      managedIdentity?.providerAccountId
+    )
+    const selectedWorkspaceId = this.firstNonNull(
+      this.normalizeField(activeAccount.workspaceAccountId),
+      managedIdentity?.workspaceAccountId
+    )
+    const emailMatches = Boolean(
+      selectedEmail && identity.email && selectedEmail === identity.email
+    )
+    if (selectedEmail && identity.email && selectedEmail !== identity.email) {
+      return false
+    }
+    if (!this.identityFieldMatches(selectedProviderId, identity.providerAccountId)) {
+      return false
+    }
+    if (!this.identityFieldMatches(selectedWorkspaceId, identity.workspaceAccountId)) {
       return false
     }
 
-    if (!this.strongIdentityFieldsMatch(accountProviderId, identity.providerAccountId)) {
-      return false
-    }
-    if (accountProviderId && identity.providerAccountId) {
-      hasStrongIdentity = true
-    }
-
-    if (!this.strongIdentityFieldsMatch(accountWorkspaceId, identity.workspaceAccountId)) {
-      return false
-    }
-    if (accountWorkspaceId && identity.workspaceAccountId) {
-      hasStrongIdentity = true
-    }
-
+    const hasStrongIdentity = Boolean(
+      (selectedProviderId && identity.providerAccountId) ||
+      (selectedWorkspaceId && identity.workspaceAccountId)
+    )
     return (
       hasStrongIdentity ||
       (emailMatches && !identity.providerAccountId && !identity.workspaceAccountId)
     )
   }
 
-  private strongIdentityFieldsMatch(
-    accountField: string | null,
-    runtimeField: string | null
-  ): boolean {
-    if (!accountField && !runtimeField) {
-      return true
-    }
-    return Boolean(accountField && runtimeField && accountField === runtimeField)
+  private identityFieldMatches(selectedField: string | null, runtimeField: string | null): boolean {
+    return !selectedField || Boolean(runtimeField && selectedField === runtimeField)
+  }
+
+  private firstNonNull(...values: (string | null | undefined)[]): string | null {
+    return values.find((value): value is string => Boolean(value)) ?? null
   }
 
   private readIdentityFromAuthContents(contents: string): CodexAuthIdentity | null {
@@ -473,25 +529,24 @@ export class CodexRuntimeHomeService {
     writeFileAtomically(diagnosticsPath, `${existingContents}${JSON.stringify(record)}\n`)
   }
 
-  private captureSystemDefaultSnapshotIfNeeded(): void {
+  private captureSystemDefaultSnapshot(options: { force: boolean }): void {
     const snapshotPath = this.getSystemDefaultSnapshotPath()
-    if (existsSync(snapshotPath)) {
+    if (!options.force && existsSync(snapshotPath)) {
       return
     }
 
     const runtimeAuthPath = this.getRuntimeAuthPath()
-    if (!existsSync(runtimeAuthPath)) {
-      return
+    const snapshot: CodexSystemDefaultSnapshot = {
+      authJson: existsSync(runtimeAuthPath) ? readFileSync(runtimeAuthPath, 'utf-8') : null
     }
-
-    writeFileAtomically(snapshotPath, readFileSync(runtimeAuthPath, 'utf-8'))
+    writeFileAtomically(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 })
   }
 
-  private restoreSystemDefaultSnapshot(): void {
+  private restoreSystemDefaultSnapshot(options: { detectExternalLogin: boolean }): void {
     // Why: detect whether an external tool (e.g. `codex auth login`) overwrote
     // auth.json while a managed account was active. If so, that external login
     // becomes the new system default — skip the stale snapshot restore.
-    if (this.detectExternalLoginAndUpdateSnapshot()) {
+    if (options.detectExternalLogin && this.detectExternalLoginAndUpdateSnapshot()) {
       return
     }
 
@@ -500,7 +555,17 @@ export class CodexRuntimeHomeService {
       return
     }
 
-    this.writeRuntimeAuth(readFileSync(snapshotPath, 'utf-8'))
+    const snapshot = this.readSystemDefaultSnapshot(snapshotPath)
+    if (!snapshot) {
+      this.writeRuntimeAuth(readFileSync(snapshotPath, 'utf-8'))
+      return
+    }
+    if (snapshot.authJson === null) {
+      rmSync(this.getRuntimeAuthPath(), { force: true })
+      this.lastWrittenAuthJson = null
+      return
+    }
+    this.writeRuntimeAuth(snapshot.authJson)
   }
 
   // Why: mirrors ClaudeRuntimeAuthService.detectExternalLoginAndUpdateSnapshot().
@@ -514,7 +579,10 @@ export class CodexRuntimeHomeService {
 
     const runtimeAuthPath = this.getRuntimeAuthPath()
     if (!existsSync(runtimeAuthPath)) {
-      return false
+      const snapshotPath = this.getSystemDefaultSnapshotPath()
+      rmSync(snapshotPath, { force: true })
+      this.lastWrittenAuthJson = null
+      return true
     }
 
     try {
@@ -535,8 +603,50 @@ export class CodexRuntimeHomeService {
   private writeRuntimeAuth(contents: string): void {
     // Why: auth.json contains sensitive credentials. Restrict to owner-only
     // so other users on a shared Linux/macOS machine cannot read it.
+    if (this.fileContentsEqual(this.getRuntimeAuthPath(), contents)) {
+      this.ensureOwnerOnlyMode(this.getRuntimeAuthPath())
+      this.lastWrittenAuthJson = contents
+      return
+    }
     writeFileAtomically(this.getRuntimeAuthPath(), contents, { mode: 0o600 })
     this.lastWrittenAuthJson = contents
+  }
+
+  private fileContentsEqual(targetPath: string, contents: string): boolean {
+    try {
+      return existsSync(targetPath) && readFileSync(targetPath, 'utf-8') === contents
+    } catch {
+      return false
+    }
+  }
+
+  private ensureOwnerOnlyMode(targetPath: string): void {
+    if (process.platform === 'win32') {
+      return
+    }
+    try {
+      chmodSync(targetPath, 0o600)
+    } catch {
+      /* Best effort: the next atomic write will set the restrictive mode. */
+    }
+  }
+
+  private readSystemDefaultSnapshot(snapshotPath: string): CodexSystemDefaultSnapshot | null {
+    try {
+      const parsed = JSON.parse(readFileSync(snapshotPath, 'utf-8')) as unknown
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        'authJson' in parsed &&
+        (typeof parsed.authJson === 'string' || parsed.authJson === null)
+      ) {
+        return parsed as CodexSystemDefaultSnapshot
+      }
+    } catch {
+      return null
+    }
+    return null
   }
 
   clearSystemDefaultSnapshot(): void {
