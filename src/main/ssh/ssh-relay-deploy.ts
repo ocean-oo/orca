@@ -219,6 +219,11 @@ async function uploadRelay(
 // be compiled on the remote host against its Node.js version and OS. We
 // write a minimal package.json + run `npm install node-pty` in the relay
 // directory so `require('node-pty')` resolves to the local node_modules.
+//
+// TODO(#1693): VS Code ships per-platform tarballs with node-pty pre-built
+// from CI and skips `npm install` on the remote entirely. That approach
+// eliminates the whole class of bugs around npm/compiler/network failures
+// on the remote. Worth doing once we're past the immediate fix.
 async function installNativeDeps(conn: SshConnection, remoteDir: string): Promise<void> {
   const nodePath = await resolveRemoteNodePath(conn)
   // Why: node's bin directory must be in PATH for npm's child processes.
