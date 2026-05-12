@@ -618,15 +618,23 @@ export default function ActivityPrototypePage(): React.JSX.Element {
             <div className="flex h-full min-h-0 flex-col">
               <div className="shrink-0 border-b border-border px-4 pt-2 pb-3">
                 <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex shrink-0">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span className="inline-flex shrink-0 pt-[3px]">
                       <AgentIcon agent={agentTypeToIconAgent(selectedThread.agentType)} size={16} />
                     </span>
-                    <h2 className="truncate text-sm font-semibold">{selectedThread.paneTitle}</h2>
-                    <EventRepoBadge repo={selectedThread.repo} />
+                    {/* Why: clamp to 2 lines (matches ThreadRow) so longer
+                        prompts don't get cut to one ellipsis. Badge moves to
+                        the secondary line so it stays at a fixed position
+                        regardless of title height. */}
+                    <h2 className="line-clamp-2 break-words text-sm font-semibold leading-snug">
+                      {selectedThread.paneTitle}
+                    </h2>
                   </div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
-                    {selectedThread.worktree.displayName}
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                    <EventRepoBadge repo={selectedThread.repo} />
+                    <span className="truncate text-xs text-muted-foreground">
+                      {selectedThread.worktree.displayName}
+                    </span>
                   </div>
                 </div>
               </div>
