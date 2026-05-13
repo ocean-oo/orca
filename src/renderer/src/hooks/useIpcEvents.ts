@@ -253,7 +253,7 @@ export function useIpcEvents(): void {
                   // already has paneKey=`${tabId}:1` baked in. Adopting the
                   // tab under the same id keeps hook-event attribution working;
                   // see docs/cli-terminal-hook-pane-key.md.
-                  ...(tabId ? { id: tabId } : {})
+                  ...(tabId !== undefined ? { id: tabId } : {})
                 }))
               : store.createTab(worktreeId)
             if (shouldActivate) {

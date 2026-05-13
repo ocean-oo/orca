@@ -283,10 +283,11 @@ const agentHookInstallFailedSchema = z
 // does not correspond to any tab in `tabsByWorktree` indicates the renderer
 // could not route the event to a pane. Pre-fix this fired routinely for
 // CLI-spawned terminals (empty paneKey); post-fix it should be near-zero in
-// normal use. The lone `reason` field discriminates between the known
-// failure modes: an empty/missing paneKey on the wire (pre-fix CLI shape)
-// vs. a paneKey whose tab id no longer exists in `tabsByWorktree` (renderer
-// adopted a different id). See docs/cli-terminal-hook-pane-key.md.
+// normal use. The lone `reason` field reflects what the producer can observe
+// at emission time: an empty paneKey on the wire (pre-fix CLI shape) vs. any
+// non-empty paneKey that fails to resolve to a known tab in `tabsByWorktree`
+// (stale tab id, malformed value, or wrong-worktree id all bucket here).
+// See docs/cli-terminal-hook-pane-key.md.
 const agentHookUnattributedSchema = z
   .object({ reason: z.enum(['empty_pane_key', 'unknown_tab_id']) })
   .strict()

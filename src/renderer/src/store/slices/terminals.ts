@@ -144,7 +144,8 @@ export type TerminalSlice = {
       /** Pre-allocated tab id (e.g. minted by main for CLI-spawned terminals
        *  whose PTY env already carries `paneKey=`${tabId}:1``). Falls back to
        *  minting a fresh id when omitted or when the supplied id collides
-       *  with an existing tab on this worktree. */
+       *  with an existing tab anywhere in the store (tabIds form the global
+       *  paneKey namespace, so collisions are checked across all worktrees). */
       id?: string
     }
   ) => TerminalTab
@@ -344,18 +345,21 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       // corrupt agent-status routing. Hook attribution degrades for that
       // single terminal because paneKey is already baked into PTY env, but
       // the rest of the tab works normally. See docs/cli-terminal-hook-pane-key.md.
+      // Why: only honor a hint that's a non-empty string. The IPC boundary at
+      // useIpcEvents.ts spreads `id` whenever `tabId !== undefined`, so a stray
+      // `''` from a future producer would otherwise be persisted as a real tab
+      // id and break paneKey routing (`${tabId}:1` would shape as `:1`).
+      const hintedId =
+        typeof options?.id === 'string' && options.id.length > 0 ? options.id : undefined
       const idCollides =
-        options?.id !== undefined &&
-        Object.values(s.tabsByWorktree).some((tabs) =>
-          tabs.some((entry) => entry.id === options.id)
-        )
-      if (options?.id !== undefined && idCollides) {
+        hintedId !== undefined &&
+        Object.values(s.tabsByWorktree).some((tabs) => tabs.some((entry) => entry.id === hintedId))
+      if (idCollides) {
         console.warn(
-          `[createTab] tabId hint ${options.id} already exists; minting a fresh id (hook attribution will degrade for this terminal)`
+          `[createTab] tabId hint ${hintedId} already exists; minting a fresh id (hook attribution will degrade for this terminal)`
         )
       }
-      const id =
-        options?.id !== undefined && !idCollides ? options.id : globalThis.crypto.randomUUID()
+      const id = hintedId !== undefined && !idCollides ? hintedId : globalThis.crypto.randomUUID()
       const shouldActivate = options?.activate !== false
       const nextOrdinal = getNextTerminalOrdinal(existing)
       const defaultTitle = `Terminal ${nextOrdinal}`

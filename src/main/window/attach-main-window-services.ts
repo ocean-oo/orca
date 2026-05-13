@@ -267,7 +267,7 @@ function registerRuntimeWindowLifecycle(
           // Why: pre-minted tabId from main keeps the renderer's tab id aligned
           // with the paneKey baked into the PTY env at spawn time, so hook
           // events route to the right slot. See docs/cli-terminal-hook-pane-key.md.
-          ...(opts.tabId ? { tabId: opts.tabId } : {})
+          ...(opts.tabId !== undefined ? { tabId: opts.tabId } : {})
         })
       }),
     splitTerminal: (tabId, paneRuntimeId, opts) => {
