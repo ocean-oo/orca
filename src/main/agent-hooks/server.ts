@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto'
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
+import { track } from '../telemetry/client'
 import { ORCA_HOOK_PROTOCOL_VERSION } from '../../shared/agent-hook-types'
 import {
   clearAllListenerCaches,
@@ -177,6 +178,17 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
   }
 }
 
+function trackEmptyPaneKeyHook(body: unknown): void {
+  if (typeof body !== 'object' || body === null) {
+    return
+  }
+  const paneKey = (body as Record<string, unknown>).paneKey
+  if (typeof paneKey === 'string' && paneKey.trim().length > 0) {
+    return
+  }
+  track('agent_hook_unattributed', { reason: 'empty_pane_key' })
+}
+
 export class AgentHookServer {
   private server: ReturnType<typeof createServer> | null = null
   private port = 0
@@ -286,14 +298,18 @@ export class AgentHookServer {
     if (trimmedConnectionId.length === 0) {
       return
     }
-    if (!envelope || typeof envelope.paneKey !== 'string' || envelope.paneKey.length === 0) {
+    if (!envelope || typeof envelope.paneKey !== 'string') {
       return
     }
     // Why: match the listener's HTTP path — `normalizeHookPayload` trims and
     // length-caps paneKey before caching, so the cache key here must follow
     // the same rule or remote-vs-local events for the same pane would diverge.
     const paneKey = envelope.paneKey.trim()
-    if (paneKey.length === 0 || paneKey.length > MAX_PANE_KEY_LEN) {
+    if (paneKey.length === 0) {
+      track('agent_hook_unattributed', { reason: 'empty_pane_key' })
+      return
+    }
+    if (paneKey.length > MAX_PANE_KEY_LEN) {
       return
     }
     if (envelope.tabId !== undefined && typeof envelope.tabId !== 'string') {
@@ -389,6 +405,7 @@ export class AgentHookServer {
           return
         }
 
+        trackEmptyPaneKeyHook(body)
         const normalized = normalizeHookPayload(this.state, source, body, this.env)
         if (normalized) {
           const enriched = this.attachStatusTiming(normalized)

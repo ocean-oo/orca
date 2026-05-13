@@ -519,6 +519,7 @@ describe('useIpcEvents updater integration', () => {
             title?: string
             ptyId?: string
             activate?: boolean
+            tabId?: string
           }) => void)
         | null
     } = { current: null }
@@ -592,6 +593,7 @@ describe('useIpcEvents updater integration', () => {
               title?: string
               ptyId?: string
               activate?: boolean
+              tabId?: string
             }) => void
           ) => {
             createTerminalListenerRef.current = listener
@@ -707,12 +709,14 @@ describe('useIpcEvents updater integration', () => {
     createTerminalListenerRef.current({
       worktreeId: 'wt-2',
       ptyId: 'pty-bg-2',
-      activate: false
+      activate: false,
+      tabId: 'tab-cli-bg'
     })
 
     expect(createTab).toHaveBeenCalledWith('wt-2', undefined, undefined, {
       initialPtyId: 'pty-bg-2',
-      activate: false
+      activate: false,
+      id: 'tab-cli-bg'
     })
     expect(setActiveView).not.toHaveBeenCalled()
     expect(setActiveWorktree).not.toHaveBeenCalled()
@@ -1865,6 +1869,64 @@ describe('useIpcEvents agent status snapshot integration', () => {
       'Future Tab',
       { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 }
     )
+  })
+
+  it('tracks ready push events whose paneKey does not resolve to a renderer tab', async () => {
+    const setAgentStatus = vi.fn()
+    const track = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-known', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Known' }]
+      },
+      workspaceSessionReady: true
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    stubAuxiliaryModules()
+    vi.doMock('@/lib/telemetry', () => ({ track }))
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+
+    onSetListenerRef.current({
+      paneKey: 'tab-missing:0',
+      state: 'working',
+      prompt: 'p',
+      agentType: 'claude',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).not.toHaveBeenCalled()
+    expect(track).toHaveBeenCalledWith('agent_hook_unattributed', {
+      reason: 'unknown_tab_id'
+    })
   })
 
   it('pulls the snapshot once workspace session is ready even before settings load', async () => {

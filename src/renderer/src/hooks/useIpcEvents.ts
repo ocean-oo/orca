@@ -992,17 +992,10 @@ export function useIpcEvents(): void {
       }
       const { exists, title } = resolvePaneKey(store, data.paneKey)
       if (!exists) {
-        // Why: regression signal — pre-fix, CLI-spawned terminals routinely
-        // shipped hook events with an empty/unknown paneKey because main
-        // could not stamp ORCA_PANE_KEY into the PTY env before the tab id
-        // existed. Post-fix this should be near-zero in normal use; a
-        // non-zero rate means a paneKey is escaping into the receiver
-        // without a matching renderer tab. Gated on workspaceSessionReady
-        // above so startup-race pings don't false-positive before tabs
-        // hydrate. See docs/cli-terminal-hook-pane-key.md.
-        track('agent_hook_unattributed', {
-          reason: data.paneKey ? 'unknown_tab_id' : 'empty_pane_key'
-        })
+        // Why: empty paneKeys are dropped in main before IPC fanout. Reaching
+        // this branch means a non-empty paneKey escaped without a matching
+        // renderer tab, so track the adoption/routing failure separately.
+        track('agent_hook_unattributed', { reason: 'unknown_tab_id' })
         return
       }
       store.setAgentStatus(data.paneKey, payload, title, {

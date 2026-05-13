@@ -104,6 +104,16 @@ function isValidPaneKey(paneKey: unknown): paneKey is string {
   return typeof paneKey === 'string' && paneKey.length > 0 && paneKey.length <= 256
 }
 
+function rememberPaneKeyForPty(ptyId: string, paneKey: unknown): string | null {
+  const normalizedPaneKey = typeof paneKey === 'string' ? paneKey.trim() : ''
+  if (!isValidPaneKey(normalizedPaneKey)) {
+    return null
+  }
+  ptyPaneKey.set(ptyId, normalizedPaneKey)
+  paneKeyPtyId.set(normalizedPaneKey, ptyId)
+  return normalizedPaneKey
+}
+
 function declarePendingPaneSerializer(paneKey: string): number {
   const gen = ++pendingSerializerGenSeq
   pendingByPaneKey.set(paneKey, gen)
@@ -817,12 +827,16 @@ export function registerPtyHandlers(
       if (isClaudeLaunch) {
         markClaudePtySpawned(result.id)
       }
+      // Why: runtime-owned CLI PTYs bypass the renderer `pty:spawn` handler,
+      // so record their spawn-time paneKey here too. Synthetic hook titles and
+      // paneKey-scoped cache cleanup both depend on this reverse lookup.
+      const paneKey = rememberPaneKeyForPty(result.id, env?.ORCA_PANE_KEY)
       if (!args.connectionId) {
         registerPty({
           ptyId: result.id,
           worktreeId: args.worktreeId ?? null,
           sessionId: sessionId ?? null,
-          paneKey: null,
+          paneKey,
           pid:
             typeof result.pid === 'number' && Number.isFinite(result.pid) && result.pid > 0
               ? result.pid
@@ -1227,10 +1241,7 @@ export function registerPtyHandlers(
       // Narrow to a bounded string so malformed or oversized values cannot
       // pollute ptyPaneKey or the downstream clearPaneState call.
       const paneKey = args.env?.ORCA_PANE_KEY
-      if (typeof paneKey === 'string' && paneKey.length > 0 && paneKey.length <= 256) {
-        ptyPaneKey.set(result.id, paneKey)
-        paneKeyPtyId.set(paneKey, result.id)
-      }
+      const rememberedPaneKey = rememberPaneKeyForPty(result.id, paneKey)
       // Why: register local PTYs (connectionId falsy) with the memory
       // collector so it can walk each PTY's process subtree and attribute
       // memory back to its worktree. SSH PTYs execute remotely and their
@@ -1261,7 +1272,7 @@ export function registerPtyHandlers(
             args.sessionId.length <= 256
               ? args.sessionId
               : null,
-          paneKey: typeof paneKey === 'string' ? paneKey : null,
+          paneKey: rememberedPaneKey,
           pid:
             typeof spawnedPid === 'number' && Number.isFinite(spawnedPid) && spawnedPid > 0
               ? spawnedPid

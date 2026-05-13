@@ -16,6 +16,14 @@ import { join } from 'path'
 import { AgentHookServer, _internals } from './server'
 import { parseAgentStatusPayload } from '../../shared/agent-status-types'
 
+const { trackMock } = vi.hoisted(() => ({
+  trackMock: vi.fn()
+}))
+
+vi.mock('../telemetry/client', () => ({
+  track: trackMock
+}))
+
 const PANE = 'tab-1:0'
 
 type Body = {
@@ -40,6 +48,7 @@ function buildBody(payload: Record<string, unknown>, overrides: Partial<Body> = 
 
 beforeEach(() => {
   _internals.resetCachesForTests()
+  trackMock.mockReset()
 })
 
 afterEach(() => {
@@ -118,6 +127,40 @@ describe('AgentHookServer listener replay', () => {
       server.setListener(listener)
 
       expect(listener).not.toHaveBeenCalled()
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('tracks hook posts with an empty paneKey before dropping them', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const env = server.buildPtyEnv()
+      const response = await fetch(`http://127.0.0.1:${env.ORCA_AGENT_HOOK_PORT}/hook/claude`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Orca-Agent-Hook-Token': env.ORCA_AGENT_HOOK_TOKEN
+        },
+        body: JSON.stringify(
+          buildBody(
+            {
+              hook_event_name: 'UserPromptSubmit',
+              prompt: 'missing pane'
+            },
+            { paneKey: '' }
+          )
+        )
+      })
+      const listener = vi.fn()
+      server.setListener(listener)
+
+      expect(response.status).toBe(204)
+      expect(listener).not.toHaveBeenCalled()
+      expect(trackMock).toHaveBeenCalledWith('agent_hook_unattributed', {
+        reason: 'empty_pane_key'
+      })
     } finally {
       server.stop()
     }
@@ -1723,6 +1766,9 @@ describe('AgentHookServer ingestRemote', () => {
     server.setListener(listener)
     server.ingestRemote({ paneKey: '   ', tabId: 'tab-1', worktreeId: 'wt-1', payload }, 'conn-1')
     expect(listener).not.toHaveBeenCalled()
+    expect(trackMock).toHaveBeenCalledWith('agent_hook_unattributed', {
+      reason: 'empty_pane_key'
+    })
   })
 
   it('normalizes inner payload via normalizeAgentStatusPayload — clamps oversized prompt', () => {

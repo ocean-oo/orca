@@ -615,12 +615,12 @@ describe('OrcaRuntimeService', () => {
       worktreeId: TEST_WORKTREE_ID
     })
     // Why: createTerminal first reveal stamps activate/tabId; the focus reveal
-    // is the second call and uses the simpler {ptyId, title} shape. Assert the
-    // most recent call (the focus one) so the createTerminal-side reveal does
-    // not shadow this expectation.
+    // is the second call and must reuse that pre-minted tabId so a retry after
+    // an earlier reveal failure still adopts under the paneKey baked into env.
     expect(revealTerminalSession).toHaveBeenLastCalledWith(TEST_WORKTREE_ID, {
       ptyId: 'pty-bg',
-      title: 'worker'
+      title: 'worker',
+      tabId: expect.stringMatching(/^[0-9a-f-]+$/)
     })
   })
 

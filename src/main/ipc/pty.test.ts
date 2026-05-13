@@ -20,6 +20,7 @@ const {
   openCodeBuildPtyEnvMock,
   openCodeClearPtyMock,
   buildAgentHookEnvMock,
+  clearAgentHookPaneStateMock,
   piBuildPtyEnvMock,
   piClearPtyMock,
   isPwshAvailableMock,
@@ -43,6 +44,7 @@ const {
   isPwshAvailableMock: vi.fn(),
   openCodeClearPtyMock: vi.fn(),
   buildAgentHookEnvMock: vi.fn(),
+  clearAgentHookPaneStateMock: vi.fn(),
   piBuildPtyEnvMock: vi.fn(),
   piClearPtyMock: vi.fn(),
   trackMock: vi.fn(),
@@ -88,7 +90,8 @@ vi.mock('../opencode/hook-service', () => ({
 
 vi.mock('../agent-hooks/server', () => ({
   agentHookServer: {
-    buildPtyEnv: buildAgentHookEnvMock
+    buildPtyEnv: buildAgentHookEnvMock,
+    clearPaneState: clearAgentHookPaneStateMock
   }
 }))
 
@@ -167,6 +170,7 @@ describe('registerPtyHandlers', () => {
     openCodeBuildPtyEnvMock.mockReset()
     openCodeClearPtyMock.mockReset()
     buildAgentHookEnvMock.mockReset()
+    clearAgentHookPaneStateMock.mockReset()
     piBuildPtyEnvMock.mockReset()
     piClearPtyMock.mockReset()
     isPwshAvailableMock.mockReset()
@@ -1072,6 +1076,47 @@ describe('registerPtyHandlers', () => {
       expect.any(String),
       'term_expected'
     )
+  })
+
+  it('maps runtime-owned spawn paneKeys for renderer serializer settlement', async () => {
+    type RuntimeSpawnController = {
+      spawn(args: {
+        cols: number
+        rows: number
+        worktreeId?: string
+        env?: Record<string, string>
+      }): Promise<{ id: string }>
+      hasRendererSerializer?(ptyId: string): boolean
+    }
+    let controller: RuntimeSpawnController | null = null
+    const runtime = {
+      setPtyController: vi.fn((value) => {
+        controller = value
+      }),
+      preAllocateHandleForPty: vi.fn(() => 'term_trusted'),
+      registerPreAllocatedHandleForPty: vi.fn(),
+      registerPty: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    }
+
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    const paneKey = 'tab-cli:1'
+    const gen = (await handlers.get('pty:declarePendingPaneSerializer')!(null, {
+      paneKey
+    })) as number
+    const spawnController = controller as unknown as RuntimeSpawnController
+    const result = await spawnController.spawn({
+      cols: 80,
+      rows: 24,
+      worktreeId: 'wt-1',
+      env: { ORCA_PANE_KEY: ` ${paneKey} ` }
+    })
+
+    expect(spawnController.hasRendererSerializer?.(result.id)).toBe(false)
+    await handlers.get('pty:settlePaneSerializer')!(null, { paneKey, gen })
+    expect(spawnController.hasRendererSerializer?.(result.id)).toBe(true)
   })
 
   it('ignores renderer-provided ORCA_TERMINAL_HANDLE for local PTY spawns', async () => {

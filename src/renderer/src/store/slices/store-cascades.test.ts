@@ -1662,4 +1662,56 @@ describe('createTab tabId hint', () => {
       warn.mockRestore()
     }
   })
+
+  it('treats tab ids as global and rejects hints that collide in another worktree', () => {
+    const store = createTestStore()
+    const wtA = 'repo1::/path/wt-a'
+    const wtB = 'repo1::/path/wt-b'
+    const existingId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    seedStore(store, {
+      worktreesByRepo: {
+        repo1: [
+          makeWorktree({ id: wtA, repoId: 'repo1', path: '/path/wt-a' }),
+          makeWorktree({ id: wtB, repoId: 'repo1', path: '/path/wt-b' })
+        ]
+      },
+      tabsByWorktree: {
+        [wtB]: [makeTab({ id: existingId, worktreeId: wtB })]
+      },
+      groupsByWorktree: {},
+      activeGroupIdByWorktree: {},
+      unifiedTabsByWorktree: {}
+    })
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const tab = store.getState().createTab(wtA, undefined, undefined, { id: existingId })
+      expect(tab.id).not.toBe(existingId)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(existingId))
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('ignores empty string hints instead of persisting an unusable tab id', () => {
+    const store = createTestStore()
+    const wt = 'repo1::/path/wt-empty-hint'
+    seedStore(store, {
+      worktreesByRepo: {
+        repo1: [makeWorktree({ id: wt, repoId: 'repo1', path: '/path/wt-empty-hint' })]
+      },
+      groupsByWorktree: {},
+      activeGroupIdByWorktree: {},
+      unifiedTabsByWorktree: {}
+    })
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const tab = store.getState().createTab(wt, undefined, undefined, { id: '' })
+      expect(tab.id).not.toBe('')
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
