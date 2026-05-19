@@ -27,19 +27,22 @@ describe('add_repo_existing_workspaces_detected schema', () => {
       detached_workspace_count: 0,
       custom_named_workspace_count: 0,
       sparse_workspace_count: 0,
+      nth_repo_added: 1,
       workspace_names: ['secret-customer-branch']
     })
     expect(parsed.success).toBe(false)
   })
 
-  it('accepts setup actions with bounded existing-workspace context', () => {
-    const parsed = eventSchemas.add_repo_setup_step_action.safeParse({
-      action: 'open_existing',
-      source: 'ssh_remote_path',
-      existing_workspace_count: 4,
-      existing_linked_workspace_count: 3,
-      nth_repo_added: 1
-    })
-    expect(parsed.success).toBe(true)
+  it('accepts setup start choices with bounded existing-workspace context', () => {
+    for (const action of ['open_existing', 'create_worktree'] as const) {
+      const parsed = eventSchemas.add_repo_setup_step_action.safeParse({
+        action,
+        source: 'ssh_remote_path',
+        existing_workspace_count: 4,
+        existing_linked_workspace_count: 3,
+        nth_repo_added: 1
+      })
+      expect(parsed.success).toBe(true)
+    }
   })
 })

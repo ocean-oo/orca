@@ -42,37 +42,38 @@ export function buildAddRepoExistingWorkspacesTelemetry(
     return null
   }
 
-  const existing_workspace_count = countWorkspaces(worktrees.length)
-  const main_workspace_count = countWorkspaces(
-    worktrees.filter((worktree) => worktree.isMainWorktree).length
-  )
-  const branch_named_workspace_count = countWorkspaces(
-    worktrees.filter((worktree) => Boolean(branchDisplayName(worktree))).length
-  )
-  const sparse_workspace_count = countWorkspaces(
-    worktrees.filter((worktree) => worktree.isSparse === true).length
-  )
+  const mainWorkspaceCount = worktrees.filter((worktree) => worktree.isMainWorktree).length
+  const branchNamedWorkspaceCount = worktrees.filter((worktree) =>
+    Boolean(branchDisplayName(worktree))
+  ).length
+  const sparseWorkspaceCount = worktrees.filter((worktree) => worktree.isSparse === true).length
 
   return {
     source,
-    existing_workspace_count,
-    existing_linked_workspace_count: countWorkspaces(worktrees.length - main_workspace_count),
-    main_workspace_count,
-    branch_named_workspace_count,
-    detached_workspace_count: countWorkspaces(worktrees.length - branch_named_workspace_count),
+    existing_workspace_count: countWorkspaces(worktrees.length),
+    existing_linked_workspace_count: countWorkspaces(worktrees.length - mainWorkspaceCount),
+    main_workspace_count: countWorkspaces(mainWorkspaceCount),
+    branch_named_workspace_count: countWorkspaces(branchNamedWorkspaceCount),
+    detached_workspace_count: countWorkspaces(worktrees.length - branchNamedWorkspaceCount),
     custom_named_workspace_count: countWorkspaces(worktrees.filter(isCustomDisplayName).length),
-    sparse_workspace_count
+    sparse_workspace_count: countWorkspaces(sparseWorkspaceCount)
   }
 }
 
 export function shouldTrackAddRepoExistingWorkspacesDetected(
-  source: AddRepoExistingWorkspaceSource | null
+  payload: ExistingWorkspacesDetectedProps | null
 ): boolean {
+  // Track the import/discovery signal, not mere setup-modal exposure: the main
+  // checkout is always a worktree, but only non-main worktrees imply migration.
+  if (!payload || payload.existing_linked_workspace_count === 0) {
+    return false
+  }
+
   // Clone/create produce a new project during this flow, so their setup step is
   // not evidence of a pre-existing workspace migration opportunity.
   return (
-    source === 'local_folder_picker' ||
-    source === 'runtime_server_path' ||
-    source === 'ssh_remote_path'
+    payload.source === 'local_folder_picker' ||
+    payload.source === 'runtime_server_path' ||
+    payload.source === 'ssh_remote_path'
   )
 }

@@ -297,7 +297,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       step !== 'setup' ||
       !repoId ||
       !existingWorkspaceTelemetry ||
-      !shouldTrackAddRepoExistingWorkspacesDetected(existingWorkspaceSource) ||
+      !shouldTrackAddRepoExistingWorkspacesDetected(existingWorkspaceTelemetry) ||
       detectedTelemetryTrackedRef.current.has(repoId)
     ) {
       return

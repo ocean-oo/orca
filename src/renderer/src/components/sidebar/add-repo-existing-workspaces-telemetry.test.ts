@@ -63,14 +63,57 @@ describe('add repo existing workspace telemetry', () => {
     expect(JSON.stringify(payload)).not.toContain('Feature With User Text')
   })
 
-  it('omits empty detection payloads and filters new project flows', () => {
+  it('tracks detection only for imported linked workspaces', () => {
     expect(buildAddRepoExistingWorkspacesTelemetry(null, [worktree({})])).toBeNull()
     expect(buildAddRepoExistingWorkspacesTelemetry('local_folder_picker', [])).toBeNull()
 
-    expect(shouldTrackAddRepoExistingWorkspacesDetected('local_folder_picker')).toBe(true)
-    expect(shouldTrackAddRepoExistingWorkspacesDetected('runtime_server_path')).toBe(true)
-    expect(shouldTrackAddRepoExistingWorkspacesDetected('ssh_remote_path')).toBe(true)
-    expect(shouldTrackAddRepoExistingWorkspacesDetected('clone_url')).toBe(false)
-    expect(shouldTrackAddRepoExistingWorkspacesDetected('create_project')).toBe(false)
+    const mainOnlyPayload = buildAddRepoExistingWorkspacesTelemetry('local_folder_picker', [
+      worktree({})
+    ])
+    expect(mainOnlyPayload?.existing_linked_workspace_count).toBe(0)
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(mainOnlyPayload)).toBe(false)
+
+    const importedLocalPayload = buildAddRepoExistingWorkspacesTelemetry('local_folder_picker', [
+      worktree({}),
+      worktree({ id: 'repo::/repo-existing', path: '/repo-existing', isMainWorktree: false })
+    ])
+    const importedRemotePayload = buildAddRepoExistingWorkspacesTelemetry('ssh_remote_path', [
+      worktree({}),
+      worktree({ id: 'repo::/remote-existing', path: '/remote-existing', isMainWorktree: false })
+    ])
+    const clonePayload = buildAddRepoExistingWorkspacesTelemetry('clone_url', [
+      worktree({}),
+      worktree({ id: 'repo::/clone-existing', path: '/clone-existing', isMainWorktree: false })
+    ])
+    const createPayload = buildAddRepoExistingWorkspacesTelemetry('create_project', [
+      worktree({}),
+      worktree({ id: 'repo::/create-existing', path: '/create-existing', isMainWorktree: false })
+    ])
+
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(importedLocalPayload)).toBe(true)
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(importedRemotePayload)).toBe(true)
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(clonePayload)).toBe(false)
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(createPayload)).toBe(false)
+  })
+
+  it('derives linked and detached counts before clamping reported values', () => {
+    const mainOnlyPayload = buildAddRepoExistingWorkspacesTelemetry(
+      'local_folder_picker',
+      Array.from({ length: 60 }, (_, index) =>
+        worktree({
+          id: `repo::/repo-main-${index}`,
+          path: `/repo-main-${index}`,
+          isMainWorktree: true
+        })
+      )
+    )
+
+    expect(mainOnlyPayload).toMatchObject({
+      existing_workspace_count: 50,
+      existing_linked_workspace_count: 0,
+      main_workspace_count: 50,
+      detached_workspace_count: 0
+    })
+    expect(shouldTrackAddRepoExistingWorkspacesDetected(mainOnlyPayload)).toBe(false)
   })
 })
