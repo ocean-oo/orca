@@ -46,6 +46,11 @@ import { DEFAULT_PET_ID, isBundledPetId } from '../../components/pet/pet-models'
 import { revokeCustomPetBlobUrl } from '../../components/pet/pet-blob-cache'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 
+export type PendingSidebarWorktreeReveal = {
+  worktreeId: string
+  behavior: 'auto' | 'smooth'
+}
+
 function clampPetSize(size: number): number {
   if (!Number.isFinite(size)) {
     return PET_SIZE_DEFAULT
@@ -405,8 +410,11 @@ export type UISlice = {
    *  problem. */
   petSize: number
   setPetSize: (size: number) => void
-  pendingRevealWorktreeId: string | null
-  revealWorktreeInSidebar: (worktreeId: string) => void
+  pendingRevealWorktree: PendingSidebarWorktreeReveal | null
+  revealWorktreeInSidebar: (
+    worktreeId: string,
+    options?: { behavior?: PendingSidebarWorktreeReveal['behavior'] }
+  ) => void
   clearPendingRevealWorktreeId: () => void
   // Why: lets the SourceControl sidebar request that the diff editor scroll
   // to a specific note. Cleared by the diff decorator after it reveals the
@@ -919,9 +927,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       return partial
     }),
 
-  pendingRevealWorktreeId: null,
-  revealWorktreeInSidebar: (worktreeId) => set({ pendingRevealWorktreeId: worktreeId }),
-  clearPendingRevealWorktreeId: () => set({ pendingRevealWorktreeId: null }),
+  pendingRevealWorktree: null,
+  revealWorktreeInSidebar: (worktreeId, options) =>
+    set({
+      pendingRevealWorktree: {
+        worktreeId,
+        behavior: options?.behavior ?? 'smooth'
+      }
+    }),
+  clearPendingRevealWorktreeId: () => set({ pendingRevealWorktree: null }),
   scrollToDiffCommentId: null,
   setScrollToDiffCommentId: (id) => set({ scrollToDiffCommentId: id }),
   persistedUIReady: false,

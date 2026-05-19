@@ -83,6 +83,8 @@ import {
 import { branchDisplayName } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
+import { revealCurrentSidebarWorktree } from './reveal-sidebar-worktree'
+import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
 
 // How long to wait after a sortEpoch bump before actually re-sorting.
 // Prevents jarring position shifts when background events (AI starting work,
@@ -103,6 +105,34 @@ export function shouldAdjustWorktreeSidebarMeasuredRowScroll(args: {
   suppressUntil: number
 }): boolean {
   return !args.isScrolling && args.now >= args.suppressUntil
+}
+
+export function shouldQueueStartupSidebarReveal(args: {
+  hasQueuedStartupReveal: boolean
+  workspaceSessionReady: boolean
+  persistedUIReady: boolean
+  activeWorktreeId: string | null
+  pendingRevealWorktree: PendingSidebarWorktreeReveal | null
+  renderRowCount: number
+}): boolean {
+  return (
+    !args.hasQueuedStartupReveal &&
+    args.workspaceSessionReady &&
+    args.persistedUIReady &&
+    args.activeWorktreeId !== null &&
+    args.pendingRevealWorktree === null &&
+    args.renderRowCount > 0
+  )
+}
+
+export function resolvePendingSidebarReveal(args: {
+  targetIndex: number
+  targetWorktreeStillExists: boolean
+}): 'scroll-and-clear' | 'clear' | 'keep-pending' {
+  if (args.targetIndex !== -1) {
+    return 'scroll-and-clear'
+  }
+  return args.targetWorktreeStillExists ? 'keep-pending' : 'clear'
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -152,7 +182,7 @@ type VirtualizedWorktreeViewportProps = {
   handleCreateForRepo: (repoId: string) => void
   handleRemoveRepo: (repo: Repo) => void
   activeModal: string
-  pendingRevealWorktreeId: string | null
+  pendingRevealWorktree: PendingSidebarWorktreeReveal | null
   clearPendingRevealWorktreeId: () => void
   worktrees: Worktree[]
   selectedWorktreeIds: ReadonlySet<string>
@@ -336,7 +366,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   handleCreateForRepo,
   handleRemoveRepo,
   activeModal,
-  pendingRevealWorktreeId,
+  pendingRevealWorktree,
   clearPendingRevealWorktreeId,
   worktrees,
   selectedWorktreeIds,
@@ -555,12 +585,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     })
 
   React.useEffect(() => {
-    if (!pendingRevealWorktreeId) {
+    if (!pendingRevealWorktree) {
       return
     }
 
     {
-      const targetWorktree = worktrees.find((w) => w.id === pendingRevealWorktreeId)
+      const targetWorktree = worktrees.find((w) => w.id === pendingRevealWorktree.worktreeId)
       if (targetWorktree && !targetWorktree.isPinned) {
         const seen = new Set<string>()
         let current: Worktree | undefined = targetWorktree
@@ -607,22 +637,33 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     }
 
     requestAnimationFrame(() => {
-      const targetIndex = renderRows.findIndex((row) =>
-        renderRowContainsWorktree(row, pendingRevealWorktreeId)
+      const targetWorktreeStillExists = worktrees.some(
+        (worktree) => worktree.id === pendingRevealWorktree.worktreeId
       )
-      if (targetIndex !== -1) {
+      const targetIndex = renderRows.findIndex((row) =>
+        renderRowContainsWorktree(row, pendingRevealWorktree.worktreeId)
+      )
+      const outcome = resolvePendingSidebarReveal({ targetIndex, targetWorktreeStillExists })
+      if (outcome === 'scroll-and-clear') {
         // Why: `align: 'auto'` is a no-op when the card is already visible and
         // otherwise scrolls the minimum amount to bring it into view. Using
         // 'center' here made every worktree click re-center the sidebar, which
         // is visually jumpy even when nothing needed to move. `behavior: 'smooth'`
         // animates that minimum scroll so off-screen reveals slide into view
         // instead of snapping — matching the native scroll-into-view feel.
-        virtualizer.scrollToIndex(targetIndex, { align: 'auto', behavior: 'smooth' })
+        virtualizer.scrollToIndex(targetIndex, {
+          align: 'auto',
+          behavior: pendingRevealWorktree.behavior
+        })
+        clearPendingRevealWorktreeId()
+        return
       }
-      clearPendingRevealWorktreeId()
+      if (outcome === 'clear') {
+        clearPendingRevealWorktreeId()
+      }
     })
   }, [
-    pendingRevealWorktreeId,
+    pendingRevealWorktree,
     groupBy,
     worktrees,
     repoMap,
@@ -709,7 +750,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       // rendered rows. Otherwise Cmd+Shift+Up/Down would skip any worktree
       // hidden in a collapsed group — in particular it couldn't cross the
       // Pinned/All boundary when either section is collapsed. Reveal will
-      // uncollapse the target section (see pendingRevealWorktreeId effect).
+      // uncollapse the target section (see pendingRevealWorktree effect).
       const worktreeRows = buildRows(
         groupBy,
         worktrees,
@@ -1510,8 +1551,10 @@ const WorktreeList = React.memo(function WorktreeList({
   const updateWorktreesMeta = useAppStore((s) => s.updateWorktreesMeta)
   const activeView = useAppStore((s) => s.activeView)
   const activeModal = useAppStore((s) => s.activeModal)
-  const pendingRevealWorktreeId = useAppStore((s) => s.pendingRevealWorktreeId)
+  const pendingRevealWorktree = useAppStore((s) => s.pendingRevealWorktree)
   const clearPendingRevealWorktreeId = useAppStore((s) => s.clearPendingRevealWorktreeId)
+  const workspaceSessionReady = useAppStore((s) => s.workspaceSessionReady)
+  const persistedUIReady = useAppStore((s) => s.persistedUIReady)
 
   // Read tabsByWorktree when needed for filtering or sorting
   const needsTabs = showActiveOnly || sortBy === 'smart'
@@ -1946,6 +1989,36 @@ const WorktreeList = React.memo(function WorktreeList({
   // sidebar card should appear selected while one of them is active.
   const selectedSidebarWorktreeId =
     activeView === 'tasks' || activeView === 'activity' ? null : activeWorktreeId
+  const hasQueuedStartupRevealRef = useRef(false)
+
+  useEffect(() => {
+    if (!workspaceSessionReady || !persistedUIReady) {
+      return
+    }
+    if (
+      !shouldQueueStartupSidebarReveal({
+        hasQueuedStartupReveal: hasQueuedStartupRevealRef.current,
+        workspaceSessionReady,
+        persistedUIReady,
+        activeWorktreeId,
+        pendingRevealWorktree,
+        renderRowCount: rows.length
+      })
+    ) {
+      return
+    }
+
+    // Why: session hydration restores the active workspace selection without
+    // going through the normal activation helper, so queue one non-animated
+    // reveal here to correct any stale virtualized scroll offset on startup.
+    hasQueuedStartupRevealRef.current = revealCurrentSidebarWorktree({ behavior: 'auto' })
+  }, [
+    activeWorktreeId,
+    pendingRevealWorktree,
+    persistedUIReady,
+    rows.length,
+    workspaceSessionReady
+  ])
 
   // Why layout effect instead of effect: the global Cmd/Ctrl+1–9 key handler
   // can fire immediately after React commits the new grouped/collapsed order.
@@ -2086,7 +2159,7 @@ const WorktreeList = React.memo(function WorktreeList({
       handleCreateForRepo={handleCreateForRepo}
       handleRemoveRepo={handleRemoveRepo}
       activeModal={activeModal}
-      pendingRevealWorktreeId={pendingRevealWorktreeId}
+      pendingRevealWorktree={pendingRevealWorktree}
       clearPendingRevealWorktreeId={clearPendingRevealWorktreeId}
       worktrees={worktrees}
       selectedWorktreeIds={selectedWorktreeIds}
