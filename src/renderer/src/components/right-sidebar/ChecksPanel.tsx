@@ -58,6 +58,7 @@ export default function ChecksPanel(): React.JSX.Element {
   const fetchUpstreamStatus = useAppStore((s) => s.fetchUpstreamStatus)
   const setRightSidebarOpen = useAppStore((s) => s.setRightSidebarOpen)
   const setRightSidebarTab = useAppStore((s) => s.setRightSidebarTab)
+  const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
 
   // Why: the sidebar stays mounted when closed (for performance). Gate
   // polling on visibility so we don't fetch checks/comments in the background
@@ -176,9 +177,10 @@ export default function ChecksPanel(): React.JSX.Element {
   )
 
   // Fetch PR data when the active worktree/branch changes.
-  // Why: pass linkedPR so worktrees created from a PR (whose new local branch
-  // differs from the PR's head ref) resolve via the number-based fallback.
+  // Why: branch lookup is lossy for fork/deleted-head PRs; reuse a known PR
+  // number from metadata or the visible cache whenever we have one.
   const linkedPR = activeWorktree?.linkedPR ?? null
+  const fallbackGitHubPRNumber = linkedPR == null ? (pr?.number ?? null) : null
   const linkedGitLabMR = activeWorktree?.linkedGitLabMR ?? null
   const activeWorktreePath = activeWorktree?.path ?? null
   const stateRequestKey =
@@ -215,7 +217,12 @@ export default function ChecksPanel(): React.JSX.Element {
       hasUpstream: remoteStatus?.hasUpstream,
       ahead: remoteStatus?.ahead,
       behind: remoteStatus?.behind,
-      linkedGitHubPR: linkedPR
+      linkedGitHubPR: linkedPR,
+      fallbackGitHubPR: fallbackGitHubPRNumber,
+      linkedGitLabMR,
+      linkedBitbucketPR: null,
+      linkedAzureDevOpsPR: null,
+      linkedGiteaPR: null
     })
       .then((result) => {
         if (!stale) {
@@ -238,6 +245,8 @@ export default function ChecksPanel(): React.JSX.Element {
     isFolder,
     isPanelVisible,
     linkedPR,
+    fallbackGitHubPRNumber,
+    linkedGitLabMR,
     remoteStatus?.ahead,
     remoteStatus?.behind,
     remoteStatus?.hasUpstream,
@@ -272,7 +281,8 @@ export default function ChecksPanel(): React.JSX.Element {
     void fetchPRForBranch(repo.path, branch, {
       force: true,
       repoId: repo.id,
-      linkedPRNumber: linkedPR
+      linkedPRNumber: linkedPR,
+      fallbackPRNumber: fallbackGitHubPRNumber ?? pr.number
     }).finally(() => {
       // Why: fetchPRForBranch updates the PR cache before resolving, which
       // can rerun this effect. Only the current refresh key may clear the
@@ -281,7 +291,17 @@ export default function ChecksPanel(): React.JSX.Element {
         setConflictDetailsRefreshing(false)
       }
     })
-  }, [repo, isFolder, branch, pr, prCacheKey, activeWorktreeId, linkedPR, fetchPRForBranch])
+  }, [
+    repo,
+    isFolder,
+    branch,
+    pr,
+    prCacheKey,
+    activeWorktreeId,
+    linkedPR,
+    fallbackGitHubPRNumber,
+    fetchPRForBranch
+  ])
 
   // Fetch checks via cached store method
   const fetchChecks = useCallback(
@@ -505,7 +525,8 @@ export default function ChecksPanel(): React.JSX.Element {
       const refreshedPR = await fetchPRForBranch(repo.path, branch, {
         force: true,
         repoId: repo.id,
-        linkedPRNumber: linkedPR
+        linkedPRNumber: linkedPR,
+        fallbackPRNumber: fallbackGitHubPRNumber
       })
       if (!isCurrentRequest()) {
         return
@@ -514,7 +535,8 @@ export default function ChecksPanel(): React.JSX.Element {
         repoPath: repo.path,
         repoId: repo.id,
         branch,
-        linkedGitHubPR: refreshedPR?.number ?? linkedPR,
+        linkedGitHubPR: linkedPR,
+        fallbackGitHubPR: refreshedPR?.number ?? fallbackGitHubPRNumber,
         linkedGitLabMR
       })
       if (!isCurrentRequest()) {
@@ -618,6 +640,7 @@ export default function ChecksPanel(): React.JSX.Element {
     pr?.prRepo,
     prCacheKey,
     linkedPR,
+    fallbackGitHubPRNumber,
     linkedGitLabMR,
     fetchPRForBranch,
     fetchPRChecks,
@@ -727,14 +750,15 @@ export default function ChecksPanel(): React.JSX.Element {
         await fetchPRForBranch(repo.path, branch, {
           force: true,
           repoId: repo.id,
-          linkedPRNumber: linkedPR
+          linkedPRNumber: linkedPR,
+          fallbackPRNumber: fallbackGitHubPRNumber ?? pr.number
         })
       }
     } finally {
       setTitleSaving(false)
       setEditingTitle(false)
     }
-  }, [repo, pr, titleDraft, branch, linkedPR, fetchPRForBranch])
+  }, [repo, pr, titleDraft, branch, linkedPR, fallbackGitHubPRNumber, fetchPRForBranch])
 
   const handleTitleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -875,17 +899,27 @@ export default function ChecksPanel(): React.JSX.Element {
       const refreshedPR = await fetchPRForBranch(repo.path, branch, {
         force: true,
         repoId: repo.id,
-        linkedPRNumber: linkedPR
+        linkedPRNumber: linkedPR,
+        fallbackPRNumber: fallbackGitHubPRNumber
       })
       await refreshHostedReviewCard(fetchHostedReviewForBranch, {
         repoPath: repo.path,
         repoId: repo.id,
         branch,
-        linkedGitHubPR: refreshedPR?.number ?? linkedPR,
+        linkedGitHubPR: linkedPR,
+        fallbackGitHubPR: refreshedPR?.number ?? fallbackGitHubPRNumber,
         linkedGitLabMR
       })
     }
-  }, [repo, branch, linkedPR, linkedGitLabMR, fetchPRForBranch, fetchHostedReviewForBranch])
+  }, [
+    repo,
+    branch,
+    linkedPR,
+    fallbackGitHubPRNumber,
+    linkedGitLabMR,
+    fetchPRForBranch,
+    fetchHostedReviewForBranch
+  ])
 
   // Open PR in browser
   const handleOpenPR = useCallback(() => {
@@ -940,6 +974,9 @@ export default function ChecksPanel(): React.JSX.Element {
       setRightSidebarOpen(true)
       setRightSidebarTab('checks')
       try {
+        if (activeWorktreeId) {
+          await updateWorktreeMeta(activeWorktreeId, { linkedPR: result.number })
+        }
         const refreshedPR = await fetchPRForBranch(repo.path, branch, {
           force: true,
           repoId: repo.id,
@@ -1009,7 +1046,9 @@ export default function ChecksPanel(): React.JSX.Element {
       pr?.prRepo,
       repo,
       setRightSidebarOpen,
-      setRightSidebarTab
+      setRightSidebarTab,
+      activeWorktreeId,
+      updateWorktreeMeta
     ]
   )
 

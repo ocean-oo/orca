@@ -699,7 +699,8 @@ function createGitHubApi(): NonNullable<Partial<PreloadApi>['gh']> {
         repo: candidate.repoId || candidate.repoPath,
         repoPath: candidate.repoPath,
         branch: candidate.branch,
-        linkedPRNumber: candidate.linkedPRNumber ?? null
+        linkedPRNumber: candidate.linkedPRNumber ?? null,
+        fallbackPRNumber: candidate.fallbackPRNumber ?? null
       })
       return pr
         ? { kind: 'found', pr, fetchedAt: Date.now() }

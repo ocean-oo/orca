@@ -779,6 +779,7 @@ function SourceControlInner(): React.JSX.Element {
     (s) => s.getHostedReviewCreationEligibility
   )
   const createHostedReview = useAppStore((s) => s.createHostedReview)
+  const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
   const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
   const prCache = useAppStore((s) => s.prCache)
   const enqueueGitHubPRRefresh = useAppStore((s) => s.enqueueGitHubPRRefresh)
@@ -1200,6 +1201,7 @@ function SourceControlInner(): React.JSX.Element {
     : null
 
   const linkedGitHubPR = activeWorktree?.linkedPR ?? null
+  const fallbackGitHubPRNumber = linkedGitHubPR == null ? (activePrFromQueue?.number ?? null) : null
   const linkedGitLabMR = activeWorktree?.linkedGitLabMR ?? null
   // Why: when activeRepo.connectionId is truthy, neither the SourceControl
   // effect below nor WorktreeCard.tsx fetches hostedReview for this branch,
@@ -1209,7 +1211,7 @@ function SourceControlInner(): React.JSX.Element {
   // gate doesn't latch.
   const isHostedReviewStateLoading =
     !activeRepo?.connectionId &&
-    (linkedGitHubPR !== null || linkedGitLabMR !== null) &&
+    ((linkedGitHubPR ?? fallbackGitHubPRNumber) !== null || linkedGitLabMR !== null) &&
     hostedReviewEntry === undefined
   useEffect(() => {
     if (
@@ -1223,13 +1225,13 @@ function SourceControlInner(): React.JSX.Element {
       return
     }
     // Why: the Source Control panel renders branch review status directly.
-    // When a terminal checkout moves this worktree onto a new branch, we need
-    // to fetch that branch's PR/MR immediately instead of waiting for the user
-    // to reselect the worktree. The linked ids handle create-from-review
-    // worktrees whose local branch differs from the remote head branch.
+    // When a terminal checkout moves this worktree onto a new branch, fetch
+    // immediately; carry a known PR number because branch lookup is lossy for
+    // fork/deleted-head PRs.
     void fetchHostedReviewForBranch(activeRepo.path, branchName, {
       repoId: activeRepo.id,
       linkedGitHubPR,
+      fallbackGitHubPR: fallbackGitHubPRNumber,
       linkedGitLabMR,
       staleWhileRevalidate: true
     })
@@ -1245,6 +1247,7 @@ function SourceControlInner(): React.JSX.Element {
     isBranchVisible,
     isFolder,
     linkedGitHubPR,
+    fallbackGitHubPRNumber,
     linkedGitLabMR
   ])
 
@@ -1802,6 +1805,9 @@ function SourceControlInner(): React.JSX.Element {
       setRightSidebarOpen(true)
       setRightSidebarTab('checks')
       try {
+        if (activeWorktreeId) {
+          await updateWorktreeMeta(activeWorktreeId, { linkedPR: result.number })
+        }
         await Promise.all([
           fetchHostedReviewForBranch(activeRepo.path, branchName, {
             force: true,
@@ -1831,7 +1837,9 @@ function SourceControlInner(): React.JSX.Element {
       fetchPRForBranch,
       linkedGitLabMR,
       setRightSidebarOpen,
-      setRightSidebarTab
+      setRightSidebarTab,
+      activeWorktreeId,
+      updateWorktreeMeta
     ]
   )
 
@@ -2164,6 +2172,7 @@ function SourceControlInner(): React.JSX.Element {
       ahead: remoteStatus?.ahead,
       behind: remoteStatus?.behind,
       linkedGitHubPR,
+      fallbackGitHubPR: fallbackGitHubPRNumber,
       linkedGitLabMR
     })
       .then((result) => {
@@ -2195,6 +2204,7 @@ function SourceControlInner(): React.JSX.Element {
     isCreatingPr,
     isFolder,
     linkedGitHubPR,
+    fallbackGitHubPRNumber,
     linkedGitLabMR,
     prGenerating,
     remoteStatus?.ahead,

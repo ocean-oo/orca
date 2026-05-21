@@ -1880,6 +1880,53 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     })
     expect(store.getState().prCache[`repo-1::${branch}`]).toBeUndefined()
   })
+
+  it('uses the cached PR number as a fallback refresh hint when worktree metadata is not linked yet', () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/cached-pr'
+    const worktreeId = 'wt-cached-pr'
+
+    store.setState({
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }],
+      groupBy: 'pr-status',
+      worktreesByRepo: {
+        [repoId]: [
+          {
+            id: worktreeId,
+            repoId,
+            path: '/repo/worktrees/cached-pr',
+            branch,
+            displayName: 'cached-pr',
+            isMainWorktree: false,
+            isBare: false,
+            isArchived: false,
+            linkedPR: null
+          }
+        ]
+      },
+      prCache: {
+        [`${repoId}::${branch}`]: {
+          data: makePR({ number: 42 }),
+          fetchedAt: 1
+        }
+      }
+    } as unknown as Partial<AppState>)
+
+    store.getState().refreshGitHubForWorktreeIfStale(worktreeId)
+
+    expect(mockApi.gh.enqueuePRRefresh).toHaveBeenCalledWith({
+      candidate: expect.objectContaining({
+        repoPath,
+        branch,
+        linkedPRNumber: null,
+        fallbackPRNumber: 42
+      }),
+      reason: 'active',
+      priority: 80
+    })
+  })
 })
 
 describe('createGitHubSlice.refreshAllGitHub', () => {

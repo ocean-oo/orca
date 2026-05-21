@@ -104,6 +104,7 @@ type RefreshHostedReviewCardArgs = {
   repoId: string
   branch: string
   linkedGitHubPR?: number | null
+  fallbackGitHubPR?: number | null
   linkedGitLabMR?: number | null
   linkedBitbucketPR?: number | null
   linkedAzureDevOpsPR?: number | null
@@ -114,10 +115,12 @@ export function refreshHostedReviewCard(
   fetchHostedReviewForBranch: HostedReviewSlice['fetchHostedReviewForBranch'],
   args: RefreshHostedReviewCardArgs
 ): Promise<HostedReviewInfo | null> {
+  const fallbackGitHubPR = args.linkedGitHubPR == null ? (args.fallbackGitHubPR ?? null) : null
   return fetchHostedReviewForBranch(args.repoPath, args.branch, {
     force: true,
     repoId: args.repoId,
     linkedGitHubPR: args.linkedGitHubPR ?? null,
+    ...(fallbackGitHubPR !== null ? { fallbackGitHubPR } : {}),
     linkedGitLabMR: args.linkedGitLabMR ?? null,
     linkedBitbucketPR: args.linkedBitbucketPR ?? null,
     linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,
@@ -218,10 +221,13 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
       requestGenerations.set(cacheKey, generation)
       const request = (async () => {
         try {
+          const fallbackGitHubPR =
+            options?.linkedGitHubPR == null ? (options?.fallbackGitHubPR ?? null) : null
           const args = {
             branch,
             ...(options?.repoId !== undefined ? { repoId: options.repoId } : {}),
             linkedGitHubPR: options?.linkedGitHubPR ?? null,
+            ...(fallbackGitHubPR !== null ? { fallbackGitHubPR } : {}),
             linkedGitLabMR: options?.linkedGitLabMR ?? null,
             linkedBitbucketPR: options?.linkedBitbucketPR ?? null,
             linkedAzureDevOpsPR: options?.linkedAzureDevOpsPR ?? null,

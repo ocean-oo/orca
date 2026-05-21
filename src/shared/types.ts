@@ -646,6 +646,7 @@ export type GitHubPRRefreshAlias = {
 
 export type GitHubPRRefreshCandidate = GitHubPRRefreshAlias & {
   linkedPRNumber?: number | null
+  fallbackPRNumber?: number | null
   repoKind: RepoKind
   repoId: string
   isBare?: boolean

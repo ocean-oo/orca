@@ -17,6 +17,7 @@ import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
 import { getHostedReviewCacheKey } from './hosted-review'
+import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from './github-cache-key'
 import { moveFocusToRendererBeforeFocusedWebviewHidden } from './browser-webview-cleanup'
 export type { WorktreeSlice, WorktreeDeleteState } from './worktree-helpers'
 
@@ -1030,8 +1031,27 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
               reviewRepo.connectionId
             )
           : null
+      const prCacheKey =
+        reviewRepo && reviewBranch
+          ? getGitHubPRCacheKey(
+              reviewRepo.path,
+              reviewRepo.id,
+              reviewBranch,
+              s.settings,
+              reviewRepo.connectionId
+            )
+          : null
+      const prCacheKeys =
+        reviewRepo && reviewBranch
+          ? [
+              prCacheKey,
+              getLegacyGitHubPRCacheKey(reviewRepo.path, reviewRepo.id, reviewBranch),
+              getLegacyGitHubPRCacheKey(reviewRepo.path, undefined, reviewBranch)
+            ].filter((key): key is string => Boolean(key))
+          : []
       const hostedReviewCache = s.hostedReviewCache ?? {}
-      if (nextWorktrees === s.worktreesByRepo && !cacheKey) {
+      const prCache = s.prCache ?? {}
+      if (nextWorktrees === s.worktreesByRepo && !cacheKey && !prCacheKey) {
         return {}
       }
 
@@ -1043,6 +1063,15 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
               return next
             })()
           : hostedReviewCache
+      const nextPRCache = prCacheKeys.some((key) => prCache[key])
+        ? (() => {
+            const next = { ...prCache }
+            for (const key of prCacheKeys) {
+              delete next[key]
+            }
+            return next
+          })()
+        : prCache
 
       return {
         ...(nextWorktrees !== s.worktreesByRepo
@@ -1050,7 +1079,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           : {}),
         ...(nextHostedReviewCache !== hostedReviewCache
           ? { hostedReviewCache: nextHostedReviewCache }
-          : {})
+          : {}),
+        ...(nextPRCache !== prCache ? { prCache: nextPRCache } : {})
       }
     })
 

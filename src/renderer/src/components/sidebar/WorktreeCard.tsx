@@ -220,6 +220,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
   const hostedReview: HostedReviewInfo | null | undefined =
     hostedReviewEntry !== undefined ? hostedReviewEntry.data : undefined
+  const fallbackGitHubPRNumber =
+    worktree.linkedPR == null && hostedReview?.provider === 'github' ? hostedReview.number : null
   const prDisplay = getWorktreeCardPrDisplay(hostedReview, worktree.linkedPR)
   const issue: IssueInfo | null | undefined = worktree.linkedIssue
     ? issueEntry !== undefined
@@ -281,12 +283,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
       return
     }
     if (repo && !isFolder && !worktree.isBare && hostedReviewCacheKey && showPR) {
-      // Why: pass linkedPR so worktrees created from a PR (whose new local
-      // branch differs from the remote head ref) still resolve their PR/MR via
-      // a number-based fallback in the main process.
+      // Why: branch lookup is lossy for fork/deleted-head PRs; reuse a known PR
+      // number from metadata or the visible cache whenever we have one.
       fetchHostedReviewForBranch(repo.path, branch, {
         repoId: repo.id,
         linkedGitHubPR: worktree.linkedPR ?? null,
+        fallbackGitHubPR: fallbackGitHubPRNumber,
         linkedGitLabMR: worktree.linkedGitLabMR ?? null,
         staleWhileRevalidate: true
       })
@@ -296,6 +298,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
     isFolder,
     worktree.isBare,
     worktree.linkedPR,
+    fallbackGitHubPRNumber,
     worktree.linkedGitLabMR,
     fetchHostedReviewForBranch,
     branch,

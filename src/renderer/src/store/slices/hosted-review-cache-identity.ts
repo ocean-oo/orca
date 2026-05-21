@@ -2,6 +2,7 @@ import type { GlobalSettings } from '../../../../shared/types'
 
 export type LinkedReviewHints = {
   linkedGitHubPR?: number | null
+  fallbackGitHubPR?: number | null
   linkedGitLabMR?: number | null
   linkedBitbucketPR?: number | null
   linkedAzureDevOpsPR?: number | null
@@ -29,7 +30,7 @@ export function getHostedReviewCacheKey(
 // linked review number. Track that distinction without changing the cache key.
 export function linkedReviewHintKey(options?: LinkedReviewHints): string {
   const hints = [
-    ['github', options?.linkedGitHubPR ?? null],
+    ['github', options?.linkedGitHubPR ?? options?.fallbackGitHubPR ?? null],
     ['gitlab', options?.linkedGitLabMR ?? null],
     ['bitbucket', options?.linkedBitbucketPR ?? null],
     ['azure-devops', options?.linkedAzureDevOpsPR ?? null],

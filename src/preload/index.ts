@@ -785,6 +785,7 @@ const api = {
       repoId?: string
       branch: string
       linkedPRNumber?: number | null
+      fallbackPRNumber?: number | null
     }): Promise<unknown> => ipcRenderer.invoke('gh:prForBranch', args),
 
     refreshPRNow: (args: { candidate: GitHubPRRefreshCandidate }): Promise<unknown> =>

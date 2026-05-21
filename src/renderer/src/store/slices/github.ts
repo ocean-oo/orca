@@ -339,7 +339,7 @@ const ERROR_TOAST_DURATION = 60_000
 
 const inflightPRRequests = new Map<
   string,
-  { promise: Promise<PRInfo | null>; force: boolean; generation: number }
+  { promise: Promise<PRInfo | null>; force: boolean; generation: number; lookupHintKey: string }
 >()
 const inflightIssueRequests = new Map<string, Promise<IssueInfo | null>>()
 const inflightChecksRequests = new Map<string, Promise<PRCheckDetail[]>>()
@@ -514,6 +514,8 @@ function buildPRRefreshCandidate(
     state.settings,
     repo.connectionId
   )
+  const fallbackPRNumber =
+    worktree.linkedPR == null ? (state.prCache[cacheKey]?.data?.number ?? null) : null
   const sshStatus = repo.connectionId
     ? state.sshConnectionStates.get(repo.connectionId)?.status
     : null
@@ -524,7 +526,10 @@ function buildPRRefreshCandidate(
     branch,
     cacheKey,
     worktreeId: worktree.id,
+    // Why: persisted linked PR metadata is exact, while PR cache numbers are
+    // only fallback hints after branch lookup misses.
     linkedPRNumber: worktree.linkedPR ?? null,
+    fallbackPRNumber,
     isBare: worktree.isBare,
     isArchived: worktree.isArchived,
     connectionId: repo.connectionId ?? null,
@@ -556,6 +561,13 @@ function shouldClearHostedReviewForNoGitHubPR(
 
 function isGitHubLinkedReviewHintKey(hintKey: string | undefined): boolean {
   return hintKey?.split('|').some((key) => key.startsWith('github:')) ?? false
+}
+
+function prLookupHintKey(linkedPRNumber: number | null, fallbackPRNumber: number | null): string {
+  if (linkedPRNumber !== null) {
+    return `linked:${linkedPRNumber}`
+  }
+  return fallbackPRNumber !== null ? `fallback:${fallbackPRNumber}` : ''
 }
 
 function linkedReviewHintKeyForNoGitHubPR(
@@ -814,7 +826,10 @@ export type GitHubSlice = {
   fetchPRForBranch: (
     repoPath: string,
     branch: string,
-    options?: RepoScopedFetchOptions & { linkedPRNumber?: number | null }
+    options?: RepoScopedFetchOptions & {
+      linkedPRNumber?: number | null
+      fallbackPRNumber?: number | null
+    }
   ) => Promise<PRInfo | null>
   fetchIssue: (
     repoPath: string,
@@ -1693,13 +1708,22 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     // the worktree-card lookup (which has a linked PR fallback) would otherwise
     // return null forever. Refetch when the cached miss could now resolve via
     // the linkedPR path.
-    const linkedRefetch = cached?.data === null && (options?.linkedPRNumber ?? null) !== null
+    const linkedPRNumber = options?.linkedPRNumber ?? null
+    const fallbackPRNumber = linkedPRNumber == null ? (options?.fallbackPRNumber ?? null) : null
+    const lookupHintKey = prLookupHintKey(linkedPRNumber, fallbackPRNumber)
+    const linkedRefetch =
+      cached?.data === null && (linkedPRNumber !== null || fallbackPRNumber !== null)
     if (!options?.force && !linkedRefetch && isFresh(cached)) {
       return cached.data
     }
 
     const inflightRequest = inflightPRRequests.get(cacheKey)
-    if (inflightRequest && (!options?.force || inflightRequest.force) && !linkedRefetch) {
+    if (
+      inflightRequest &&
+      (!options?.force || inflightRequest.force) &&
+      inflightRequest.lookupHintKey === lookupHintKey &&
+      !linkedRefetch
+    ) {
       return inflightRequest.promise
     }
 
@@ -1708,7 +1732,6 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     const requestStartedHostedReviewEntry = get().hostedReviewCache[hostedReviewCacheKey]
     prRequestGenerations.set(cacheKey, generation)
 
-    const linkedPRNumber = options?.linkedPRNumber ?? null
     const request = (async () => {
       try {
         const runtimeRepo = getRuntimeRepoTarget(get(), repoPath, requestSettings)
@@ -1716,7 +1739,12 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           ? await callRuntimeRpc<PRInfo | null>(
               runtimeRepo.target,
               'github.prForBranch',
-              { repo: runtimeRepo.repo.id, branch, linkedPRNumber },
+              {
+                repo: runtimeRepo.repo.id,
+                branch,
+                linkedPRNumber,
+                ...(fallbackPRNumber !== null ? { fallbackPRNumber } : {})
+              },
               { timeoutMs: 30_000 }
             ).then((pr) =>
               pr
@@ -1731,13 +1759,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 branch,
                 cacheKey,
                 linkedPRNumber,
+                fallbackPRNumber,
                 connectionId: repo?.connectionId ?? null,
                 cachedFetchedAt: cached?.fetchedAt ?? null
               }
               return window.api.gh.refreshPRNow
                 ? await window.api.gh.refreshPRNow({ candidate })
                 : await window.api.gh
-                    .prForBranch({ repoPath, repoId, branch, linkedPRNumber })
+                    .prForBranch({ repoPath, repoId, branch, linkedPRNumber, fallbackPRNumber })
                     .then((pr) =>
                       pr
                         ? ({ kind: 'found', pr, fetchedAt: Date.now() } as const)
@@ -1781,7 +1810,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     inflightPRRequests.set(cacheKey, {
       promise: request,
       force: Boolean(options?.force),
-      generation
+      generation,
+      lookupHintKey
     })
     return request
   },
@@ -2075,7 +2105,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
         force: bypassesGitHubPRRefreshFreshness(reason),
         repoId: candidate.repoId,
-        linkedPRNumber: candidate.linkedPRNumber ?? null
+        linkedPRNumber: candidate.linkedPRNumber ?? null,
+        fallbackPRNumber: candidate.fallbackPRNumber ?? null
       })
       return
     }
@@ -2087,7 +2118,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             return get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
               force: bypassesGitHubPRRefreshFreshness(reason),
               repoId: candidate.repoId,
-              linkedPRNumber: candidate.linkedPRNumber ?? null
+              linkedPRNumber: candidate.linkedPRNumber ?? null,
+              fallbackPRNumber: candidate.fallbackPRNumber ?? null
             })
           }
           return null
@@ -2110,7 +2142,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       for (const candidate of candidates) {
         void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
           repoId: candidate.repoId,
-          linkedPRNumber: candidate.linkedPRNumber ?? null
+          linkedPRNumber: candidate.linkedPRNumber ?? null,
+          fallbackPRNumber: candidate.fallbackPRNumber ?? null
         })
       }
       return
@@ -2332,7 +2365,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       if (getRuntimeRepoTarget(state, candidate.repoPath)) {
         void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
           repoId: candidate.repoId,
-          linkedPRNumber: candidate.linkedPRNumber ?? null
+          linkedPRNumber: candidate.linkedPRNumber ?? null,
+          fallbackPRNumber: candidate.fallbackPRNumber ?? null
         })
       } else {
         void window.api.gh.enqueuePRRefresh?.({ candidate, reason: 'swr', priority: 10 })
@@ -2387,7 +2421,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
             force: true,
             repoId: candidate.repoId,
-            linkedPRNumber: candidate.linkedPRNumber ?? null
+            linkedPRNumber: candidate.linkedPRNumber ?? null,
+            fallbackPRNumber: candidate.fallbackPRNumber ?? null
           })
         } else {
           void window.api.gh.enqueuePRRefresh?.({ candidate, reason: 'post-push', priority: 100 })
@@ -2567,7 +2602,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
             force: true,
             repoId: candidate.repoId,
-            linkedPRNumber: candidate.linkedPRNumber ?? null
+            linkedPRNumber: candidate.linkedPRNumber ?? null,
+            fallbackPRNumber: candidate.fallbackPRNumber ?? null
           })
         } else {
           void window.api.gh.enqueuePRRefresh?.({ candidate, reason: 'active', priority: 80 })

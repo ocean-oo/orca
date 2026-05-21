@@ -5167,17 +5167,25 @@ export class OrcaRuntimeService {
   async getRepoPRForBranch(
     repoSelector: string,
     branch: string,
-    linkedPRNumber?: number | null
+    linkedPRNumber?: number | null,
+    fallbackPRNumber?: number | null
   ): Promise<Awaited<ReturnType<typeof getPRForBranch>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
     this.assertHostIntegrationRepoIsLocal(repo, 'repo_pr')
-    return getPRForBranch(repo.path, branch, linkedPRNumber ?? null)
+    return getPRForBranch(
+      repo.path,
+      branch,
+      linkedPRNumber ?? null,
+      null,
+      linkedPRNumber == null ? (fallbackPRNumber ?? null) : null
+    )
   }
 
   async getHostedReviewForBranch(args: {
     repoSelector: string
     branch: string
     linkedGitHubPR?: number | null
+    fallbackGitHubPR?: number | null
     linkedGitLabMR?: number | null
     linkedBitbucketPR?: number | null
     linkedAzureDevOpsPR?: number | null
@@ -5189,6 +5197,7 @@ export class OrcaRuntimeService {
       repoPath: repo.path,
       branch: args.branch,
       linkedGitHubPR: args.linkedGitHubPR ?? null,
+      fallbackGitHubPR: args.linkedGitHubPR == null ? (args.fallbackGitHubPR ?? null) : null,
       linkedGitLabMR: args.linkedGitLabMR ?? null,
       linkedBitbucketPR: args.linkedBitbucketPR ?? null,
       linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,
@@ -5222,6 +5231,7 @@ export class OrcaRuntimeService {
       ahead: args.ahead,
       behind: args.behind,
       linkedGitHubPR: args.linkedGitHubPR ?? null,
+      fallbackGitHubPR: args.linkedGitHubPR == null ? (args.fallbackGitHubPR ?? null) : null,
       linkedGitLabMR: args.linkedGitLabMR ?? null,
       linkedBitbucketPR: args.linkedBitbucketPR ?? null,
       linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,

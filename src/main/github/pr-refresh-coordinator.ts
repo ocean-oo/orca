@@ -432,7 +432,8 @@ async function drainQueue(): Promise<void> {
         next.candidate.repoPath,
         next.candidate.branch,
         next.candidate.linkedPRNumber ?? null,
-        next.candidate.connectionId ?? null
+        next.candidate.connectionId ?? null,
+        next.candidate.linkedPRNumber == null ? (next.candidate.fallbackPRNumber ?? null) : null
       )
       outcomeObserver?.(next.candidate, outcome)
       broadcast({ aliases, reason: next.reason, outcome, requestStartedAt }, requestSequence)
@@ -575,7 +576,8 @@ export async function refreshPRNow(candidate: GitHubPRRefreshCandidate): Promise
     candidate.repoPath,
     candidate.branch,
     candidate.linkedPRNumber ?? null,
-    candidate.connectionId ?? null
+    candidate.connectionId ?? null,
+    candidate.linkedPRNumber == null ? (candidate.fallbackPRNumber ?? null) : null
   )
   outcomeObserver?.(candidate, outcome)
   broadcast({ aliases, reason: 'manual', outcome, requestStartedAt }, requestSequence)
