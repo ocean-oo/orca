@@ -561,6 +561,8 @@ async function main(): Promise<void> {
     }
 
     await new Promise<void>((resolve, reject) => {
+      let staleRetryAttempted = false
+
       const onListening = (): void => {
         restoreUmask()
         ownsSocketPath = true
@@ -573,7 +575,7 @@ async function main(): Promise<void> {
         resolve()
       }
 
-      const onInitialError = (err: NodeJS.ErrnoException): void => {
+      const failInitial = (err: NodeJS.ErrnoException): void => {
         restoreUmask()
         server.off('listening', onListening)
         if (err.code === 'EADDRINUSE') {
@@ -584,6 +586,52 @@ async function main(): Promise<void> {
           process.stderr.write(`[relay] Socket server error before listen: ${err.message}\n`)
         }
         reject(err)
+      }
+
+      // Why: a previous relay killed by SIGKILL/OOM/host-crash leaves the
+      // socket file on disk with no listener. EADDRINUSE on bind in that
+      // case is not "duplicate active" — it is a stale inode. Probe with a
+      // short connect; if it refuses, the socket is dead and we may unlink
+      // and retry once. If it connects, a live relay owns it and we keep
+      // the existing "duplicate detected" rejection.
+      const onInitialError = (err: NodeJS.ErrnoException): void => {
+        if (err.code !== 'EADDRINUSE' || staleRetryAttempted) {
+          failInitial(err)
+          return
+        }
+        staleRetryAttempted = true
+        const probe = createConnection({ path: sockPath })
+        const probeTimeout = setTimeout(() => {
+          probe.destroy()
+          failInitial(err)
+        }, 500)
+        probe.once('connect', () => {
+          clearTimeout(probeTimeout)
+          probe.destroy()
+          failInitial(err)
+        })
+        probe.once('error', (probeErr: NodeJS.ErrnoException) => {
+          clearTimeout(probeTimeout)
+          if (probeErr.code !== 'ECONNREFUSED' && probeErr.code !== 'ENOENT') {
+            failInitial(err)
+            return
+          }
+          try {
+            unlinkSync(sockPath)
+          } catch (unlinkErr) {
+            const e = unlinkErr as NodeJS.ErrnoException
+            if (e.code !== 'ENOENT') {
+              failInitial(err)
+              return
+            }
+          }
+          process.stderr.write(
+            `[relay] Removed stale socket at ${sockPath} and retrying listen\n`
+          )
+          server.once('listening', onListening)
+          server.once('error', failInitial)
+          server.listen(sockPath)
+        })
       }
 
       server.once('listening', onListening)
