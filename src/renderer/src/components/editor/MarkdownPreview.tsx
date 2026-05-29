@@ -344,6 +344,16 @@ export default function MarkdownPreview({
   const rootRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const setSearchInputElement = useCallback((input: HTMLInputElement | null) => {
+    inputRef.current = input
+    if (!input) {
+      return
+    }
+    // Why: opening preview search should select the query once, while typing
+    // and match-count updates must not keep re-selecting the field.
+    input.focus()
+    input.select()
+  }, [])
   const matchesRef = useRef<HTMLElement[]>([])
   const lastAppliedInitialAnchorRef = useRef<string | null>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -612,13 +622,6 @@ export default function MarkdownPreview({
     },
     [scrollToAnchor]
   )
-
-  useEffect(() => {
-    if (isSearchOpen) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [isSearchOpen])
 
   useEffect(() => {
     const body = bodyRef.current
@@ -1308,7 +1311,7 @@ export default function MarkdownPreview({
           <div className="markdown-preview-search" onKeyDown={(event) => event.stopPropagation()}>
             <div className="markdown-preview-search-field">
               <Input
-                ref={inputRef}
+                ref={setSearchInputElement}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
