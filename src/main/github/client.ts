@@ -1741,6 +1741,83 @@ async function getFallbackPRListForBranch(
   return list[0] ?? null
 }
 
+function parseTrackedUpstreamBranchName(upstreamRef: string, branchName: string): string | null {
+  const trimmed = upstreamRef.trim()
+  const remoteSeparator = trimmed.indexOf('/')
+  if (remoteSeparator <= 0) {
+    return null
+  }
+  const upstreamBranchName = trimmed.slice(remoteSeparator + 1).trim()
+  return upstreamBranchName && upstreamBranchName !== branchName ? upstreamBranchName : null
+}
+
+async function getTrackedUpstreamBranchName(
+  repoPath: string,
+  branchName: string
+): Promise<string | null> {
+  try {
+    const { stdout } = await gitExecFileAsync(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branchName}@{upstream}`],
+      { cwd: repoPath }
+    )
+    return parseTrackedUpstreamBranchName(stdout, branchName)
+  } catch {
+    return null
+  }
+}
+
+async function lookupPRByBranchName(args: {
+  candidates: OwnerRepo[]
+  headRepo: OwnerRepo | null
+  branchName: string
+  ghOptions: ReturnType<typeof ghRepoExecOptions>
+}): Promise<{ data: PullRequestLookupData | null; dataRepo: OwnerRepo | null }> {
+  if (args.candidates.length > 0) {
+    for (const candidate of args.candidates) {
+      try {
+        const data = args.headRepo
+          ? await getRestPRForBranch(
+              candidate,
+              args.headRepo.owner,
+              args.branchName,
+              args.ghOptions
+            )
+          : await getFallbackPRListForBranch(candidate, args.branchName, args.ghOptions)
+        if (data) {
+          return { data, dataRepo: candidate }
+        }
+      } catch (err) {
+        if (args.headRepo) {
+          throw err
+        }
+        const data = await getRestPRForBranch(
+          candidate,
+          candidate.owner,
+          args.branchName,
+          args.ghOptions
+        )
+        if (data) {
+          return { data, dataRepo: candidate }
+        }
+      }
+    }
+    return { data: null, dataRepo: null }
+  }
+
+  try {
+    const { stdout } = await ghExecFileAsync(
+      ['pr', 'view', args.branchName, '--json', PR_LOOKUP_JSON_FIELDS],
+      args.ghOptions
+    )
+    return { data: JSON.parse(stdout), dataRepo: null }
+  } catch (err) {
+    if (isNoPullRequestError(err)) {
+      return { data: null, dataRepo: null }
+    }
+    throw err
+  }
+}
+
 async function getRestPRByNumber(
   ownerRepo: OwnerRepo,
   number: number,
@@ -1905,41 +1982,27 @@ export async function getPRForBranchOutcome(
     } else if (branchName) {
       // During a rebase the worktree is in detached HEAD and branch is empty.
       // An empty --head filter causes gh to return an arbitrary PR.
-      if (candidates.length > 0) {
-        for (const candidate of candidates) {
-          try {
-            data = headRepo
-              ? await getRestPRForBranch(candidate, headRepo.owner, branchName, ghOptions)
-              : await getFallbackPRListForBranch(candidate, branchName, ghOptions)
-            if (data) {
-              dataRepo = candidate
-              break
-            }
-          } catch (err) {
-            if (headRepo) {
-              throw err
-            } else {
-              data = await getRestPRForBranch(candidate, candidate.owner, branchName, ghOptions)
-              if (data) {
-                dataRepo = candidate
-                break
-              }
-            }
-          }
-        }
-      } else {
-        try {
-          const { stdout } = await ghExecFileAsync(
-            ['pr', 'view', branchName, '--json', PR_LOOKUP_JSON_FIELDS],
+      const branchLookup = await lookupPRByBranchName({
+        candidates,
+        headRepo,
+        branchName,
+        ghOptions
+      })
+      data = branchLookup.data
+      dataRepo = branchLookup.dataRepo
+      if (!data && !connectionId) {
+        // Why: worktrees can have a short local branch tracking a differently
+        // named remote PR head; after the local miss, try that configured head.
+        const upstreamBranchName = await getTrackedUpstreamBranchName(repoPath, branchName)
+        if (upstreamBranchName) {
+          const upstreamLookup = await lookupPRByBranchName({
+            candidates,
+            headRepo,
+            branchName: upstreamBranchName,
             ghOptions
-          )
-          data = JSON.parse(stdout)
-        } catch (err) {
-          if (isNoPullRequestError(err)) {
-            data = null
-          } else {
-            throw err
-          }
+          })
+          data = upstreamLookup.data
+          dataRepo = upstreamLookup.dataRepo
         }
       }
     }

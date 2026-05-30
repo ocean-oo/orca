@@ -583,6 +583,53 @@ describe('getPRForBranch', () => {
     expect(pr).toMatchObject({ number: 42, title: 'Fallback PR lookup' })
   })
 
+  it('falls back to the tracked upstream branch when the local branch name differs', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: JSON.stringify([]) })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 78,
+            title: 'Upstream branch PR',
+            state: 'open',
+            html_url: 'https://github.com/acme/widgets/pull/78',
+            updated_at: '2026-03-28T00:00:00Z',
+            draft: false,
+            mergeable: true,
+            base: { ref: 'main', sha: 'base-oid' },
+            head: { ref: 'contributor/original', sha: 'upstream-head-oid' }
+          }
+        ])
+      })
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: 'origin/contributor/original\n',
+      stderr: ''
+    })
+
+    const pr = await getPRForBranch('/repo-root', 'local-created-from-pr')
+
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', 'local-created-from-pr@{upstream}'],
+      { cwd: '/repo-root' }
+    )
+    expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
+      1,
+      ['api', 'repos/acme/widgets/pulls?head=acme%3Alocal-created-from-pr&state=all&per_page=1'],
+      { cwd: '/repo-root' }
+    )
+    expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
+      2,
+      ['api', 'repos/acme/widgets/pulls?head=acme%3Acontributor%2Foriginal&state=all&per_page=1'],
+      { cwd: '/repo-root' }
+    )
+    expect(pr).toMatchObject({
+      number: 78,
+      title: 'Upstream branch PR',
+      headSha: 'upstream-head-oid'
+    })
+  })
+
   it('uses linked PR number as the source of truth when provided', async () => {
     getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
     ghExecFileAsyncMock.mockResolvedValueOnce({
