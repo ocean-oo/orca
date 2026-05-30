@@ -223,6 +223,15 @@ function createMockTransport(initialPtyId: string | null = null): MockTransport 
   return transport
 }
 
+function createPaneContainer(): HTMLElement {
+  const container = new EventTarget() as HTMLElement
+  Object.defineProperty(container, 'dataset', {
+    configurable: true,
+    value: {}
+  })
+  return container
+}
+
 function createPane(paneId: number) {
   const leafId = leafIdForPane(paneId)
   const activeBuffer = {
@@ -272,7 +281,7 @@ function createPane(paneId: number) {
         registerOscHandler: vi.fn(() => ({ dispose: vi.fn() }))
       }
     },
-    container: { dataset: {} },
+    container: createPaneContainer(),
     fitAddon: {
       fit: vi.fn()
     }
