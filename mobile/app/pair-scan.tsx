@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Linking } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -45,12 +45,16 @@ export default function PairScanScreen() {
   const mountedRef = useRef(true)
   const activePairingAttemptRef = useRef<PairingConnectionAttempt | null>(null)
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false
-      activePairingAttemptRef.current?.dispose()
-      activePairingAttemptRef.current = null
+  const setPairScanRootRef = useCallback((node: View | null): void => {
+    if (node !== null) {
+      mountedRef.current = true
+      return
     }
+    // Why: pairing attempts can outlive the visible route; dispose them when
+    // the scan screen detaches without a passive cleanup-only Effect.
+    mountedRef.current = false
+    activePairingAttemptRef.current?.dispose()
+    activePairingAttemptRef.current = null
   }, [])
 
   const handleBarCodeScanned = useCallback(
@@ -194,7 +198,7 @@ export default function PairScanScreen() {
 
   if (!permission) {
     return (
-      <View style={[styles.container, containerPadding]}>
+      <View ref={setPairScanRootRef} style={[styles.container, containerPadding]}>
         <ActivityIndicator color={colors.textSecondary} />
       </View>
     )
@@ -203,7 +207,7 @@ export default function PairScanScreen() {
   if (!permission.granted) {
     const canAskAgain = permission.canAskAgain !== false
     return (
-      <View style={[styles.container, containerPadding]}>
+      <View ref={setPairScanRootRef} style={[styles.container, containerPadding]}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ChevronLeft size={22} color={colors.textSecondary} />
         </Pressable>
@@ -246,7 +250,7 @@ export default function PairScanScreen() {
   }
 
   return (
-    <View style={[styles.container, containerPadding]}>
+    <View ref={setPairScanRootRef} style={[styles.container, containerPadding]}>
       <Pressable style={styles.backButton} onPress={() => router.back()}>
         <ChevronLeft size={22} color={colors.textSecondary} />
       </Pressable>
