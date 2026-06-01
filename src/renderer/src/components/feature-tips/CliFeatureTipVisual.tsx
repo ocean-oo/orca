@@ -74,7 +74,7 @@ export function CliFeatureTipVisual(): JSX.Element {
                 key={command}
                 className={`truncate ${isVisible ? 'animate-cli-tip-command-line' : 'invisible'}`}
               >
-                <span className="text-amber-600">&gt; </span>
+                <span className="text-foreground">&gt; </span>
                 <span>{command}</span>
                 {isCurrentLine ? (
                   <span className="animate-cli-tip-caret ml-0.5 inline-block h-3 w-1 translate-y-0.5 rounded-sm bg-foreground/70" />

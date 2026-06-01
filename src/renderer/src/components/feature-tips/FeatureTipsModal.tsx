@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import { Loader2, Mic } from 'lucide-react'
 import { toast } from 'sonner'
 import { getDefaultVoiceSettings } from '../../../../shared/constants'
@@ -118,6 +118,8 @@ export default function FeatureTipsModal(): JSX.Element | null {
   const markFeatureTipsSeen = useAppStore((s) => s.markFeatureTipsSeen)
   const modalData = useAppStore((s) => s.modalData)
   const mountedRef = useMountedRef()
+  const activeModalRef = useRef(activeModal)
+  const setupRequestIdRef = useRef(0)
   const [primaryBusy, setPrimaryBusy] = useState(false)
   const [skillTerminalOpen, setSkillTerminalOpen] = useState(false)
   const isOpen = activeModal === 'feature-tips'
@@ -129,6 +131,10 @@ export default function FeatureTipsModal(): JSX.Element | null {
     settings
   })
 
+  useEffect(() => {
+    activeModalRef.current = activeModal
+  }, [activeModal])
+
   const markCurrentTipSeen = (): void => {
     if (currentTip) {
       markFeatureTipsSeen([currentTip.id])
@@ -137,15 +143,19 @@ export default function FeatureTipsModal(): JSX.Element | null {
 
   const handleOpenChange = (open: boolean): void => {
     if (!open) {
+      setupRequestIdRef.current += 1
       markCurrentTipSeen()
       setSkillTerminalOpen(false)
+      setPrimaryBusy(false)
       closeModal()
     }
   }
 
   const handleSkip = (): void => {
+    setupRequestIdRef.current += 1
     markCurrentTipSeen()
     setSkillTerminalOpen(false)
+    setPrimaryBusy(false)
     closeModal()
   }
 
@@ -181,6 +191,14 @@ export default function FeatureTipsModal(): JSX.Element | null {
         break
       }
       case 'setup-cli': {
+        const setupRequestId = setupRequestIdRef.current + 1
+        setupRequestIdRef.current = setupRequestId
+        // Why: this modal is lazily mounted; closing it does not unmount the
+        // component, so async install results must not reopen UI after dismissal.
+        const canApplySetupResult = (): boolean =>
+          mountedRef.current &&
+          activeModalRef.current === 'feature-tips' &&
+          setupRequestIdRef.current === setupRequestId
         const telemetrySource = getOrcaCliFeatureTipTelemetrySource(modalData.source)
         trackOrcaCliFeatureTipSetupClicked(telemetrySource)
         setPrimaryBusy(true)
@@ -188,17 +206,17 @@ export default function FeatureTipsModal(): JSX.Element | null {
           const result = await installCliFromFeatureTip(() => window.api.cli.install())
           if (result.kind === 'installed') {
             trackOrcaCliFeatureTipSetupResult(telemetrySource, 'installed')
-            enableOrchestrationSkillSetup()
-            if (!mountedRef.current) {
+            if (!canApplySetupResult()) {
               return
             }
+            enableOrchestrationSkillSetup()
             toast.success('Registered `orca` in PATH.')
             setSkillTerminalOpen(true)
             return
           }
 
           trackOrcaCliFeatureTipSetupResult(telemetrySource, 'needs_attention')
-          if (!mountedRef.current) {
+          if (!canApplySetupResult()) {
             return
           }
           toast.warning('Orca CLI needs attention', {
@@ -213,21 +231,21 @@ export default function FeatureTipsModal(): JSX.Element | null {
             message.includes('Development mode uses a generated launcher for validation only')
           ) {
             trackOrcaCliFeatureTipSetupResult(telemetrySource, 'dev_preview')
-            enableOrchestrationSkillSetup()
-            if (!mountedRef.current) {
+            if (!canApplySetupResult()) {
               return
             }
+            enableOrchestrationSkillSetup()
             toast.info('Development preview: opening skills setup terminal.')
             setSkillTerminalOpen(true)
             return
           }
 
           trackOrcaCliFeatureTipSetupResult(telemetrySource, 'failed')
-          if (mountedRef.current) {
+          if (canApplySetupResult()) {
             toast.error(message)
           }
         } finally {
-          if (mountedRef.current) {
+          if (canApplySetupResult()) {
             setPrimaryBusy(false)
           }
         }
@@ -243,12 +261,12 @@ export default function FeatureTipsModal(): JSX.Element | null {
     return (
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent
-          className="!flex h-[min(31rem,calc(100vh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl md:!flex-row"
+          className="!flex max-h-[calc(100vh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl md:!h-[min(31rem,calc(100vh-2rem))] md:!flex-row"
           showCloseButton={!skillTerminalOpen}
         >
           <div
-            className={`scrollbar-sleek flex min-h-0 min-w-0 shrink-0 flex-col justify-between overflow-y-auto px-8 py-9 transition-[flex-basis] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
-              skillTerminalOpen ? 'md:basis-full' : 'md:basis-[47.5%]'
+            className={`scrollbar-sleek flex min-h-0 min-w-0 flex-1 flex-col justify-between overflow-y-auto px-8 py-9 transition-[flex-basis] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:shrink-0 ${
+              skillTerminalOpen ? 'basis-auto md:basis-full' : 'basis-auto md:basis-[47.5%]'
             }`}
           >
             <DialogHeader className={`${skillTerminalOpen ? 'gap-2' : 'gap-4'} text-left`}>
@@ -314,7 +332,7 @@ export default function FeatureTipsModal(): JSX.Element | null {
                 skillTerminalOpen ? 'translate-x-full opacity-0' : 'translate-x-0 opacity-100'
               }`}
             >
-              <FeatureTipVisual tip={currentTip} />
+              {skillTerminalOpen ? null : <FeatureTipVisual tip={currentTip} />}
             </div>
           </div>
         </DialogContent>
