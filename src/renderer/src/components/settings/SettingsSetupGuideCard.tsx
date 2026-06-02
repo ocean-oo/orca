@@ -36,7 +36,7 @@ export function SettingsSetupGuideCard(): React.JSX.Element | null {
           <div className="min-w-0 space-y-3">
             <div className="space-y-1">
               <h2 className="text-base font-semibold leading-tight text-foreground">
-                Getting started with Orca
+                Onboarding checklist
               </h2>
               <p className="text-sm text-muted-foreground">
                 {completedStepCount}/{setupSteps.length} setup tasks complete
