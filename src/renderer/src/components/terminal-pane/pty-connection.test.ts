@@ -3050,7 +3050,7 @@ describe('connectPanePty', () => {
     const binding = connectPanePty(
       pane as never,
       manager as never,
-      createDeps({ isVisibleRef: { current: false } }) as never
+      createDeps({ isVisibleRef: { current: false }, startup: { command: 'codex' } }) as never
     )
     await flushAsyncTicks(6)
 
@@ -3059,7 +3059,7 @@ describe('connectPanePty', () => {
     vi.advanceTimersByTime(50)
 
     expect(transport.sendInput).not.toHaveBeenCalledWith('\x1b[?997;2n')
-    expect(pane.terminal.write).toHaveBeenCalledWith('\x1b[?2031h')
+    expect(pane.terminal.write).toHaveBeenCalledWith('\x1b[?2031h', expect.any(Function))
 
     binding.dispose()
   })
