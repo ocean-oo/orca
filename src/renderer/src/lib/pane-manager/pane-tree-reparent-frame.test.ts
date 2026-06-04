@@ -12,26 +12,41 @@ vi.mock('./pane-divider', () => ({
   createDivider: vi.fn(() => createMockElement('pane-divider'))
 }))
 
-type TestElement = HTMLElement & {
+type TestElement = {
   className: string
+  classList: {
+    contains: (classToken: string) => boolean
+  }
   children: TestElement[]
   parentElement: TestElement | null
   style: Record<string, string>
+  firstElementChild: TestElement | null
   appendChild: (child: TestElement) => TestElement
   replaceChild: (nextChild: TestElement, oldChild: TestElement) => TestElement
+  hasAttribute: (name: string) => boolean
+  removeAttribute: (name: string) => void
+  setAttribute: (name: string, value: string) => void
   remove: () => void
 }
 
 function createMockElement(className = ''): TestElement {
+  const attributes = new Set<string>()
   const element = {
     className,
     children: [],
     parentElement: null,
     style: {},
+    get firstElementChild(): TestElement | null {
+      return element.children[0] ?? null
+    },
     classList: {
       contains: (classToken: string): boolean => element.className.split(/\s+/).includes(classToken)
     },
     appendChild: (child: TestElement): TestElement => {
+      const previousParent = child.parentElement
+      if (previousParent) {
+        previousParent.children = previousParent.children.filter((entry) => entry !== child)
+      }
       element.children.push(child)
       child.parentElement = element
       return child
@@ -47,6 +62,13 @@ function createMockElement(className = ''): TestElement {
       oldChild.parentElement = null
       return oldChild
     },
+    hasAttribute: (name: string): boolean => attributes.has(name),
+    removeAttribute: (name: string): void => {
+      attributes.delete(name)
+    },
+    setAttribute: (name: string): void => {
+      attributes.add(name)
+    },
     remove: vi.fn()
   } as unknown as TestElement
   return element
@@ -58,9 +80,9 @@ function createPane(id: number, container = createMockElement('pane')): ManagedP
     id,
     leafId,
     stablePaneId: leafId,
-    container,
-    xtermContainer: createMockElement(),
-    linkTooltip: createMockElement(),
+    container: container as unknown as HTMLElement,
+    xtermContainer: createMockElement() as unknown as HTMLElement,
+    linkTooltip: createMockElement() as unknown as HTMLElement,
     terminal: {} as never,
     fitAddon: {} as never,
     searchAddon: {} as never,
@@ -100,12 +122,12 @@ describe('insertPaneNextTo reparent frame', () => {
     const parent = createMockElement('pane-split')
     const source = createPane(1)
     const target = createPane(2)
-    parent.appendChild(target.container as TestElement)
+    parent.appendChild(target.container as unknown as TestElement)
     const frames: FrameRequestCallback[] = []
     const safeFit = vi.fn()
 
     insertPaneNextTo(source, target, 'right', {
-      getRoot: () => parent,
+      getRoot: () => parent as unknown as HTMLElement,
       getStyleOptions: () => ({}),
       safeFit,
       refitPanesUnder: vi.fn(),
@@ -133,13 +155,13 @@ describe('insertPaneNextTo reparent frame', () => {
     const parent = createMockElement('pane-split')
     const source = createPane(1)
     const target = createPane(2)
-    parent.appendChild(target.container as TestElement)
+    parent.appendChild(target.container as unknown as TestElement)
     const frames: FrameRequestCallback[] = []
     const safeFit = vi.fn()
     let destroyed = false
 
     insertPaneNextTo(source, target, 'right', {
-      getRoot: () => parent,
+      getRoot: () => parent as unknown as HTMLElement,
       getStyleOptions: () => ({}),
       safeFit,
       refitPanesUnder: vi.fn(),
@@ -154,5 +176,29 @@ describe('insertPaneNextTo reparent frame', () => {
 
     expect(webglRendererMock.attachWebgl).not.toHaveBeenCalled()
     expect(safeFit).not.toHaveBeenCalled()
+  })
+
+  it('recomputes terminal split edge markers from the final reparented tree', async () => {
+    setupDocument()
+    const { insertPaneNextTo } = await import('./pane-tree-ops')
+    const root = createMockElement('pane-manager-root')
+    const target = createPane(2)
+    root.appendChild(target.container as unknown as TestElement)
+    const source = createPane(1)
+
+    insertPaneNextTo(source, target, 'right', {
+      getRoot: () => root as unknown as HTMLElement,
+      getStyleOptions: () => ({}),
+      safeFit: vi.fn(),
+      refitPanesUnder: vi.fn(),
+      requestPaneReparentFrame: vi.fn()
+    })
+
+    const rootSplit = root.firstElementChild
+    expect(rootSplit?.classList.contains('pane-split')).toBe(true)
+    expect(rootSplit?.hasAttribute('data-terminal-edge-block-start')).toBe(true)
+    expect(rootSplit?.hasAttribute('data-terminal-edge-block-end')).toBe(true)
+    expect(rootSplit?.hasAttribute('data-terminal-edge-inline-start')).toBe(true)
+    expect(rootSplit?.hasAttribute('data-terminal-edge-inline-end')).toBe(true)
   })
 })

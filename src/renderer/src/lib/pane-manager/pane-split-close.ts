@@ -12,6 +12,7 @@ import {
   promoteSibling,
   removeDividers,
   safeFit,
+  updateTerminalSplitEdgeState,
   wrapInSplit
 } from './pane-tree-ops'
 import { applyDividerStyles, applyPaneOpacity } from './pane-divider'
@@ -64,6 +65,7 @@ export function splitManagedPane(args: SplitManagedPaneArgs): ManagedPane | null
   const movedPaneStates = prepareMovedPanesForSplit(existingContainer, existing, args.panes)
 
   wrapInSplit(existingContainer, newPane.container, isVertical, divider, args.opts)
+  updateTerminalSplitEdgeState(args.root)
   args.setActivePaneId(newPane.id)
   openSplitPane(args, newPane, args.opts?.cwd)
 
@@ -197,8 +199,10 @@ function removePaneContainer(args: CloseManagedPaneArgs, pane: ManagedPaneIntern
     paneContainer.remove()
     removeDividers(parent)
     promoteSibling(sibling, parent, args.root)
+    updateTerminalSplitEdgeState(args.root)
   } else {
     paneContainer.remove()
+    updateTerminalSplitEdgeState(args.root)
   }
 }
 
