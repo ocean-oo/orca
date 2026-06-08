@@ -117,7 +117,8 @@ function SetupCommandPreview({
           <div className="font-mono text-[11px] text-muted-foreground">orca.yaml</div>
           {headerAction}
         </div>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[12px] leading-5 text-emerald-700 dark:text-emerald-300/95">
+        {/* Why: long orca.yaml scripts must not grow the create dialog past the viewport. */}
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[12px] leading-5 text-emerald-700 scrollbar-sleek dark:text-emerald-300/95">
           {setupConfig.command}
         </pre>
       </div>
@@ -132,7 +133,7 @@ function SetupCommandPreview({
         </div>
         {headerAction}
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground">
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-5 text-foreground scrollbar-sleek">
         {setupConfig.command}
       </pre>
     </div>
