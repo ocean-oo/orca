@@ -54,6 +54,7 @@ const EMOJI_TABLE_FIXTURE = readFileSync(
   path.join(__dirname, 'fixtures', 'terminal-emoji-table.md'),
   'utf8'
 )
+const RAW_EMOJI_TABLE_MIN_COLS = 140
 
 function rawEmojiFixtureBoxTableScript(table: string, runId: string): string {
   const marker = `RAW_EMOJI_FIXTURE_TABLE_RESTORE_${runId}`
@@ -147,7 +148,7 @@ function rawEmojiFixtureCompletionMarker(runId: string): string {
 }
 
 async function setWideRenderedTableViewport(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 1480, height: 820 })
+  await page.setViewportSize({ width: 1760, height: 820 })
   await page.waitForTimeout(250)
   await page.evaluate(() => {
     const store = window.__store
@@ -156,6 +157,21 @@ async function setWideRenderedTableViewport(page: Page): Promise<void> {
     }
   })
   await page.waitForTimeout(250)
+}
+
+async function waitForRawEmojiTableColumns(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as RawTableDebugWindow).getActiveTestPane?.().terminal.cols ?? 0
+        ),
+      {
+        message: 'raw emoji table golden needs a wide terminal viewport',
+        timeout: 10_000
+      }
+    )
+    .toBeGreaterThanOrEqual(RAW_EMOJI_TABLE_MIN_COLS)
 }
 
 async function readTerminalBoxTableWrapDiagnostics(page: Page): Promise<{
@@ -454,6 +470,7 @@ test.describe('Terminal raw emoji table scroll restore repro', () => {
     await setWideRenderedTableViewport(orcaPage)
     await ensureTerminalVisible(orcaPage)
     await waitForActiveTerminalManager(orcaPage, 30_000)
+    await waitForRawEmojiTableColumns(orcaPage)
     const ptyId = await waitForActivePanePtyId(orcaPage)
     const runId = randomUUID()
     const scriptPath = path.join(testRepoPath, `.orca-raw-emoji-fixture-table-${runId}.mjs`)
