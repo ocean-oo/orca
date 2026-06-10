@@ -29,6 +29,11 @@ Automations:
   automations run           Run an Orca automation now
   automations runs          List automation run history
 
+Projects:
+  project list              List durable projects known to Orca
+  project setups            List project host setups
+  project setup-existing-folder Make a project available on a host by importing an existing folder
+
 Repos:
   repo list                 List repos registered in Orca
   repo add                  Add a project to Orca by filesystem path
@@ -201,6 +206,9 @@ Common Commands:
   orca terminal split [--terminal <handle>] [--direction horizontal|vertical] [--json]
   orca terminal switch [--terminal <handle>] [--json]
   orca terminal close [--terminal <handle>] [--json]
+  orca project list [--json]
+  orca project setups [--project <id>] [--host <host-id>] [--json]
+  orca project setup-existing-folder --project <id> --host <host-id> --path <path> [--kind git|folder] [--display-name <name>] [--json]
   orca repo list [--json]
   orca repo add --path <path> [--json]
   orca repo show --repo <selector> [--json]

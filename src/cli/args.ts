@@ -77,6 +77,7 @@ export function supportsBrowserPageFlag(commandPath: string[]): boolean {
   if (
     [
       'automations',
+      'project',
       'repo',
       'worktree',
       'terminal',
@@ -105,6 +106,7 @@ export function isCommandGroup(commandPath: string[]): boolean {
     (commandPath.length === 1 &&
       [
         'automations',
+        'project',
         'repo',
         'worktree',
         'terminal',

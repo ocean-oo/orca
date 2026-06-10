@@ -141,6 +141,9 @@ describe('orca root help', () => {
     expect(logSpy.mock.calls[0][0]).toContain(
       'computer press-key        Press a single key such as Return or Escape'
     )
+    expect(logSpy.mock.calls[0][0]).toContain(
+      'project setup-existing-folder Make a project available on a host by importing an existing folder'
+    )
     expect(callMock).not.toHaveBeenCalled()
   })
 })
@@ -247,7 +250,9 @@ describe('orca cli worktree awareness', () => {
 
     await main(['worktree', 'current', '--json'], '/tmp/repo/feature/src')
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', { limit: 10_000 })
+    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', {
+      limit: 10_000
+    })
     expect(callMock).toHaveBeenNthCalledWith(2, 'worktree.show', {
       worktree: 'id:repo::/tmp/repo/feature'
     })
@@ -994,6 +999,174 @@ describe('orca cli worktree awareness', () => {
     expect(callMock).toHaveBeenCalledWith('repo.add', {
       path: path.resolve('/tmp/repo/apps/web')
     })
+  })
+
+  it('lists projects through the project-first runtime API', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_project_list', {
+        projects: [
+          {
+            id: 'github:stablyai/orca',
+            displayName: 'Orca',
+            badgeColor: '#7c3aed',
+            providerIdentity: {
+              provider: 'github',
+              owner: 'stablyai',
+              repo: 'orca'
+            },
+            sourceRepoIds: ['repo-1'],
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ]
+      })
+    )
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['project', 'list', '--json'], '/tmp/repo')
+
+    expect(callMock).toHaveBeenCalledWith('project.list')
+  })
+
+  it('filters project host setups locally after fetching setup compatibility state', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_project_setups', {
+        setups: [
+          {
+            id: 'setup-local',
+            projectId: 'github:stablyai/orca',
+            hostId: 'local',
+            repoId: 'repo-local',
+            path: '/tmp/orca',
+            displayName: 'Orca',
+            setupState: 'ready',
+            setupMethod: 'legacy-repo',
+            createdAt: 1,
+            updatedAt: 1
+          },
+          {
+            id: 'setup-remote',
+            projectId: 'github:stablyai/orca',
+            hostId: 'runtime:gpu',
+            repoId: 'repo-remote',
+            path: '/srv/orca',
+            displayName: 'Orca',
+            setupState: 'ready',
+            setupMethod: 'legacy-repo',
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ]
+      })
+    )
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(
+      ['project', 'setups', '--project', 'github:stablyai/orca', '--host', 'runtime:gpu'],
+      '/tmp/repo'
+    )
+
+    expect(callMock).toHaveBeenCalledWith('projectHostSetup.list')
+    expect(logSpy.mock.calls[0]?.[0]).toContain('setup-remote')
+    expect(logSpy.mock.calls[0]?.[0]).not.toContain('setup-local')
+  })
+
+  it('sets up an existing project folder with a path resolved against the local cli cwd', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_project_setup', {
+        result: {
+          project: {
+            id: 'github:stablyai/orca',
+            displayName: 'Orca',
+            badgeColor: '#7c3aed',
+            sourceRepoIds: ['repo-1'],
+            createdAt: 1,
+            updatedAt: 1
+          },
+          setup: {
+            id: 'setup-local',
+            projectId: 'github:stablyai/orca',
+            hostId: 'local',
+            repoId: 'repo-1',
+            path: path.resolve('/tmp/orca'),
+            displayName: 'Orca',
+            setupState: 'ready',
+            setupMethod: 'imported-existing-folder',
+            createdAt: 1,
+            updatedAt: 1
+          },
+          repo: {
+            id: 'repo-1',
+            path: path.resolve('/tmp/orca'),
+            displayName: 'Orca',
+            badgeColor: '#7c3aed',
+            addedAt: 1
+          }
+        }
+      })
+    )
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(
+      [
+        'project',
+        'setup-existing-folder',
+        '--project',
+        'github:stablyai/orca',
+        '--host',
+        'local',
+        '--path',
+        '..',
+        '--kind',
+        'git',
+        '--display-name',
+        'Orca',
+        '--json'
+      ],
+      '/tmp/orca/worktrees/feature'
+    )
+
+    expect(callMock).toHaveBeenCalledWith('projectHostSetup.setupExistingFolder', {
+      projectId: 'github:stablyai/orca',
+      hostId: 'local',
+      path: path.resolve('/tmp/orca/worktrees'),
+      kind: 'git',
+      displayName: 'Orca'
+    })
+  })
+
+  it('rejects remote project setup relative paths instead of resolving against client cwd', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+
+    await main(
+      [
+        'project',
+        'setup-existing-folder',
+        '--project',
+        'github:stablyai/orca',
+        '--host',
+        'runtime:gpu',
+        '--path',
+        './orca',
+        '--pairing-code',
+        'remote-runtime',
+        '--json'
+      ],
+      '/tmp/repo'
+    )
+
+    expect(callMock).not.toHaveBeenCalled()
+    expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
+      'Remote project setup requires --path to be an absolute path on the remote server.'
+    )
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
   })
 
   it('rejects remote repo.add relative paths instead of resolving against client cwd', async () => {
@@ -2118,7 +2291,9 @@ describe('orca cli worktree awareness', () => {
     await main(['tab', 'current', '--pairing-code', 'remote-runtime', '--json'], '/tmp/client/src')
 
     expect(callMock).toHaveBeenCalledTimes(1)
-    expect(callMock).toHaveBeenCalledWith('browser.tabCurrent', { worktree: undefined })
+    expect(callMock).toHaveBeenCalledWith('browser.tabCurrent', {
+      worktree: undefined
+    })
   })
 
   it('passes emulator gesture points through to the runtime', async () => {
@@ -2254,7 +2429,9 @@ describe('orca cli worktree awareness', () => {
       '/tmp/repo/feature/src'
     )
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', { limit: 10_000 })
+    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', {
+      limit: 10_000
+    })
     expect(callMock).toHaveBeenNthCalledWith(2, 'automation.create', {
       name: 'Daily review',
       prompt: 'Review open changes',
@@ -2442,8 +2619,12 @@ describe('orca cli worktree awareness', () => {
     queueFixtures(
       callMock,
       worktreeListFixture([buildWorktree('/tmp/repo/feature', 'feature/foo', 'abc', 'repo-1')]),
-      okFixture('req_create', { automation: { id: 'auto-1', name: 'Daily review' } }),
-      okFixture('req_edit', { automation: { id: 'auto-1', name: 'Daily review' } })
+      okFixture('req_create', {
+        automation: { id: 'auto-1', name: 'Daily review' }
+      }),
+      okFixture('req_edit', {
+        automation: { id: 'auto-1', name: 'Daily review' }
+      })
     )
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -2468,7 +2649,9 @@ describe('orca cli worktree awareness', () => {
     )
     await main(['automations', 'edit', 'auto-1', '--fresh-session', '--json'], '/tmp/repo')
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', { limit: 10_000 })
+    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', {
+      limit: 10_000
+    })
     expect(callMock).toHaveBeenNthCalledWith(
       2,
       'automation.create',
@@ -2532,8 +2715,16 @@ describe('orca cli worktree awareness', () => {
   })
 
   it.each([
-    { flag: 'enabled', value: 'false', message: '--enabled does not take a value' },
-    { flag: 'disabled', value: 'false', message: '--disabled does not take a value' }
+    {
+      flag: 'enabled',
+      value: 'false',
+      message: '--enabled does not take a value'
+    },
+    {
+      flag: 'disabled',
+      value: 'false',
+      message: '--disabled does not take a value'
+    }
   ])('rejects automation create --$flag with a string value', async ({ flag, value, message }) => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -2571,7 +2762,9 @@ describe('orca cli worktree awareness', () => {
     queueFixtures(
       callMock,
       worktreeListFixture([buildWorktree('/tmp/repo/feature', 'feature/foo', 'abc', 'repo-1')]),
-      okFixture('req_automation_create', { automation: { id: 'auto-1', name: 'Daily review' } })
+      okFixture('req_automation_create', {
+        automation: { id: 'auto-1', name: 'Daily review' }
+      })
     )
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -2594,7 +2787,9 @@ describe('orca cli worktree awareness', () => {
       '/tmp/repo/feature/src'
     )
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', { limit: 10_000 })
+    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', {
+      limit: 10_000
+    })
     expect(callMock).toHaveBeenNthCalledWith(2, 'automation.create', {
       name: 'Daily review',
       prompt: 'Review open changes',
@@ -2615,7 +2810,9 @@ describe('orca cli worktree awareness', () => {
     queueFixtures(
       callMock,
       worktreeListFixture([buildWorktree('/tmp/repo/feature', 'feature/foo', 'abc', 'repo-1')]),
-      okFixture('req_edit', { automation: { id: 'auto-1', name: 'Daily review' } })
+      okFixture('req_edit', {
+        automation: { id: 'auto-1', name: 'Daily review' }
+      })
     )
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -2624,7 +2821,9 @@ describe('orca cli worktree awareness', () => {
       '/tmp/repo/feature/src'
     )
 
-    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', { limit: 10_000 })
+    expect(callMock).toHaveBeenNthCalledWith(1, 'worktree.list', {
+      limit: 10_000
+    })
     expect(callMock).toHaveBeenNthCalledWith(2, 'automation.update', {
       id: 'auto-1',
       updates: {
@@ -2692,9 +2891,15 @@ describe('orca cli worktree awareness', () => {
         missedRunGraceMinutes: undefined
       }
     })
-    expect(callMock).toHaveBeenNthCalledWith(2, 'automation.delete', { id: 'auto-1' })
-    expect(callMock).toHaveBeenNthCalledWith(3, 'automation.runNow', { id: 'auto-1' })
-    expect(callMock).toHaveBeenNthCalledWith(4, 'automation.show', { id: 'auto-1' })
+    expect(callMock).toHaveBeenNthCalledWith(2, 'automation.delete', {
+      id: 'auto-1'
+    })
+    expect(callMock).toHaveBeenNthCalledWith(3, 'automation.runNow', {
+      id: 'auto-1'
+    })
+    expect(callMock).toHaveBeenNthCalledWith(4, 'automation.show', {
+      id: 'auto-1'
+    })
   })
 
   it('rejects ambiguous positional and flag automation ids before dispatch', async () => {
