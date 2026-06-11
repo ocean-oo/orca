@@ -3023,6 +3023,7 @@
           "5e97f0c4b9": "프로젝트가 생성되었습니다.",
           "2c12db1511": "프로젝트가 이미 추가되었습니다.",
           "875dda0995": "서버 상위 경로를 입력하세요.",
+          "ssh_parent_manual": "Enter an SSH parent path.",
           "45b7c26034": "프로젝트 생성",
           "85085d74d2": "만드는 중…"
         },
@@ -3350,6 +3351,10 @@
         "SidebarWorkspaceOptionsMenu": {
           "hosts": "Hosts",
           "allHostsDetail": "Show every host",
+          "configuredSshHost": "Configured SSH",
+          "projectSshHost": "Project SSH",
+          "activeRuntimeHost": "Active server",
+          "projectRuntimeHost": "Project server",
           "95c9754653": "에이전트 활동 레이아웃",
           "3d4b9c4997": "호버",
           "ba87080fb7": "속성 표시",
@@ -5036,6 +5041,7 @@
           "availableHosts": "사용 가능한 호스트",
           "availableHostsDescription": "이 프로젝트가 설정된 호스트입니다.",
           "availableHostsHelp": "프로젝트 경로와 워크트리 설정은 호스트별로 다릅니다. 워크스페이스는 준비된 모든 설정에서 만들 수 있습니다.",
+          "viewingHost": "Viewing host",
           "currentSetup": "현재",
           "hostSetupStateReady": "준비됨",
           "hostSetupStateNotSetUp": "설정되지 않음",

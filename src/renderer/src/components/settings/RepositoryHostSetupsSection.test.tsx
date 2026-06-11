@@ -85,6 +85,46 @@ function typeIntoInput(input: HTMLInputElement, value: string): void {
 }
 
 describe('RepositoryHostSetupsSection', () => {
+  it('shows a viewing-host selector when the project has multiple settings-backed hosts', () => {
+    const localRepo = makeRepo({
+      id: 'local-repo',
+      displayName: 'Orca',
+      path: '/Users/alice/orca'
+    })
+    const remoteRepo = makeRepo({
+      id: 'remote-repo',
+      displayName: 'Orca',
+      path: '/home/alice/orca',
+      connectionId: 'openclaw 2'
+    })
+    useAppStore.setState({
+      repos: [localRepo, remoteRepo],
+      projects: [makeProject({ id: 'github:stablyai/orca' })],
+      projectHostSetups: [
+        makeSetup({
+          id: 'local-repo',
+          projectId: 'github:stablyai/orca',
+          repoId: 'local-repo',
+          hostId: 'local',
+          path: '/Users/alice/orca'
+        }),
+        makeSetup({
+          id: 'remote-repo',
+          projectId: 'github:stablyai/orca',
+          repoId: 'remote-repo',
+          hostId: toSshExecutionHostId('openclaw 2'),
+          path: '/home/alice/orca'
+        })
+      ],
+      sshTargetLabels: new Map([['openclaw 2', 'openclaw 2']])
+    })
+
+    renderSection(localRepo)
+
+    expect(container.textContent).toContain('Viewing host')
+    expect(container.textContent).toContain('Local Mac')
+  })
+
   it('opens the selected host setup settings pane through the setup repo id', () => {
     const openSettingsPage = vi.fn()
     const openSettingsTarget = vi.fn()

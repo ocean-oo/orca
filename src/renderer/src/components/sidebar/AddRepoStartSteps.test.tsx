@@ -127,7 +127,6 @@ function getHostAwareActionModel(): {
   const { secondaryActions } = getAddRepoLocalStartActions({
     isSshLikely: true,
     showRemoteAction: false,
-    canCreateProject: false,
     onBrowse: vi.fn(),
     onOpenCloneStep: vi.fn(),
     onOpenRemoteStep: vi.fn(),
@@ -184,7 +183,7 @@ describe('AddRepoLocalStartStep', () => {
     const model = getHostAwareActionModel()
 
     expect(model.secondary).toEqual(['Clone from URL', 'Create new project'])
-    expect(model.createDisabled).toBe(true)
+    expect(model.createDisabled).toBe(false)
   })
 
   it('focuses Browse folder when the default Add Project step opens', async () => {

@@ -1,0 +1,137 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ReactModule from 'react'
+import type { Repo } from '../../../../shared/types'
+
+const mocks = vi.hoisted(() => ({
+  stateValues: [] as unknown[],
+  stateSetters: [] as ReturnType<typeof vi.fn>[],
+  stateIndex: 0,
+  refValues: [] as unknown[],
+  refIndex: 0,
+  storeState: {
+    settings: { activeRuntimeEnvironmentId: null as string | null },
+    repos: [] as Repo[]
+  },
+  cloneRemote: vi.fn(),
+  cloneLocal: vi.fn(),
+  pickDirectory: vi.fn(),
+  onCloneProgress: vi.fn(() => vi.fn()),
+  fetchWorktrees: vi.fn(),
+  onGitRepoReady: vi.fn()
+}))
+
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof ReactModule>()
+  return {
+    ...actual,
+    useCallback: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+    useEffect: (effect: () => void | (() => void)) => {
+      effect()
+    },
+    useRef: <T>(value: T) => {
+      const index = mocks.refIndex++
+      return {
+        current: index in mocks.refValues ? (mocks.refValues[index] as T) : value
+      }
+    },
+    useState: <T>(initial: T | (() => T)) => {
+      const index = mocks.stateIndex++
+      const value =
+        index in mocks.stateValues
+          ? mocks.stateValues[index]
+          : typeof initial === 'function'
+            ? (initial as () => T)()
+            : initial
+      const setter = vi.fn()
+      mocks.stateSetters[index] = setter
+      return [value as T, setter]
+    }
+  }
+})
+
+vi.mock('@/store', () => {
+  const useAppStore = Object.assign(
+    (selector: (state: typeof mocks.storeState) => unknown) => selector(mocks.storeState),
+    {
+      getState: () => mocks.storeState,
+      setState: (next: Partial<typeof mocks.storeState>) => {
+        Object.assign(mocks.storeState, next)
+      }
+    }
+  )
+  return { useAppStore }
+})
+
+vi.mock('@/runtime/runtime-rpc-client', () => ({
+  getActiveRuntimeTarget: () => ({ kind: 'local' }),
+  callRuntimeRpc: vi.fn()
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn()
+  }
+}))
+
+function makeRepo(overrides: Partial<Repo> = {}): Repo {
+  return {
+    id: 'repo-cloned',
+    path: '/srv/orca',
+    displayName: 'orca',
+    badgeColor: '#999999',
+    addedAt: 1,
+    kind: 'git',
+    ...overrides
+  }
+}
+
+describe('useAddRepoCloneFlow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.stateIndex = 0
+    mocks.stateSetters = []
+    mocks.refIndex = 0
+    mocks.refValues = []
+    mocks.stateValues = ['https://github.com/stablyai/orca.git', '/srv', false, null, null]
+    mocks.storeState.repos = []
+    vi.stubGlobal('window', {
+      api: {
+        repos: {
+          cloneRemote: mocks.cloneRemote,
+          clone: mocks.cloneLocal,
+          pickDirectory: mocks.pickDirectory,
+          onCloneProgress: mocks.onCloneProgress
+        }
+      }
+    })
+  })
+
+  it('clones through the selected SSH target', async () => {
+    const repo = makeRepo({ connectionId: 'ssh-1' })
+    mocks.cloneRemote.mockResolvedValue(repo)
+    mocks.fetchWorktrees.mockResolvedValue(true)
+    const { useAddRepoCloneFlow } = await import('./useAddRepoCloneFlow')
+
+    const result = useAddRepoCloneFlow({
+      step: 'clone',
+      activeRuntimeEnvironmentId: null,
+      sshTargetId: 'ssh-1',
+      workspaceDir: '/local/workspace',
+      fetchWorktrees: mocks.fetchWorktrees,
+      onGitRepoReady: mocks.onGitRepoReady
+    })
+    await result.handleClone()
+
+    expect(mocks.cloneRemote).toHaveBeenCalledWith({
+      connectionId: 'ssh-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/srv'
+    })
+    expect(mocks.cloneLocal).not.toHaveBeenCalled()
+    expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
+      requireAuthoritative: true
+    })
+    expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id, 'clone_url')
+  })
+})

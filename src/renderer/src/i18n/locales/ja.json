@@ -3023,6 +3023,7 @@
           "5e97f0c4b9": "プロジェクトが作成されました",
           "2c12db1511": "プロジェクトはすでに追加されています",
           "875dda0995": "サーバーの親パスを入力します。",
+          "ssh_parent_manual": "Enter an SSH parent path.",
           "45b7c26034": "プロジェクトの作成",
           "85085d74d2": "作成…"
         },
@@ -3350,6 +3351,10 @@
         "SidebarWorkspaceOptionsMenu": {
           "hosts": "Hosts",
           "allHostsDetail": "Show every host",
+          "configuredSshHost": "Configured SSH",
+          "projectSshHost": "Project SSH",
+          "activeRuntimeHost": "Active server",
+          "projectRuntimeHost": "Project server",
           "95c9754653": "エージェントアクティビティのレイアウト",
           "3d4b9c4997": "ホバー",
           "ba87080fb7": "プロパティを表示する",
@@ -5036,6 +5041,7 @@
           "availableHosts": "利用可能なホスト",
           "availableHostsDescription": "このプロジェクトがセットアップされているホスト。",
           "availableHostsHelp": "プロジェクトのパスとワークツリー設定はホストごとに異なります。ワークスペースは準備済みの任意のセットアップで作成できます。",
+          "viewingHost": "Viewing host",
           "currentSetup": "現在",
           "hostSetupStateReady": "準備完了",
           "hostSetupStateNotSetUp": "未セットアップ",

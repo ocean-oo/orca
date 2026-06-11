@@ -470,6 +470,8 @@ const api = {
 
     cloneRemote: (args) => ipcRenderer.invoke('repos:cloneRemote', args),
 
+    createRemote: (args) => ipcRenderer.invoke('repos:createRemote', args),
+
     cloneAbort: () => ipcRenderer.invoke('repos:cloneAbort'),
 
     onCloneProgress: (

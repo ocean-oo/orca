@@ -27,8 +27,30 @@ function getHostMetadata(host: SidebarHostOption): string {
   if (host.kind === 'local') {
     return host.detail
   }
-  const kindLabel = host.kind === 'ssh' ? 'SSH' : 'Runtime'
-  return `${kindLabel} · ${healthLabel}`
+  if (host.kind === 'ssh') {
+    const presenceLabel =
+      host.presence === 'configured'
+        ? translate(
+            'auto.components.sidebar.SidebarWorkspaceOptionsMenu.configuredSshHost',
+            'Configured SSH'
+          )
+        : translate(
+            'auto.components.sidebar.SidebarWorkspaceOptionsMenu.projectSshHost',
+            'Project SSH'
+          )
+    return `${presenceLabel} · ${healthLabel}`
+  }
+  const presenceLabel =
+    host.presence === 'active'
+      ? translate(
+          'auto.components.sidebar.SidebarWorkspaceOptionsMenu.activeRuntimeHost',
+          'Active server'
+        )
+      : translate(
+          'auto.components.sidebar.SidebarWorkspaceOptionsMenu.projectRuntimeHost',
+          'Project server'
+        )
+  return `${presenceLabel} · ${healthLabel}`
 }
 
 export function SidebarHostScopeMenuSection({

@@ -17,8 +17,9 @@ import {
   CreateProjectParentBrowser
 } from './CreateProjectLocationField'
 import { translate } from '@/i18n/i18n'
+import { AddRepoCreateKindCard, type AddRepoCreateKind } from './AddRepoCreateKindCard'
 
-type RepoKind = 'git' | 'folder'
+type RepoKind = AddRepoCreateKind
 
 export function useCreateRepo(
   fetchWorktrees: (
@@ -26,7 +27,8 @@ export function useCreateRepo(
     options?: { requireAuthoritative?: boolean }
   ) => Promise<boolean>,
   closeModal: () => void,
-  onGitRepoReady?: (repoId: string) => void | Promise<void>
+  onGitRepoReady?: (repoId: string) => void | Promise<void>,
+  options: { hostId?: string | null; sshTargetId?: string | null } = {}
 ) {
   const [createName, setCreateName] = useState('')
   const [createParent, setCreateParent] = useState('')
@@ -34,6 +36,9 @@ export function useCreateRepo(
   const [createError, setCreateError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const mountedRef = useMountedRef()
+  const hostToken = options.hostId ?? options.sshTargetId ?? ''
+  const hostTokenRef = useRef(hostToken)
+  hostTokenRef.current = hostToken
 
   // Why: monotonic ID so stale create callbacks can detect they were superseded
   // when the user clicks Back or closes the dialog mid-create. Mirrors the
@@ -50,10 +55,26 @@ export function useCreateRepo(
   }, [])
 
   const handlePickParent = useCallback(async () => {
+    if (options.sshTargetId) {
+      // Why: the native picker can only browse the client machine. SSH create
+      // uses a host path typed by the user until remote folder picking exists.
+      toast.error(
+        translate(
+          'auto.components.sidebar.AddRepoCreateStep.ssh_parent_manual',
+          'Enter an SSH parent path.'
+        )
+      )
+      return
+    }
     if (useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim()) {
       // Why: the native folder picker returns a client-local path. Runtime
       // project creation needs an explicit server parent path.
-      toast.error(translate("auto.components.sidebar.AddRepoCreateStep.875dda0995", "Enter a server parent path."))
+      toast.error(
+        translate(
+          'auto.components.sidebar.AddRepoCreateStep.875dda0995',
+          'Enter a server parent path.'
+        )
+      )
       return
     }
     const gen = createGenRef.current
@@ -62,7 +83,7 @@ export function useCreateRepo(
       setCreateParent(dir)
       setCreateError(null)
     }
-  }, [mountedRef])
+  }, [mountedRef, options.sshTargetId])
 
   const handleCreate = useCallback(async () => {
     const name = createName.trim()
@@ -70,13 +91,20 @@ export function useCreateRepo(
     if (!name || !parentPath) {
       return
     }
+    const requestHostToken = hostTokenRef.current
     const gen = ++createGenRef.current
     setIsCreating(true)
     setCreateError(null)
     try {
       const target = getActiveRuntimeTarget(useAppStore.getState().settings)
-      const result =
-        target.kind === 'environment'
+      const result = options.sshTargetId
+        ? await window.api.repos.createRemote({
+            connectionId: options.sshTargetId,
+            parentPath,
+            name,
+            kind: createKind
+          })
+        : target.kind === 'environment'
           ? await callRuntimeRpc<{ repo: Repo } | { error: string }>(
               target,
               'repo.create',
@@ -94,7 +122,11 @@ export function useCreateRepo(
             })
       // Why: if the user closed the dialog or clicked Back mid-create,
       // createGenRef was bumped by resetCreateState. Ignore stale results.
-      if (gen !== createGenRef.current || !mountedRef.current) {
+      if (
+        gen !== createGenRef.current ||
+        requestHostToken !== hostTokenRef.current ||
+        !mountedRef.current
+      ) {
         return
       }
       if ('error' in result) {
@@ -119,20 +151,33 @@ export function useCreateRepo(
         useAppStore.setState({ repos: updated })
       }
       if (wasDeduped) {
-        toast.info(translate("auto.components.sidebar.AddRepoCreateStep.2c12db1511", "Project already added"), {
-          description: repo.displayName
-        })
+        toast.info(
+          translate(
+            'auto.components.sidebar.AddRepoCreateStep.2c12db1511',
+            'Project already added'
+          ),
+          {
+            description: repo.displayName
+          }
+        )
       } else {
-        toast.success(translate("auto.components.sidebar.AddRepoCreateStep.5e97f0c4b9", "Project created"), {
-          description: repo.displayName
-        })
+        toast.success(
+          translate('auto.components.sidebar.AddRepoCreateStep.5e97f0c4b9', 'Project created'),
+          {
+            description: repo.displayName
+          }
+        )
       }
       if (isGitRepoKind(repo)) {
         // Why: Git repos use the shared default-checkout completion path.
         // Why: if refresh is temporarily non-authoritative, the shared opener
         // still reveals the project so the user is not left in a completed add flow.
         await fetchWorktrees(repo.id, { requireAuthoritative: true })
-        if (gen !== createGenRef.current || !mountedRef.current) {
+        if (
+          gen !== createGenRef.current ||
+          requestHostToken !== hostTokenRef.current ||
+          !mountedRef.current
+        ) {
           return
         }
         await onGitRepoReady?.(repo.id)
@@ -140,7 +185,11 @@ export function useCreateRepo(
         // Why: folder repos skip the Git default-checkout handoff, so activate the synthetic
         // root workspace before closing. Matches addNonGitFolder's behavior.
         await fetchWorktrees(repo.id)
-        if (gen !== createGenRef.current || !mountedRef.current) {
+        if (
+          gen !== createGenRef.current ||
+          requestHostToken !== hostTokenRef.current ||
+          !mountedRef.current
+        ) {
           return
         }
         const folderWorktree = useAppStore.getState().worktreesByRepo[repo.id]?.[0]
@@ -151,18 +200,35 @@ export function useCreateRepo(
         closeModal()
       }
     } catch (err) {
-      if (gen !== createGenRef.current || !mountedRef.current) {
+      if (
+        gen !== createGenRef.current ||
+        requestHostToken !== hostTokenRef.current ||
+        !mountedRef.current
+      ) {
         return
       }
       setCreateError(err instanceof Error ? err.message : String(err))
     } finally {
       // Why: only clear the loading state if this invocation is still current;
       // a superseded create must not flip the flag back off for a new flow.
-      if (gen === createGenRef.current && mountedRef.current) {
+      if (
+        gen === createGenRef.current &&
+        requestHostToken === hostTokenRef.current &&
+        mountedRef.current
+      ) {
         setIsCreating(false)
       }
     }
-  }, [createName, createParent, createKind, fetchWorktrees, mountedRef, closeModal, onGitRepoReady])
+  }, [
+    createName,
+    createParent,
+    createKind,
+    fetchWorktrees,
+    mountedRef,
+    closeModal,
+    onGitRepoReady,
+    options.sshTargetId
+  ])
 
   return {
     createName,
@@ -178,80 +244,6 @@ export function useCreateRepo(
     handlePickParent,
     handleCreate
   }
-}
-
-// ── UI helpers ───────────────────────────────────────────────────────
-
-type KindCardProps = {
-  kind: RepoKind
-  selected: boolean
-  disabled: boolean
-  onSelect: () => void
-  onArrowNav: () => void
-  icon: React.ReactNode
-  title: string
-  caption: string
-}
-
-function KindCard({
-  kind,
-  selected,
-  disabled,
-  onSelect,
-  onArrowNav,
-  icon,
-  title,
-  caption
-}: KindCardProps): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      tabIndex={selected ? 0 : -1}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        // Why: WAI-ARIA radiogroup spec expects all four arrow keys to move
-        // selection. Left/Right handle the horizontal grid layout; Up/Down
-        // are added so vertical nav (e.g. screen-reader users, future layout
-        // changes) behaves the same.
-        if (
-          e.key === 'ArrowLeft' ||
-          e.key === 'ArrowRight' ||
-          e.key === 'ArrowUp' ||
-          e.key === 'ArrowDown'
-        ) {
-          e.preventDefault()
-          onArrowNav()
-        } else if (e.key === ' ' || e.key === 'Enter') {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
-      disabled={disabled}
-      data-kind={kind}
-      className={`group relative flex items-center gap-3 rounded-md border px-3.5 py-3.5 text-left text-xs transition-colors cursor-pointer outline-none ${
-        selected ? 'border-foreground/30 bg-accent' : 'border-border hover:bg-accent/50'
-      } focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60`}
-    >
-      {/* Icon chip gives the glyph enough weight to sit balanced next to the title block. */}
-      <span
-        className={`shrink-0 inline-flex items-center justify-center size-8 rounded-md border transition-colors ${
-          selected
-            ? 'border-foreground/20 bg-background/60 text-foreground'
-            : 'border-border/70 bg-background/30 text-muted-foreground group-hover:text-foreground'
-        }`}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[13px] font-medium leading-tight">{title}</span>
-        <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5">
-          {caption}
-        </span>
-      </span>
-    </button>
-  )
 }
 
 type CreateStepProps = {
@@ -336,9 +328,15 @@ export function CreateStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{translate("auto.components.sidebar.AddRepoCreateStep.db9be12229", "Start a new project")}</DialogTitle>
+        <DialogTitle>
+          {translate('auto.components.sidebar.AddRepoCreateStep.db9be12229', 'Start a new project')}
+        </DialogTitle>
         <DialogDescription>
-          {translate("auto.components.sidebar.AddRepoCreateStep.d877ece0d6", "Create a Git repository or a plain folder and open it in Orca.")}</DialogDescription>
+          {translate(
+            'auto.components.sidebar.AddRepoCreateStep.d877ece0d6',
+            'Create a Git repository or a plain folder and open it in Orca.'
+          )}
+        </DialogDescription>
       </DialogHeader>
 
       {/* Why: DialogContent is a CSS grid; grid items default to min-width:auto
@@ -350,27 +348,33 @@ export function CreateStep({
         <div
           ref={setRadioGroupNode}
           role="radiogroup"
-          aria-label={translate("auto.components.sidebar.AddRepoCreateStep.180e9b5e48", "Project kind")}
+          aria-label={translate(
+            'auto.components.sidebar.AddRepoCreateStep.180e9b5e48',
+            'Project kind'
+          )}
           className="grid grid-cols-2 gap-2"
         >
-          <KindCard
+          <AddRepoCreateKindCard
             kind="git"
             selected={createKind === 'git'}
             disabled={isCreating}
             onSelect={() => onKindChange('git')}
             onArrowNav={cycleKind}
             icon={<GitBranch className="size-4" />}
-            title={translate("auto.components.sidebar.AddRepoCreateStep.11fd2a7db8", "Git repository")}
+            title={translate(
+              'auto.components.sidebar.AddRepoCreateStep.11fd2a7db8',
+              'Git repository'
+            )}
             caption="Initializes an empty Git repo"
           />
-          <KindCard
+          <AddRepoCreateKindCard
             kind="folder"
             selected={createKind === 'folder'}
             disabled={isCreating}
             onSelect={() => onKindChange('folder')}
             onArrowNav={cycleKind}
             icon={<Folder className="size-4" />}
-            title={translate("auto.components.sidebar.AddRepoCreateStep.038729c107", "Folder")}
+            title={translate('auto.components.sidebar.AddRepoCreateStep.038729c107', 'Folder')}
             caption="Create a new folder"
           />
         </div>
@@ -381,12 +385,16 @@ export function CreateStep({
             htmlFor="create-project-name"
             className="text-[11px] font-medium text-muted-foreground block"
           >
-            {translate("auto.components.sidebar.AddRepoCreateStep.a8149a3a5a", "Name")}</label>
+            {translate('auto.components.sidebar.AddRepoCreateStep.a8149a3a5a', 'Name')}
+          </label>
           <Input
             id="create-project-name"
             value={createName}
             onChange={(e) => onNameChange(e.target.value)}
-            placeholder={translate("auto.components.sidebar.AddRepoCreateStep.0ae45b8238", "my-project")}
+            placeholder={translate(
+              'auto.components.sidebar.AddRepoCreateStep.0ae45b8238',
+              'my-project'
+            )}
             className="h-11 text-sm font-mono"
             disabled={isCreating}
             autoFocus
@@ -413,7 +421,9 @@ export function CreateStep({
         )}
 
         <Button onClick={onCreate} disabled={!canSubmit} size="lg" className="w-full">
-          {isCreating ? translate("auto.components.sidebar.AddRepoCreateStep.85085d74d2", "Creating…") : translate("auto.components.sidebar.AddRepoCreateStep.45b7c26034", "Create project")}
+          {isCreating
+            ? translate('auto.components.sidebar.AddRepoCreateStep.85085d74d2', 'Creating…')
+            : translate('auto.components.sidebar.AddRepoCreateStep.45b7c26034', 'Create project')}
         </Button>
       </div>
     </>

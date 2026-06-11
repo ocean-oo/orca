@@ -1,5 +1,5 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { CloneStep } from './AddRepoSteps'
+import { CloneStep } from './AddRepoCloneStep'
 import { RemoteStep } from './AddRepoRemoteStep'
 import { CreateStep } from './AddRepoCreateStep'
 import { AddRepoLocalStartStep } from './AddRepoStartSteps'
@@ -43,6 +43,7 @@ type AddRepoDialogStepContentProps = {
   hostSelector?: ReactNode
   showRemoteAction?: boolean
   canCreateProject?: boolean
+  manualCreateParentEntry?: boolean
   onBrowse: () => void
   onOpenCloneStep: () => void
   onOpenCreateStep: () => void
@@ -104,6 +105,7 @@ export function AddRepoDialogStepContent({
   hostSelector,
   showRemoteAction = true,
   canCreateProject = true,
+  manualCreateParentEntry = isRuntimeEnvironmentActive,
   onBrowse,
   onOpenCloneStep,
   onOpenCreateStep,
@@ -229,7 +231,7 @@ export function AddRepoDialogStepContent({
         createKind={createKind}
         createError={createError}
         isCreating={isCreating}
-        manualParentEntry={isRuntimeEnvironmentActive}
+        manualParentEntry={manualCreateParentEntry}
         runtimeEnvironmentId={activeRuntimeEnvironmentId}
         onNameChange={onCreateNameChange}
         onParentChange={onCreateParentChange}

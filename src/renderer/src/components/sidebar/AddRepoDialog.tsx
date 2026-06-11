@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { track } from '@/lib/telemetry'
 import { useRemoteRepo } from './AddRepoSteps'
 import { useCreateRepo } from './AddRepoCreateStep'
 import { buildNestedRepoScanTelemetry } from '../../../../shared/nested-repo-telemetry'
-import type { AddRepoExistingWorkspaceSource } from '../../../../shared/telemetry-events'
 import { AddRepoStepIndicator } from './AddRepoStepIndicator'
 import { AddRepoDialogStepContent } from './AddRepoDialogStepContent'
 import type { AddRepoDialogStep } from './add-repo-dialog-types'
@@ -14,13 +13,9 @@ import { useAddRepoCloneFlow } from './useAddRepoCloneFlow'
 import { useAddRepoLocalFolderFlow } from './useAddRepoLocalFolderFlow'
 import { useAddRepoServerPathFlow } from './useAddRepoServerPathFlow'
 import { useAddRepoNestedImportFlow } from './useAddRepoNestedImportFlow'
-import {
-  buildAddRepoExistingWorkspacesTelemetry,
-  shouldTrackAddRepoExistingWorkspacesDetected
-} from './add-repo-existing-workspaces-telemetry'
-import { finishProjectAddWithDefaultCheckout } from './project-added-default-checkout'
 import { AddRepoHostSelector } from './AddRepoHostSelector'
 import { useAddRepoHostSelection } from './use-add-repo-host-selection'
+import { useCompleteGitRepoAdd } from './use-complete-git-repo-add'
 
 const AddRepoDialog = React.memo(function AddRepoDialog() {
   const activeModal = useAppStore((s) => s.activeModal)
@@ -36,11 +31,14 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const setHideDefaultBranchWorkspace = useAppStore((s) => s.setHideDefaultBranchWorkspace)
   const settings = useAppStore((s) => s.settings)
+  const completeGitRepoAdd = useCompleteGitRepoAdd({
+    closeModal,
+    setHideDefaultBranchWorkspace
+  })
 
   const [step, setStep] = useState<AddRepoDialogStep>('add')
   const [isAdding, setIsAdding] = useState(false)
   const [addProjectBusyLabel, setAddProjectBusyLabel] = useState<string | null>(null)
-  const detectedTelemetryTrackedRef = useRef<Set<string>>(new Set())
   const {
     nestedScan,
     nestedSelectedPaths,
@@ -64,37 +62,6 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     cancelNestedRepoScan,
     setStep
   })
-
-  const completeGitRepoAdd = useCallback(
-    async (repoId: string, source: AddRepoExistingWorkspaceSource): Promise<void> => {
-      const worktrees = useAppStore.getState().worktreesByRepo[repoId] ?? []
-      const sortedWorktrees = [...worktrees].sort((a, b) => {
-        if (a.lastActivityAt !== b.lastActivityAt) {
-          return b.lastActivityAt - a.lastActivityAt
-        }
-        return a.displayName.localeCompare(b.displayName)
-      })
-      const existingWorkspaceTelemetry = buildAddRepoExistingWorkspacesTelemetry(
-        source,
-        sortedWorktrees
-      )
-      if (
-        existingWorkspaceTelemetry &&
-        shouldTrackAddRepoExistingWorkspacesDetected(existingWorkspaceTelemetry) &&
-        !detectedTelemetryTrackedRef.current.has(repoId)
-      ) {
-        detectedTelemetryTrackedRef.current.add(repoId)
-        track('add_repo_existing_workspaces_detected', existingWorkspaceTelemetry)
-      }
-      await finishProjectAddWithDefaultCheckout({
-        repoId,
-        source,
-        closeModal,
-        setHideDefaultBranchWorkspace
-      })
-    },
-    [closeModal, setHideDefaultBranchWorkspace]
-  )
 
   const {
     sshTargets,
@@ -165,8 +132,11 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     resetCreateState,
     handlePickParent,
     handleCreate
-  } = useCreateRepo(fetchWorktrees, closeModal, (repoId) =>
-    completeGitRepoAdd(repoId, 'create_project')
+  } = useCreateRepo(
+    fetchWorktrees,
+    closeModal,
+    (repoId) => completeGitRepoAdd(repoId, 'create_project'),
+    { hostId: selectedHostId, sshTargetId: selectedSshTargetId }
   )
 
   const {
@@ -345,7 +315,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           isCreating={isCreating}
           hostSelector={hostSelector}
           showRemoteAction={false}
-          canCreateProject={selectedParsedHost?.kind !== 'ssh'}
+          manualCreateParentEntry={isRuntimeEnvironmentActive || selectedParsedHost?.kind === 'ssh'}
           onBrowse={
             selectedParsedHost?.kind === 'ssh'
               ? () => void handleOpenRemoteStep(selectedSshTargetId)
@@ -356,9 +326,6 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
             setStep('clone')
           }}
           onOpenCreateStep={() => {
-            if (selectedParsedHost?.kind === 'ssh') {
-              return
-            }
             setCreateError(null)
             setStep('create')
           }}

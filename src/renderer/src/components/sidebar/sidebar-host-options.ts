@@ -19,6 +19,7 @@ export type SidebarHostOption = {
   detail: string
   kind: 'local' | 'ssh' | 'runtime'
   health: ExecutionHostHealth
+  presence: 'local' | 'configured' | 'project' | 'active'
   // Why: surfaced to the sidebar host-header menu so it can warn on version skew.
   compatibility?: RuntimeCompatVerdict
   // Why: lets host headers spell out auth-needed SSH states, not just an icon.
@@ -47,6 +48,19 @@ export function buildSidebarHostOptions(args: {
   // options feed (host headers, scope picker, focus menu).
   hostLabelOverrides?: ReadonlyMap<ExecutionHostId, string>
 }): SidebarHostOption[] {
+  const configuredSshTargetIds = new Set(args.sshTargetLabels.keys())
+  const projectSshTargetIds = new Set<string>()
+  for (const repo of args.repos) {
+    if (repo.connectionId?.trim()) {
+      projectSshTargetIds.add(repo.connectionId.trim())
+    }
+    if (repo.executionHostId?.startsWith('ssh:')) {
+      projectSshTargetIds.add(decodeURIComponent(repo.executionHostId.slice('ssh:'.length)))
+    }
+  }
+  const activeRuntimeHostId = args.settings?.activeRuntimeEnvironmentId?.trim()
+    ? (`runtime:${encodeURIComponent(args.settings.activeRuntimeEnvironmentId.trim())}` as const)
+    : null
   return buildExecutionHostRegistry({
     repos: args.repos,
     settings: args.settings,
@@ -54,6 +68,27 @@ export function buildSidebarHostOptions(args: {
     sshConnectionStates: args.sshConnectionStates,
     runtimeStatusByEnvironmentId: args.runtimeStatusByEnvironmentId,
     hostLabelOverrides: args.hostLabelOverrides
+  }).map((host) => {
+    if (host.kind === 'local') {
+      return { ...host, presence: 'local' }
+    }
+    if (host.kind === 'ssh') {
+      const targetId = decodeURIComponent(host.id.slice('ssh:'.length))
+      // Why: configured hosts explain why a disconnected target remains
+      // visible; project-only hosts remain because workspaces still point at it.
+      return {
+        ...host,
+        presence: configuredSshTargetIds.has(targetId)
+          ? 'configured'
+          : projectSshTargetIds.has(targetId)
+            ? 'project'
+            : 'active'
+      }
+    }
+    return {
+      ...host,
+      presence: host.id === activeRuntimeHostId ? 'active' : 'project'
+    }
   })
 }
 

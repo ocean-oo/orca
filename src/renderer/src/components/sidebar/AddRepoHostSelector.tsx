@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import type { SidebarHostOption } from './sidebar-host-options'
 import { getSidebarHostHealthLabel, shouldShowHostScopeControls } from './sidebar-host-options'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
+import { describeRuntimeCompatBlock } from '../../../../shared/protocol-compat'
 import { translate } from '@/i18n/i18n'
 
 type AddRepoHostSelectorProps = {
@@ -31,6 +32,13 @@ function isHostDisabled(host: SidebarHostOption): boolean {
   return host.health === 'blocked'
 }
 
+function getHostStatusDetail(host: SidebarHostOption): string {
+  if (host.compatibility?.kind === 'blocked') {
+    return describeRuntimeCompatBlock(host.compatibility)
+  }
+  return `${getSidebarHostHealthLabel(host.health)}${host.detail ? ` - ${host.detail}` : ''}`
+}
+
 export function AddRepoHostSelector({
   hosts,
   selectedHostId,
@@ -46,6 +54,7 @@ export function AddRepoHostSelector({
   if (!selectedHost) {
     return null
   }
+  const selectedHealthLabel = getSidebarHostHealthLabel(selectedHost.health)
 
   return (
     <div className="space-y-1">
@@ -60,9 +69,24 @@ export function AddRepoHostSelector({
               variant="outline"
               role="combobox"
               aria-expanded={open}
-              className="h-8 min-w-56 justify-between px-3 text-xs font-normal"
+              className="h-10 min-w-56 justify-between px-3 text-xs font-normal"
             >
-              <span className="min-w-0 truncate">{selectedHost.label}</span>
+              <span className="min-w-0 flex flex-col items-start leading-tight">
+                <span className="max-w-40 truncate">{selectedHost.label}</span>
+                {selectedHost.health !== 'local' && (
+                  <span
+                    title={getHostStatusDetail(selectedHost)}
+                    className={cn(
+                      'max-w-40 truncate text-[10px]',
+                      selectedHost.health === 'available'
+                        ? 'text-muted-foreground'
+                        : 'text-destructive'
+                    )}
+                  >
+                    {selectedHealthLabel}
+                  </span>
+                )}
+              </span>
               <ChevronsUpDown className="size-3.5 opacity-50" />
             </Button>
           </PopoverTrigger>
@@ -103,8 +127,7 @@ export function AddRepoHostSelector({
                           </span>
                         </span>
                         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                          {getSidebarHostHealthLabel(host.health)}
-                          {host.detail ? ` - ${host.detail}` : ''}
+                          {getHostStatusDetail(host)}
                         </span>
                       </span>
                     </CommandItem>

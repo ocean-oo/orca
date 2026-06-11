@@ -21,7 +21,8 @@ describe('sidebar host options', () => {
         label: 'Local Mac',
         detail: 'This computer',
         kind: 'local',
-        health: 'local'
+        health: 'local',
+        presence: 'local'
       }
     ])
     expect(shouldShowHostScopeControls(hosts)).toBe(false)
@@ -36,6 +37,8 @@ describe('sidebar host options', () => {
 
     expect(hosts.map((host) => host.id)).toEqual(['local', 'ssh:ssh-saved', 'ssh:ssh-from-repo'])
     expect(hosts.map((host) => host.health)).toEqual(['local', 'disconnected', 'disconnected'])
+    expect(hosts.find((host) => host.id === 'ssh:ssh-saved')?.presence).toBe('configured')
+    expect(hosts.find((host) => host.id === 'ssh:ssh-from-repo')?.presence).toBe('project')
     expect(shouldShowHostScopeControls(hosts)).toBe(true)
   })
 

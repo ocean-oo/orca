@@ -3040,6 +3040,7 @@
           "5e97f0c4b9": "Project created",
           "2c12db1511": "Project already added",
           "875dda0995": "Enter a server parent path.",
+          "ssh_parent_manual": "Enter an SSH parent path.",
           "45b7c26034": "Create project",
           "85085d74d2": "Creating…"
         },
@@ -3371,6 +3372,10 @@
         "SidebarWorkspaceOptionsMenu": {
           "hosts": "Hosts",
           "allHostsDetail": "Show every host",
+          "configuredSshHost": "Configured SSH",
+          "projectSshHost": "Project SSH",
+          "activeRuntimeHost": "Active server",
+          "projectRuntimeHost": "Project server",
           "95c9754653": "Agent activity layout",
           "3d4b9c4997": "Hover",
           "ba87080fb7": "Show properties",
@@ -5056,6 +5061,7 @@
           "availableHosts": "Available Hosts",
           "availableHostsDescription": "Hosts where this project is set up.",
           "availableHostsHelp": "Project paths and worktree settings are host-specific; creating a workspace can target any ready setup.",
+          "viewingHost": "Viewing host",
           "currentSetup": "Current",
           "hostSetupStateReady": "Ready",
           "hostSetupStateNotSetUp": "Not set up",

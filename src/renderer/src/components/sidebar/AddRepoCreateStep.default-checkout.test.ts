@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     worktreesByRepo: {} as Record<string, unknown[]>
   },
   createRepo: vi.fn(),
+  createRemoteRepo: vi.fn(),
   fetchWorktrees: vi.fn(),
   onGitRepoReady: vi.fn(),
   activateAndRevealWorktree: vi.fn(),
@@ -92,10 +93,13 @@ describe('useCreateRepo default-checkout handoff', () => {
     mocks.stateValues = ['created', '/projects', 'git', null, false]
     mocks.storeState.repos = []
     mocks.storeState.worktreesByRepo = {}
+    mocks.createRepo.mockReset()
+    mocks.createRemoteRepo.mockReset()
     vi.stubGlobal('window', {
       api: {
         repos: {
           create: mocks.createRepo,
+          createRemote: mocks.createRemoteRepo,
           pickDirectory: vi.fn()
         }
       }
@@ -167,5 +171,29 @@ describe('useCreateRepo default-checkout handoff', () => {
     expect(mocks.markOnboardingProjectAdded).toHaveBeenCalledWith('addedFolder')
     expect(closeModal).toHaveBeenCalled()
     expect(mocks.onGitRepoReady).not.toHaveBeenCalled()
+  })
+
+  it('creates projects through the SSH host when an SSH target is selected', async () => {
+    const repo = makeRepo({ connectionId: 'ssh-1', path: '/srv/created' })
+    mocks.createRemoteRepo.mockResolvedValue({ repo })
+    mocks.fetchWorktrees.mockResolvedValue(true)
+    const { useCreateRepo } = await import('./AddRepoCreateStep')
+
+    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady, {
+      sshTargetId: 'ssh-1'
+    })
+    await result.handleCreate()
+
+    expect(mocks.createRemoteRepo).toHaveBeenCalledWith({
+      connectionId: 'ssh-1',
+      parentPath: '/projects',
+      name: 'created',
+      kind: 'git'
+    })
+    expect(mocks.createRepo).not.toHaveBeenCalled()
+    expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
+      requireAuthoritative: true
+    })
+    expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
   })
 })

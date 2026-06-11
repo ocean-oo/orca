@@ -54,6 +54,7 @@ const {
     readDir: vi.fn().mockResolvedValue([]),
     readFile: vi.fn().mockRejectedValue(new Error('not found')),
     stat: vi.fn().mockRejectedValue(new Error('not found')),
+    createDirNoClobber: vi.fn().mockResolvedValue(undefined),
     deletePath: vi.fn().mockResolvedValue(undefined)
   },
   mockMultiplexer: {
@@ -836,6 +837,8 @@ describe('repos:addRemote', () => {
     })
     mockFilesystemProvider.stat.mockReset()
     mockFilesystemProvider.stat.mockRejectedValue(new Error('not found'))
+    mockFilesystemProvider.createDirNoClobber.mockReset()
+    mockFilesystemProvider.createDirNoClobber.mockResolvedValue(undefined)
     mockFilesystemProvider.deletePath.mockReset()
     mockFilesystemProvider.deletePath.mockResolvedValue(undefined)
     mockMultiplexer.request.mockReset()
@@ -858,6 +861,10 @@ describe('repos:addRemote', () => {
 
   it('registers the repos:cloneRemote handler', () => {
     expect(handlers.has('repos:cloneRemote')).toBe(true)
+  })
+
+  it('registers the repos:createRemote handler', () => {
+    expect(handlers.has('repos:createRemote')).toBe(true)
   })
 
   it('creates a remote repo with connectionId', async () => {
@@ -1077,6 +1084,125 @@ describe('repos:addRemote', () => {
     ).rejects.toThrow('Clone destination must be an absolute path on the SSH host')
 
     expect(mockGitProvider.clone).not.toHaveBeenCalled()
+  })
+
+  it('creates a new git project on an SSH target', async () => {
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '/home/user',
+      name: 'created',
+      kind: 'git'
+    })
+
+    expect(mockFilesystemProvider.createDirNoClobber).toHaveBeenCalledWith('/home/user/created')
+    expect(mockGitProvider.exec).toHaveBeenCalledWith(['init'], '/home/user/created')
+    expect(mockGitProvider.exec).toHaveBeenCalledWith(
+      ['commit', '--allow-empty', '-m', 'Initial commit'],
+      '/home/user/created'
+    )
+    expect(mockStore.addRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/home/user/created',
+        connectionId: 'conn-1',
+        kind: 'git',
+        displayName: 'created',
+        externalWorktreeVisibility: 'hide'
+      })
+    )
+    expect(result).toHaveProperty('repo.path', '/home/user/created')
+    expect(result).toHaveProperty('repo.connectionId', 'conn-1')
+  })
+
+  it('creates a new folder project on an SSH target without git init', async () => {
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '/home/user',
+      name: 'notes',
+      kind: 'folder'
+    })
+
+    expect(mockFilesystemProvider.createDirNoClobber).toHaveBeenCalledWith('/home/user/notes')
+    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+    expect(mockStore.addRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/home/user/notes',
+        connectionId: 'conn-1',
+        kind: 'folder',
+        displayName: 'notes'
+      })
+    )
+    expect(result).toHaveProperty('repo.kind', 'folder')
+  })
+
+  it('rejects SSH create parent paths that are not absolute host paths', async () => {
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: 'relative/path',
+      name: 'created',
+      kind: 'git'
+    })
+
+    expect(result).toEqual({ error: 'Parent directory must be an absolute path on the SSH host' })
+    expect(mockFilesystemProvider.createDirNoClobber).not.toHaveBeenCalled()
+    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+  })
+
+  it('rejects non-empty existing SSH create targets', async () => {
+    mockFilesystemProvider.stat.mockResolvedValueOnce({ type: 'directory', size: 0, mtime: 0 })
+    mockFilesystemProvider.readDir.mockResolvedValueOnce([
+      { name: 'package.json', isDirectory: false, isSymlink: false }
+    ])
+
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '/home/user',
+      name: 'created',
+      kind: 'git'
+    })
+
+    expect(result).toEqual({
+      error: '"created" already exists at this location and is not empty.'
+    })
+    expect(mockFilesystemProvider.createDirNoClobber).not.toHaveBeenCalled()
+    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+  })
+
+  it('removes a newly created SSH directory when git init fails', async () => {
+    mockGitProvider.exec.mockRejectedValueOnce(new Error('git init failed'))
+
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '/home/user',
+      name: 'created',
+      kind: 'git'
+    })
+
+    expect(result).toEqual({ error: 'Failed to initialize git repository: git init failed' })
+    expect(mockFilesystemProvider.deletePath).toHaveBeenCalledWith('/home/user/created', true)
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
+  })
+
+  it('preserves an existing empty SSH directory and removes only .git when commit fails', async () => {
+    mockFilesystemProvider.stat.mockResolvedValueOnce({ type: 'directory', size: 0, mtime: 0 })
+    mockFilesystemProvider.readDir.mockResolvedValueOnce([])
+    mockGitProvider.exec
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(new Error('Please tell me who you are'))
+
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '/home/user',
+      name: 'created',
+      kind: 'git'
+    })
+
+    expect(result).toEqual({
+      error:
+        'Git author identity is not configured on the SSH host. Run `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"` on that host, then try again.'
+    })
+    expect(mockFilesystemProvider.deletePath).toHaveBeenCalledWith('/home/user/created/.git', true)
+    expect(mockFilesystemProvider.deletePath).not.toHaveBeenCalledWith('/home/user/created', true)
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
 
   it('returns existing repo if same connectionId and path already added', async () => {

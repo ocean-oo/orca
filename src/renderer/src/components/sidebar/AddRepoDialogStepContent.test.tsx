@@ -127,6 +127,18 @@ describe('AddRepoDialogStepContent nested imports', () => {
     expect(html).toContain('aria-label="Browse server filesystem"')
   })
 
+  it('uses manual path entry for SSH create project locations', () => {
+    const html = renderStepContent({
+      step: 'create',
+      manualCreateParentEntry: true,
+      activeRuntimeEnvironmentId: null
+    })
+
+    expect(html).toContain('Start a new project')
+    expect(html).toContain('placeholder="/home/user/projects"')
+    expect(html).not.toContain('Choose parent folder')
+  })
+
   it('offers server browsing for remote clone destinations', () => {
     const html = renderStepContent({
       step: 'clone',

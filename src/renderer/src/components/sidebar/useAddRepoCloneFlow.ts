@@ -42,6 +42,9 @@ export function useAddRepoCloneFlow({
   const [cloneProgress, setCloneProgress] = useState<{ phase: string; percent: number } | null>(
     null
   )
+  const hostToken = `${activeRuntimeEnvironmentId?.trim() ?? ''}:${sshTargetId?.trim() ?? ''}`
+  const hostTokenRef = useRef(hostToken)
+  hostTokenRef.current = hostToken
   // Why: monotonic ID so stale clone callbacks can detect they were superseded.
   const cloneGenRef = useRef(0)
   // Why: track whether we've already auto-filled for this entry into the clone step,
@@ -105,6 +108,7 @@ export function useAddRepoCloneFlow({
     if (!trimmedUrl || !cloneDestination.trim()) {
       return
     }
+    const requestHostToken = hostTokenRef.current
     const gen = ++cloneGenRef.current
     setIsCloning(true)
     setCloneError(null)
@@ -133,7 +137,7 @@ export function useAddRepoCloneFlow({
               url: trimmedUrl,
               destination: cloneDestination.trim()
             })) as Repo)
-      if (gen !== cloneGenRef.current) {
+      if (gen !== cloneGenRef.current || requestHostToken !== hostTokenRef.current) {
         return
       }
       toast.success(
@@ -153,18 +157,18 @@ export function useAddRepoCloneFlow({
       // Why: once the repo exists, a transient non-authoritative refresh
       // should fall through to project reveal instead of leaving the add flow open.
       await fetchWorktrees(repo.id, { requireAuthoritative: true })
-      if (gen !== cloneGenRef.current) {
+      if (gen !== cloneGenRef.current || requestHostToken !== hostTokenRef.current) {
         return
       }
       await onGitRepoReady(repo.id, 'clone_url')
     } catch (err) {
-      if (gen !== cloneGenRef.current) {
+      if (gen !== cloneGenRef.current || requestHostToken !== hostTokenRef.current) {
         return
       }
       const message = err instanceof Error ? err.message : String(err)
       setCloneError(message)
     } finally {
-      if (gen === cloneGenRef.current) {
+      if (gen === cloneGenRef.current && requestHostToken === hostTokenRef.current) {
         setIsCloning(false)
       }
     }

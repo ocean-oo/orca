@@ -7,7 +7,15 @@ import {
 import type { SidebarHostOption } from '../sidebar/sidebar-host-options'
 
 function host(id: SidebarHostOption['id'], label: string): SidebarHostOption {
-  return { id, label, detail: '', kind: id === 'local' ? 'local' : 'ssh', health: 'available' }
+  const kind = id === 'local' ? 'local' : id.startsWith('runtime:') ? 'runtime' : 'ssh'
+  return {
+    id,
+    label,
+    detail: '',
+    kind,
+    health: 'available',
+    presence: kind === 'local' ? 'local' : 'configured'
+  }
 }
 
 describe('buildHostScopeChoices', () => {
