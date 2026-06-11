@@ -134,4 +134,21 @@ describe('useAddRepoCloneFlow', () => {
     })
     expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id, 'clone_url')
   })
+
+  it('does not prefill SSH clone destinations from the local workspace directory', async () => {
+    mocks.stateValues = ['https://github.com/stablyai/orca.git', '', false, null, null]
+    const { useAddRepoCloneFlow } = await import('./useAddRepoCloneFlow')
+
+    const result = useAddRepoCloneFlow({
+      step: 'clone',
+      activeRuntimeEnvironmentId: null,
+      sshTargetId: 'ssh-1',
+      workspaceDir: '/private/tmp/orca-setup-e2e.hOWO1f',
+      fetchWorktrees: mocks.fetchWorktrees,
+      onGitRepoReady: mocks.onGitRepoReady
+    })
+
+    expect(result.cloneDestination).toBe('')
+    expect(mocks.stateSetters[1]).not.toHaveBeenCalledWith('/private/tmp/orca-setup-e2e.hOWO1f')
+  })
 })

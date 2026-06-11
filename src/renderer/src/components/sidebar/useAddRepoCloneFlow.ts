@@ -62,6 +62,7 @@ export function useAddRepoCloneFlow({
     step,
     cloneDestination,
     activeRuntimeEnvironmentId,
+    sshTargetId,
     workspaceDir,
     cloneStepAutoFilled: cloneStepAutoFilledRef.current
   })
