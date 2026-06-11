@@ -479,6 +479,11 @@ import {
 import { prefetchWorktreeCreateBase } from '../worktree-create-base-prefetch'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
+import {
+  isNativeWindowsConptyPty,
+  registerConptyDa1OverrideInstaller,
+  shouldModelAnswerHiddenPtyQueries
+} from './terminal-model-query-authority'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import type { IFilesystemProvider, IPtyProvider } from '../providers/types'
@@ -584,6 +589,11 @@ type RuntimeStore = {
     mobileEmulatorDefaultDeviceUdid?: string | null
     voice?: VoiceSettings
     claudeAgentTeamsMode?: GlobalSettings['claudeAgentTeamsMode']
+    // Why: Phase-5 query responder kill switches — read per chunk in
+    // onPtyData to capture reply ownership at ingestion.
+    terminalMainSideEffectAuthority?: GlobalSettings['terminalMainSideEffectAuthority']
+    terminalHiddenDeliveryGate?: GlobalSettings['terminalHiddenDeliveryGate']
+    terminalModelQueryAuthority?: GlobalSettings['terminalModelQueryAuthority']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value
@@ -1477,6 +1487,14 @@ export class OrcaRuntimeService {
     >
   >()
 
+  // Why: Phase-5 query-responder suppression — a terminal-RPC subscribe
+  // stream feeds a remote xterm view (mobile/web/remote desktop) that answers
+  // queries with view authority, so main must yield while one is attached
+  // (terminal-query-authority.md). Ref-counted per PTY because multiple
+  // streams can attach concurrently; mobileSubscribers is consulted too so
+  // grace-window mobile records keep suppressing.
+  private remoteTerminalViewSubscriberCounts = new Map<string, number>()
+
   // Why: per-PTY driver state. The "driver" is whoever currently owns the
   // input/resize floor. While `kind === 'mobile'` the desktop renderer drops
   // xterm.onData/onResize and shows the lock banner; `terminal.send` /
@@ -1665,6 +1683,10 @@ export class OrcaRuntimeService {
     this.onPtyStopped = deps?.onPtyStopped ?? null
     this.onTerminalAgentStatus = deps?.onTerminalAgentStatus ?? null
     this.onTerminalSideEffects = deps?.onTerminalSideEffects ?? null
+    // Why: the ConPTY spawn mark can land after daemon stream data already
+    // created this PTY's emulator; the mark retrofits the DA1 override here
+    // (terminal-query-authority.md §ConPTY DA1).
+    registerConptyDa1OverrideInstaller((ptyId) => this.ensureNativeWindowsConptyDa1Override(ptyId))
   }
 
   getLocalProvider(): IPtyProvider | null {
@@ -3325,6 +3347,12 @@ export class OrcaRuntimeService {
     // panel can surface them in place of the kernel bind address.
     advertisedUrlWatcher.ingest(ptyId, data, at)
     serveSimStateWatcher.ingestPtyOutput(ptyId, data)
+    // Why: reply ownership is captured per chunk, here at ingestion — the
+    // same module state and tick as the hidden-gate drop sites — and rides
+    // the writeChain link. A mark/setting/subscriber flip before the queued
+    // emulator write runs must not change who answers (terminal-query-
+    // authority.md invariant 1).
+    const forwardQueryReplies = this.shouldAnswerQueriesForLiveChunk(ptyId)
     // Ordering invariant (DO NOT REORDER): maybeHydrateHeadlessFromRenderer
     // MUST run before trackHeadlessTerminalData so the eager-state pattern
     // (set headlessTerminals + writeChain head = seedPromise) is in place
@@ -3333,7 +3361,7 @@ export class OrcaRuntimeService {
     // that the later seed-resolve would overwrite, dropping the live byte.
     // See docs/mobile-prefer-renderer-scrollback.md.
     this.maybeHydrateHeadlessFromRenderer(ptyId)
-    this.trackHeadlessTerminalData(ptyId, data, outputSequence)
+    this.trackHeadlessTerminalData(ptyId, data, outputSequence, forwardQueryReplies)
 
     let normalizedData: string | null = null
     const getNormalizedData = (): string => {
@@ -3884,6 +3912,37 @@ export class OrcaRuntimeService {
     }
   }
 
+  /** Registered by terminal-RPC subscribe/multiplex streams: while a remote
+   *  view subscriber is attached its xterm answers queries with view
+   *  authority and the model responder must stay silent. Returns an
+   *  idempotent release. */
+  registerRemoteTerminalViewSubscriber(ptyId: string): () => void {
+    this.remoteTerminalViewSubscriberCounts.set(
+      ptyId,
+      (this.remoteTerminalViewSubscriberCounts.get(ptyId) ?? 0) + 1
+    )
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      const next = (this.remoteTerminalViewSubscriberCounts.get(ptyId) ?? 1) - 1
+      if (next <= 0) {
+        this.remoteTerminalViewSubscriberCounts.delete(ptyId)
+      } else {
+        this.remoteTerminalViewSubscriberCounts.set(ptyId, next)
+      }
+    }
+  }
+
+  hasRemoteTerminalViewSubscriber(ptyId: string): boolean {
+    if ((this.remoteTerminalViewSubscriberCounts.get(ptyId) ?? 0) > 0) {
+      return true
+    }
+    return (this.mobileSubscribers.get(ptyId)?.size ?? 0) > 0
+  }
+
   subscribeToFitOverrideChanges(
     ptyId: string,
     listener: (event: { mode: 'mobile-fit' | 'desktop-fit'; cols: number; rows: number }) => void
@@ -4004,14 +4063,12 @@ export class OrcaRuntimeService {
       return
     }
     const dims = size ?? this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
-    const state: RuntimeHeadlessTerminal = {
-      emulator: new HeadlessEmulator({ cols: dims.cols, rows: dims.rows }),
-      outputSequence: 0,
-      writeChain: Promise.resolve()
-    }
+    const state = this.createPtyHeadlessTerminalState(ptyId, dims)
     this.headlessTerminals.set(ptyId, state)
     state.writeChain = state.writeChain
       .then(async () => {
+        // Why: seed writes never set forwardQueryReplies — the main-side
+        // replay guard. A snapshot containing old queries must answer no one.
         await state.emulator.write(data)
         if (metadata.cwd !== undefined) {
           state.emulator.setCwd(metadata.cwd)
@@ -4050,11 +4107,9 @@ export class OrcaRuntimeService {
 
     this.headlessHydrationState.set(ptyId, 'pending')
     const dims = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
-    const state: RuntimeHeadlessTerminal = {
-      emulator: new HeadlessEmulator({ cols: dims.cols, rows: dims.rows }),
-      outputSequence: 0,
-      writeChain: Promise.resolve()
-    }
+    // Why: hydration writes below never set forwardQueryReplies (main-side
+    // replay guard) — renderer-buffer snapshots can embed stale queries.
+    const state = this.createPtyHeadlessTerminalState(ptyId, dims)
     this.headlessTerminals.set(ptyId, state)
 
     // Why: append the seed work to writeChain so live writes queued by
@@ -4127,11 +4182,28 @@ export class OrcaRuntimeService {
     }
   }
 
-  private trackHeadlessTerminalData(ptyId: string, data: string, outputSequence: number): void {
+  /** Per-chunk reply-ownership capture (Phase 5). Evaluated synchronously at
+   *  ingestion only — never re-read at reply time. */
+  private shouldAnswerQueriesForLiveChunk(ptyId: string): boolean {
+    return shouldModelAnswerHiddenPtyQueries({
+      ptyId,
+      settings: this.store?.getSettings(),
+      hasRemoteViewSubscriber: this.hasRemoteTerminalViewSubscriber(ptyId)
+    })
+  }
+
+  private trackHeadlessTerminalData(
+    ptyId: string,
+    data: string,
+    outputSequence: number,
+    forwardQueryReplies = false
+  ): void {
     const state = this.getOrCreateHeadlessTerminal(ptyId)
     state.writeChain = state.writeChain
       .then(async () => {
-        await state.emulator.write(data)
+        // Why: the ingestion-time ownership decision is closed over this
+        // chain link; async scheduling cannot retroactively change it.
+        await state.emulator.write(data, { forwardQueryReplies })
         state.outputSequence = outputSequence
       })
       .catch(() => {
@@ -4140,17 +4212,53 @@ export class OrcaRuntimeService {
       })
   }
 
+  /** Shared factory for the per-PTY runtime emulators (seed, hydration, and
+   *  lazy live-byte creation): wires the Phase-5 query-reply sink and the
+   *  ConPTY DA1 override. The daemon emulator never goes through here. */
+  private createPtyHeadlessTerminalState(
+    ptyId: string,
+    dims: { cols: number; rows: number }
+  ): RuntimeHeadlessTerminal {
+    let state: RuntimeHeadlessTerminal | null = null
+    const emulator = new HeadlessEmulator({
+      cols: dims.cols,
+      rows: dims.rows,
+      // Why: replies take the provider input path (same entry as pty:write —
+      // daemon shell-ready gating and the SSH relay write apply unchanged),
+      // NOT writePtyInput, so renderer interactive-output metering never
+      // counts responder traffic as user-input echo.
+      onQueryReply: (reply) => {
+        // Why the identity check: queued writeChain links can parse after
+        // disposeHeadlessTerminal, and daemon respawns reuse session ids — a
+        // stale link's reply must never reach a successor PTY under this id.
+        if (state !== null && this.headlessTerminals.get(ptyId) === state) {
+          this.ptyController?.write(ptyId, reply)
+        }
+      }
+    })
+    if (isNativeWindowsConptyPty(ptyId)) {
+      emulator.installConptyPrimaryDeviceAttributesOverride()
+    }
+    state = { emulator, outputSequence: 0, writeChain: Promise.resolve() }
+    return state
+  }
+
+  /** Phase-5 ConPTY DA1 retrofit (terminal-query-authority.md): invoked via
+   *  markNativeWindowsConptyPty when the spawn mark lands after daemon stream
+   *  data already created this PTY's emulator. Idempotent emulator-side. */
+  private ensureNativeWindowsConptyDa1Override(ptyId: string): void {
+    if (isNativeWindowsConptyPty(ptyId)) {
+      this.headlessTerminals.get(ptyId)?.emulator.installConptyPrimaryDeviceAttributesOverride()
+    }
+  }
+
   private getOrCreateHeadlessTerminal(ptyId: string): RuntimeHeadlessTerminal {
     const existing = this.headlessTerminals.get(ptyId)
     if (existing) {
       return existing
     }
     const size = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
-    const state: RuntimeHeadlessTerminal = {
-      emulator: new HeadlessEmulator({ cols: size.cols, rows: size.rows }),
-      outputSequence: 0,
-      writeChain: Promise.resolve()
-    }
+    const state = this.createPtyHeadlessTerminalState(ptyId, size)
     this.headlessTerminals.set(ptyId, state)
     return state
   }
@@ -4315,6 +4423,10 @@ export class OrcaRuntimeService {
       return
     }
     this.headlessTerminals.delete(ptyId)
+    // Why: queued chain links still parse below before the emulator disposes;
+    // sever the reply sink now so they cannot write to a respawned PTY that
+    // reused this id (belt to the sink's state-identity check).
+    state.emulator.disableQueryReplyForwarding()
     state.writeChain.finally(() => state.emulator.dispose()).catch(() => state.emulator.dispose())
   }
 
@@ -5013,6 +5125,7 @@ export class OrcaRuntimeService {
     serveSimStateWatcher.unbindPty(ptyId)
     // Clean up new mobile state for this PTY
     this.mobileSubscribers.delete(ptyId)
+    this.remoteTerminalViewSubscriberCounts.delete(ptyId)
     this.mobileDisplayModes.delete(ptyId)
     this.resizeListeners.delete(ptyId)
     this.lastRendererSizes.delete(ptyId)

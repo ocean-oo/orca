@@ -45,6 +45,17 @@ export function buildWindowsPtyCompatibilityOptions(
   }
 }
 
+/** Mirror of main's effectiveShellOverride fold (pty.ts spawn handlers): a
+ *  tab-level shell override wins, else the global Windows shell setting
+ *  applies — so renderer and main classify a global-WSL default identically
+ *  (the main-side twin is isNativeWindowsLocalPtySpawn). */
+export function resolveWindowsShellOverride(
+  tabShellOverride: string | null | undefined,
+  globalWindowsShell: string | null | undefined
+): string | undefined {
+  return tabShellOverride ?? globalWindowsShell ?? undefined
+}
+
 export function isLocalNativeWindowsPty(context: WindowsPtyCompatibilityContext): boolean {
   if (!isWindowsUserAgent(context.userAgent)) {
     return false

@@ -87,9 +87,13 @@ ingestion and an async write; the decision must not be re-read at reply time):
 4. no remote view subscriber is attached to the PTY (runtime terminal-RPC
    subscriber records / `mobileSubscribers`): a mobile/web/remote-desktop
    xterm receiving the multiplexed stream answers with view authority, exactly
-   like a visible local pane. Read-only consumers (CLI reads, automation
-   observers) do not suppress — they also do not answer; that bounded
-   no-reply case matches today's behavior.
+   like a visible local pane. Legacy JSON `terminal.subscribe` streams **do**
+   register as view subscribers and suppress, even when the consumer is a
+   read-only watcher — deliberately conservative, because the stream may feed
+   an older live xterm view and a withheld reply (the pre-Phase-5 status quo)
+   is strictly safer than a double reply. Consumers that never register a
+   stream (CLI `terminal.read`, automation observers) do not suppress — they
+   also do not answer; that bounded no-reply case matches today's behavior.
 
 Everything the emulator emits outside a forwarding window is discarded, which
 also swallows unsolicited core emissions (e.g. native 997 color-scheme pushes
@@ -156,8 +160,11 @@ The provider kind is known main-side: mirror `isLocalNativeWindowsPty`
 provider, `win32`, not WSL). For such PTYs register a CSI `c` override on the
 emulator parser (the main-side twin of
 `installConptyDeviceAttributesHandler`) replying `CSI ?61;4c`, still gated by
-the forwarding predicate. ConPTY blocking on a missing DA1 is a spawn-time
-hazard; spawn-time ownership is deterministic (see races below).
+the forwarding predicate. The override is installed at emulator creation and
+retrofitted when the spawn mark lands (daemon stream data can create the
+emulator before the awaited spawn response marks the PTY). ConPTY blocking on
+a missing DA1 is a spawn-time hazard; see the races section for the
+hidden-at-spawn loss window that remains until Phase 6.
 
 ## Suppression: when main never replies
 
@@ -197,9 +204,14 @@ Safe-side rule per class: duplicates are structurally impossible (one decision
 point per chunk); where the race costs anything it costs a missing reply.
 That is acceptable for state queries (DSR/CPR/DECRPM — TUIs re-probe or
 tolerate silence, as they did for every hidden pane before this phase). The
-one blocking-on-no-reply sequence, ConPTY DA1, only fires at spawn, where
-ownership is deterministic: visible pane, startup window (renderer), or
-marked-at-spawn (main). It cannot land in the flip gap.
+one blocking-on-no-reply sequence, ConPTY DA1, only fires at spawn. A visible
+pane or an active codex startup window answers it from the renderer xterm.
+But a PTY spawned hidden **without** the startup window has no answerer until
+the renderer's hidden mark lands in main (one IPC hop after spawn): a DA1
+arriving in that pre-mark window is lost. That loss window is the pre-Phase-4
+hidden status quo and persists until Phase 6 marks hidden panes at spawn
+(spawn-record flag, below) — spawn-time ownership is not deterministic before
+then.
 
 ## Invariants
 

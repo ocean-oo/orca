@@ -276,6 +276,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalHiddenViewParking: true,
     terminalMainSideEffectAuthority: true,
     terminalHiddenDeliveryGate: true,
+    terminalModelQueryAuthority: true,
     defaultTuiAgent: null,
     disabledTuiAgents: [...DEFAULT_DISABLED_TUI_AGENTS],
     claudeAgentTeamsDefaultDisabledMigrated: true,

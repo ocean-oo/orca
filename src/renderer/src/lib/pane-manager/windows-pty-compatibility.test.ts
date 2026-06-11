@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildWindowsPtyCompatibilityOptions,
-  isLocalNativeWindowsPty
+  isLocalNativeWindowsPty,
+  resolveWindowsShellOverride
 } from './windows-pty-compatibility'
 
 describe('buildWindowsPtyCompatibilityOptions', () => {
@@ -86,6 +87,39 @@ describe('buildWindowsPtyCompatibilityOptions', () => {
         shellOverride: null
       })
     ).toEqual({})
+  })
+
+  it('classifies a global-WSL default shell as non-native, matching main', () => {
+    // Why: main folds the global terminalWindowsShell into its spawn
+    // classification (isNativeWindowsLocalPtySpawn). Without the fold the
+    // renderer would call a tab with no override native-ConPTY while main
+    // never marks it.
+    const windowsUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    expect(
+      isLocalNativeWindowsPty({
+        userAgent: windowsUserAgent,
+        connectionId: null,
+        cwd: 'C:\\repo',
+        shellOverride: resolveWindowsShellOverride(undefined, 'wsl.exe')
+      })
+    ).toBe(false)
+    // A tab-level override beats the global setting, both directions.
+    expect(
+      isLocalNativeWindowsPty({
+        userAgent: windowsUserAgent,
+        connectionId: null,
+        cwd: 'C:\\repo',
+        shellOverride: resolveWindowsShellOverride('powershell.exe', 'wsl.exe')
+      })
+    ).toBe(true)
+    expect(
+      isLocalNativeWindowsPty({
+        userAgent: windowsUserAgent,
+        connectionId: null,
+        cwd: 'C:\\repo',
+        shellOverride: resolveWindowsShellOverride('wsl.exe', 'powershell.exe')
+      })
+    ).toBe(false)
   })
 
   it('exposes the same local native Windows predicate for related renderer workarounds', () => {

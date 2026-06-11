@@ -290,6 +290,49 @@ describe('HeadlessEmulator', () => {
       expect(emulator.getSnapshot().modes.sgrMouseMode).toBe(false)
     })
 
+    it('tracks kitty keyboard flags for emulator re-seed parity', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(0)
+
+      await emulator.write('\x1b[=5;1u')
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(5)
+    })
+
+    it('round-trips a pushed CSI > 1 u flag through the core-internals read path', async () => {
+      // Why: getKittyKeyboardFlags reads _core.coreService.kittyKeyboard.flags,
+      // a private xterm surface. If an xterm upgrade breaks that path this
+      // must fail loudly instead of the responder silently answering ?0u.
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+
+      await emulator.write('\x1b[>1u')
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(1)
+    })
+
+    it('snapshots the active-buffer kitty flags (alt screen keeps its own set)', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      // Kitty flags are per screen buffer: entering the alt screen swaps to
+      // its own (empty) flag set, exactly what a CSI ? u reply would report.
+      await emulator.write('\x1b[=5;1u\x1b[?1049h')
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(0)
+
+      await emulator.write('\x1b[=3;1u')
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(3)
+
+      await emulator.write('\x1b[?1049l')
+      expect(emulator.getSnapshot().modes.kittyKeyboardFlags).toBe(5)
+    })
+
+    it('never pushes kitty flags into rehydrateSequences', async () => {
+      // Why: POST_REPLAY_REATTACH_RESET's deliberate kitty reset must stay
+      // authoritative for renderer replays (terminal-query-authority.md).
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      await emulator.write('\x1b[?1049h\x1b[=5;1u')
+
+      const snapshot = emulator.getSnapshot()
+      expect(snapshot.modes.kittyKeyboardFlags).toBe(5)
+      expect(snapshot.rehydrateSequences).not.toContain('u')
+    })
+
     it('tracks split SGR mouse reporting sequences', async () => {
       emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
 

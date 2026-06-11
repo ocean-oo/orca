@@ -73,6 +73,11 @@ import {
   shouldDropHiddenRendererPtyData,
   unmarkHiddenRendererPty
 } from './pty-hidden-delivery-gate'
+import {
+  clearNativeWindowsConptyPty,
+  isNativeWindowsLocalPtySpawn,
+  markNativeWindowsConptyPty
+} from '../runtime/terminal-model-query-authority'
 import type { PtyModelRestoreReason } from '../../shared/pty-model-restore-marker'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
@@ -858,6 +863,8 @@ export function clearProviderPtyState(id: string): void {
   // shutdown, SSH exit/connection teardown) — hidden/interest gate bits must
   // not outlive the PTY or a reused map entry could silently gate a new one.
   clearHiddenRendererPtyDeliveryState(id)
+  // Why: the Phase-5 ConPTY DA1 spawn record must not leak onto a reused id.
+  clearNativeWindowsConptyPty(id)
   const paneKey = ptyPaneKey.get(id)
   const stillOwnsPaneKey = paneKey ? paneKeyPtyId.get(paneKey) === id : false
   // Why: drop the memory-collector registration so a dead PTY does not keep
@@ -1905,6 +1912,18 @@ export function registerPtyHandlers(
         }
       }
       ptyOwnership.set(result.id, args.connectionId ?? null)
+      // Why: Phase-5 ConPTY DA1 — record the native-Windows-local-PTY
+      // determination from the spawn record before any byte reaches the
+      // runtime emulator, so its DA1 override exists from byte zero.
+      if (
+        isNativeWindowsLocalPtySpawn({
+          connectionId: args.connectionId,
+          cwd: args.cwd,
+          shellOverride: daemonShellOverride
+        })
+      ) {
+        markNativeWindowsConptyPty(result.id)
+      }
       const relayResultId = getRelayPtyId(args.connectionId, result.id)
       const persistSshLease = (): void => {
         if (!store || !args.connectionId) {
@@ -2540,6 +2559,18 @@ export function registerPtyHandlers(
         }
       }
       ptyOwnership.set(result.id, args.connectionId ?? null)
+      // Why: Phase-5 ConPTY DA1 — record the native-Windows-local-PTY
+      // determination from the spawn record before the headless seed below,
+      // so the runtime emulator's DA1 override exists from byte zero.
+      if (
+        isNativeWindowsLocalPtySpawn({
+          connectionId: args.connectionId,
+          cwd: args.cwd,
+          shellOverride: effectiveShellOverride
+        })
+      ) {
+        markNativeWindowsConptyPty(result.id)
+      }
       const relayResultId = getRelayPtyId(args.connectionId, result.id)
       if (store && args.connectionId) {
         // Why: remote PTYs live in the SSH relay grace window after Orca

@@ -1319,6 +1319,16 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           emit({ type: 'end', streamId: request.streamId })
           return
         }
+        if (closed) {
+          return
+        }
+        // Why: a competing subscribe for the same streamId can fully register
+        // while this one awaited the PTY id above. Overwriting it in
+        // `streams` would orphan its data/view-subscriber registrations — a
+        // leaked view subscriber permanently silences the model query
+        // responder (terminal-query-authority.md). Detach it so every
+        // registration stays release-balanced.
+        detachStream(request.streamId, false)
 
         const ptyId = leaf.ptyId
         const stream: TerminalMultiplexStream = {
@@ -1354,7 +1364,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         )
 
         try {
-          stream.unsubscribeData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
+          const unsubscribeStreamData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
             if (closed || streams.get(request.streamId) !== stream) {
               return
             }
@@ -1364,6 +1374,15 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             }
             stream.outputBatcher.push(data, meta)
           })
+          // Why: a multiplexed stream feeds a remote xterm view that answers
+          // terminal queries with view authority; the main model responder
+          // yields while it is attached (terminal-query-authority.md).
+          // Wrapped into unsubscribeData so every detach path releases it.
+          const releaseViewSubscriber = runtime.registerRemoteTerminalViewSubscriber(ptyId)
+          stream.unsubscribeData = () => {
+            releaseViewSubscriber()
+            unsubscribeStreamData()
+          }
 
           if (isMobile && request.client?.id) {
             await runtime.handleMobileSubscribe(ptyId, request.client.id, request.viewport)
@@ -1479,6 +1498,13 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
               }
             })
         } catch (error) {
+          // Why the ownership check: a newer subscribe may own this streamId
+          // now (it detached and released this stream on arrival). Detaching
+          // or erroring the slot here would tear down the successor's live
+          // registrations instead of this stream's.
+          if (streams.get(request.streamId) !== stream) {
+            return
+          }
           detachStream(request.streamId, false)
           sendStreamError(request.streamId, error instanceof Error ? error.message : String(error))
           emit({ type: 'end', streamId: request.streamId })
@@ -1578,9 +1604,19 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           const outputBatcher = createTerminalOutputBatcher((chunk) => {
             emit({ type: 'data', chunk })
           })
-          const unsubscribeData = runtime.subscribeToTerminalData(ptyId, (data) => {
+          const unsubscribeStreamData = runtime.subscribeToTerminalData(ptyId, (data) => {
             outputBatcher.push(data)
           })
+          // Why: this legacy JSON stream can feed a live xterm view too
+          // (older web/desktop subscribers), so it conservatively registers
+          // as a remote view subscriber. For read-only watchers the cost is
+          // a withheld model reply — the pre-Phase-5 status quo — which is
+          // strictly safer than a double reply under a view consumer.
+          const releaseViewSubscriber = runtime.registerRemoteTerminalViewSubscriber(ptyId)
+          const unsubscribeData = (): void => {
+            releaseViewSubscriber()
+            unsubscribeStreamData()
+          }
           const unsubscribeFit = runtime.subscribeToFitOverrideChanges(ptyId, (event) => {
             outputBatcher.flush()
             emit({
@@ -1718,7 +1754,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           return
         }
 
-        unsubscribeData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
+        const unsubscribeStreamData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
           if (closed) {
             return
           }
@@ -1732,6 +1768,14 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           }
           outputBatcher?.push(data, meta)
         })
+        // Why: binary subscribe streams feed remote xterm views (mobile and
+        // binary-capable desktop clients) that answer queries with view
+        // authority; the main model responder yields while attached.
+        const releaseViewSubscriber = runtime.registerRemoteTerminalViewSubscriber(ptyId)
+        unsubscribeData = () => {
+          releaseViewSubscriber()
+          unsubscribeStreamData()
+        }
 
         const read = await runtime.readTerminal(params.terminal)
         const serialized = await serializeBudgetedMobileSnapshot(runtime, ptyId, isMobile)

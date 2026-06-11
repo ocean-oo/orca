@@ -47,7 +47,10 @@ import {
   waitForTerminalOutputParsed,
   writeTerminalOutput
 } from '@/lib/pane-manager/pane-terminal-output-scheduler'
-import { isLocalNativeWindowsPty } from '@/lib/pane-manager/windows-pty-compatibility'
+import {
+  isLocalNativeWindowsPty,
+  resolveWindowsShellOverride
+} from '@/lib/pane-manager/windows-pty-compatibility'
 import { recordTerminalOutput, restoreScrollStateAfterLayout } from '@/lib/pane-manager/pane-scroll'
 import type { ScrollState } from '@/lib/pane-manager/pane-manager-types'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
@@ -1511,7 +1514,10 @@ export function connectPanePty(
     userAgent: navigator.userAgent,
     connectionId,
     cwd: deps.cwd,
-    shellOverride
+    // Why: main folds the global Windows shell into its spawn classification
+    // (pty.ts effectiveShellOverride); fold it here too so both sides treat
+    // a global-WSL default identically (terminal-query-authority.md ConPTY).
+    shellOverride: resolveWindowsShellOverride(shellOverride, state.settings?.terminalWindowsShell)
   })
   const shouldApplyNativeWindowsRewriteRefresh = isNativeWindowsConpty
   const shouldProtectNativeWindowsSynchronizedOutput = isNativeWindowsConpty

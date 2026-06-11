@@ -2,12 +2,28 @@ import './xterm-env-polyfill'
 import { Terminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { extractLastOscTitle } from '../../shared/agent-detection'
+import { TerminalMouseModeMirror } from './terminal-mouse-mode-mirror'
 import type { TerminalSnapshot, TerminalModes } from './types'
 
 export type HeadlessEmulatorOptions = {
   cols: number
   rows: number
   scrollback?: number
+  /** Phase-5 model query responder sink (terminal-query-authority.md).
+   *  When set, xterm-core auto-replies generated while parsing a write
+   *  flagged `forwardQueryReplies` are forwarded here; all other emissions
+   *  (seeds, hydration, snapshot replay, unsolicited core pushes) are
+   *  discarded. The daemon Session must NEVER pass this — its emulator
+   *  stays write-only forever (contract invariant: the daemon never
+   *  answers). */
+  onQueryReply?: (reply: string) => void
+}
+
+export type HeadlessEmulatorWriteOptions = {
+  /** Reply ownership captured at ingestion for this exact chunk. Default
+   *  false is the main-side replay guard (twin of the renderer's
+   *  replay-guard.ts): seed/hydration/snapshot writes never forward. */
+  forwardQueryReplies?: boolean
 }
 
 export type HeadlessSnapshotOptions = {
@@ -17,15 +33,19 @@ export type HeadlessSnapshotOptions = {
 type TerminalWithSynchronousWrite = Terminal & {
   _core?: {
     writeSync?: (data: string) => void
+    // Why: kitty keyboard flags are not on the public IModes; read the core
+    // service state the CSI =/>/< u handlers mutate.
+    coreService?: {
+      kittyKeyboard?: { flags?: number }
+    }
   }
 }
 
 const DEFAULT_SCROLLBACK = 5000
+// Keep in sync with the renderer twin in terminal-conpty-device-attributes.ts
+// (main must not import renderer modules).
+const CONPTY_DA1_RESPONSE = '\x1b[?61;4c'
 const OSC_SCAN_TAIL_LIMIT = 4096
-// Why: PTY/SSH chunks can split a long combined DECSET before the final h/l.
-// Keep parser state far beyond normal mode lists while still bounding memory.
-const PRIVATE_MODE_SCAN_TAIL_LIMIT = 4096
-type MouseTrackingMode = NonNullable<TerminalModes['mouseTrackingMode']>
 
 function parseFileUriPath(uri: string): string | null {
   try {
@@ -61,11 +81,15 @@ export class HeadlessEmulator {
   private cwd: string | null = null
   private lastTitle: string | null = null
   private oscScanTail = ''
-  private privateModeScanTail = ''
-  private mouseTrackingMode: MouseTrackingMode = 'none'
-  private sgrMouseMode = false
-  private sgrMousePixelsMode = false
+  private mouseModes = new TerminalMouseModeMirror()
   private disposed = false
+  private onQueryReply: ((reply: string) => void) | null
+  private conptyDa1OverrideInstalled = false
+  // Why: replies must be scoped to the exact write that carried the query.
+  // The window opens around the parse of a forward-flagged chunk and closes
+  // with it, so seeds/snapshots and unsolicited core emissions (e.g. native
+  // 997 pushes from option mutations) can never leak to the PTY.
+  private queryReplyForwardingDepth = 0
 
   constructor(opts: HeadlessEmulatorOptions) {
     this.terminal = new Terminal({
@@ -73,26 +97,72 @@ export class HeadlessEmulator {
       rows: opts.rows,
       scrollback: opts.scrollback ?? DEFAULT_SCROLLBACK,
       allowProposedApi: true,
-      logLevel: 'off'
+      logLevel: 'off',
+      // Why: parity with the renderer's buildDefaultTerminalOptions — parse
+      // CSI =/>/< u pushes so CSI ? u answers with the flags the hidden app
+      // actually pushed. Write-only daemon use is unaffected: keyboard state
+      // never alters serialization (terminal-query-authority.md §kitty).
+      vtExtensions: { kittyKeyboard: true }
     })
 
     this.serializer = new SerializeAddon()
     this.terminal.loadAddon(this.serializer)
 
-    // Why no onData wiring: this emulator exists purely for state tracking
-    // (snapshots, cwd, mode flags). It MUST NOT respond to terminal query
-    // sequences (DA1/DA2, DSR, OSC 10/11/12, DECRPM). The emulator parses
-    // data in-process synchronously before `handleSubprocessData` forwards
-    // it to the renderer over IPC, so any reply it emits would land on the
-    // shell's stdin ahead of the renderer's xterm reply and win the race.
-    // The renderer is the authoritative responder (it has the real theme,
-    // cursor position, and paste mode); a daemon-side reply would be a
-    // double-reply with wrong values. OSC 11 was the visible casualty:
-    // Claude Code's /theme auto always saw the emulator's default-black
-    // background regardless of Orca's configured terminal theme.
+    // Why onData is gated behind onQueryReply: by default this emulator is
+    // pure state tracking and MUST NOT respond to terminal query sequences
+    // (DA1/DA2, DSR, OSC 10/11/12, DECRPM). The daemon emulator parses data
+    // in-process synchronously before `handleSubprocessData` forwards it to
+    // the renderer over IPC, so any reply it emitted would land on the
+    // shell's stdin ahead of the renderer's xterm reply and win the race —
+    // a double-reply with default-xterm values (OSC 11 default-black was
+    // the visible casualty). Only main's runtime per-PTY emulators pass a
+    // sink, and even then replies flow only for chunks the hidden-delivery
+    // gate DROPPED, where the renderer never sees the bytes and main is the
+    // single answerer. See docs/reference/terminal-query-authority.md.
+    this.onQueryReply = opts.onQueryReply ?? null
+    if (this.onQueryReply) {
+      this.terminal.onData((reply) => this.emitQueryReply(reply))
+    }
   }
 
-  write(data: string): Promise<void> {
+  /** Main-side twin of the renderer's terminal-conpty-device-attributes.ts:
+   *  ConPTY 1.22+ blocks at spawn waiting for a DA1 reply, and the override
+   *  variant (`CSI ?61;4c`) must win. Returning true consumes the query so
+   *  xterm core's default `?1;2c` cannot double-reply (custom CSI handlers
+   *  run before core's; false falls through). The reply still routes through
+   *  the forwarding window, so replayed/seeded bytes never answer. */
+  installConptyPrimaryDeviceAttributesOverride(): void {
+    // Why idempotent: the spawn mark can land after daemon stream data
+    // already created the emulator, so the override is installed both at
+    // creation and retrofitted at mark time — never stacked.
+    if (this.conptyDa1OverrideInstalled) {
+      return
+    }
+    this.conptyDa1OverrideInstalled = true
+    this.terminal.parser.registerCsiHandler({ final: 'c' }, (params) => {
+      const isPrimaryQuery = params.length === 0 || (params.length === 1 && params[0] === 0)
+      if (!isPrimaryQuery) {
+        return false
+      }
+      this.emitQueryReply(CONPTY_DA1_RESPONSE)
+      return true
+    })
+  }
+
+  private emitQueryReply(reply: string): void {
+    if (this.queryReplyForwardingDepth > 0 && this.onQueryReply) {
+      this.onQueryReply(reply)
+    }
+  }
+
+  /** Severs the reply sink at PTY teardown. Queued writeChain links may
+   *  still parse after dispose is requested, and daemon respawns reuse
+   *  session ids — a late reply must never reach a successor PTY. */
+  disableQueryReplyForwarding(): void {
+    this.onQueryReply = null
+  }
+
+  write(data: string, opts: HeadlessEmulatorWriteOptions = {}): Promise<void> {
     if (this.disposed) {
       return Promise.resolve()
     }
@@ -104,19 +174,43 @@ export class HeadlessEmulator {
     if (lastTitle !== null) {
       this.lastTitle = lastTitle
     }
+    const forwardQueryReplies = opts.forwardQueryReplies === true
     const writeSync = (this.terminal as TerminalWithSynchronousWrite)._core?.writeSync
     if (typeof writeSync === 'function') {
-      // Why: hidden renderer restore snapshots are requested immediately after
-      // PTY bursts; queued headless writes can snapshot half-cleared TUI rows.
-      writeSync.call((this.terminal as TerminalWithSynchronousWrite)._core, data)
-      this.scanPrivateModes(data)
+      if (forwardQueryReplies) {
+        this.queryReplyForwardingDepth += 1
+      }
+      try {
+        // Why: hidden renderer restore snapshots are requested immediately after
+        // PTY bursts; queued headless writes can snapshot half-cleared TUI rows.
+        writeSync.call((this.terminal as TerminalWithSynchronousWrite)._core, data)
+      } finally {
+        if (forwardQueryReplies) {
+          this.queryReplyForwardingDepth -= 1
+        }
+      }
+      this.mouseModes.scan(data)
       return Promise.resolve()
+    }
+    // Why the sentinel: xterm parses queued writes asynchronously, so opening
+    // the window at enqueue time would leak it over earlier queued unflagged
+    // chunks (seed/hydration bytes parsing while depth > 0). Write callbacks
+    // fire in FIFO parse order, so a zero-byte write whose callback opens the
+    // window brackets the parse of exactly this chunk; the data callback
+    // closes it.
+    if (forwardQueryReplies) {
+      this.terminal.write('', () => {
+        this.queryReplyForwardingDepth += 1
+      })
     }
     return new Promise<void>((resolve) => {
       this.terminal.write(data, () => {
+        if (forwardQueryReplies) {
+          this.queryReplyForwardingDepth -= 1
+        }
         // Why: snapshots combine serialized xterm state with mirrored mouse
         // modes. Commit the mirror only after xterm has parsed the same bytes.
-        this.scanPrivateModes(data)
+        this.mouseModes.scan(data)
         resolve()
       })
     })
@@ -207,78 +301,6 @@ export class HeadlessEmulator {
     return suffix.slice(-OSC_SCAN_TAIL_LIMIT)
   }
 
-  private scanPrivateModes(data: string): void {
-    const input = this.privateModeScanTail + data
-    this.privateModeScanTail = this.extractPrivateModeScanTail(input)
-    // oxlint-disable-next-line no-control-regex -- terminal escape sequences require control chars
-    const privateModeRe = /\x1bc|\x1b\[\?([0-9;]+)([hl])|\x9b\?([0-9;]+)([hl])/g
-    let match: RegExpExecArray | null
-    while ((match = privateModeRe.exec(input)) !== null) {
-      if (match[0] === '\x1bc') {
-        this.mouseTrackingMode = 'none'
-        this.sgrMouseMode = false
-        this.sgrMousePixelsMode = false
-        continue
-      }
-      const params = match[1] ?? match[3]
-      const enabled = (match[2] ?? match[4]) === 'h'
-      for (const rawParam of params.split(';')) {
-        if (rawParam === '') {
-          continue
-        }
-        const param = Number(rawParam)
-        if (!Number.isInteger(param)) {
-          continue
-        }
-        if (param === 9) {
-          this.mouseTrackingMode = enabled ? 'x10' : 'none'
-        }
-        if (param === 1000) {
-          this.mouseTrackingMode = enabled ? 'vt200' : 'none'
-        }
-        if (param === 1002) {
-          this.mouseTrackingMode = enabled ? 'drag' : 'none'
-        }
-        if (param === 1003) {
-          this.mouseTrackingMode = enabled ? 'any' : 'none'
-        }
-        if (param === 1006) {
-          this.sgrMouseMode = enabled
-          this.sgrMousePixelsMode = false
-        }
-        if (param === 1016) {
-          this.sgrMouseMode = false
-          this.sgrMousePixelsMode = enabled
-        }
-      }
-    }
-  }
-
-  private extractPrivateModeScanTail(input: string): string {
-    const start = Math.max(input.lastIndexOf('\x1b'), input.lastIndexOf('\x9b'))
-    if (start === -1) {
-      return ''
-    }
-    const tail = input.slice(start)
-    if (tail.length > PRIVATE_MODE_SCAN_TAIL_LIMIT) {
-      return ''
-    }
-    if (tail === '\x1b' || tail === '\x1b[' || tail === '\x9b') {
-      return tail
-    }
-    if (tail.startsWith('\x1b[?')) {
-      return this.isIncompletePrivateModeParams(tail.slice(3)) ? tail : ''
-    }
-    if (tail.startsWith('\x9b?')) {
-      return this.isIncompletePrivateModeParams(tail.slice(2)) ? tail : ''
-    }
-    return ''
-  }
-
-  private isIncompletePrivateModeParams(params: string): boolean {
-    return /^[0-9;]*$/.test(params)
-  }
-
   private normalizeSnapshotAnsiForModes(snapshotAnsi: string, modes: TerminalModes): string {
     if (!modes.alternateScreen) {
       return snapshotAnsi
@@ -303,20 +325,32 @@ export class HeadlessEmulator {
 
   private getModes(): TerminalModes {
     const buffer = this.terminal.buffer.active
-    const mouseTrackingMode = this.mouseTrackingMode
+    const mouseTrackingMode = this.mouseModes.mouseTrackingMode
     return {
       bracketedPaste: this.terminal.modes.bracketedPasteMode,
       mouseTracking: mouseTrackingMode !== 'none',
       mouseTrackingMode,
-      sgrMouseMode: this.sgrMouseMode,
-      sgrMousePixelsMode: this.sgrMousePixelsMode,
+      sgrMouseMode: this.mouseModes.sgrMouseMode,
+      sgrMousePixelsMode: this.mouseModes.sgrMousePixelsMode,
       applicationCursor:
         buffer.type === 'normal' ? this.terminal.modes.applicationCursorKeysMode : false,
-      alternateScreen: buffer.type === 'alternate'
+      alternateScreen: buffer.type === 'alternate',
+      kittyKeyboardFlags: this.getKittyKeyboardFlags()
     }
   }
 
+  private getKittyKeyboardFlags(): number {
+    const flags = (this.terminal as TerminalWithSynchronousWrite)._core?.coreService?.kittyKeyboard
+      ?.flags
+    return typeof flags === 'number' ? flags : 0
+  }
+
   private buildRehydrateSequences(modes: TerminalModes): string {
+    // Why no kitty flags here: rehydrateSequences feeds renderer xterms, and
+    // POST_REPLAY_REATTACH_RESET's deliberate kitty reset (stale CSI-u Ctrl+C
+    // hazard) must stay authoritative. modes.kittyKeyboardFlags exists for
+    // emulator re-seed parity only; a re-seeded emulator answers ?0u and
+    // protocol-conformant programs re-push.
     const seqs: string[] = []
     if (modes.alternateScreen) {
       seqs.push('\x1b[?1049h')
