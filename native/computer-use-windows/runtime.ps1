@@ -856,55 +856,6 @@ function Set-OrcaElementValue($Element, [string]$Value) {
     $false
 }
 
-function Test-OrcaEditableTextElement($Element) {
-    if ($null -eq $Element) { return $false }
-    try {
-        $pattern = $Element.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)
-        if (-not $pattern.Current.IsReadOnly) { return $true }
-    } catch {}
-
-    $controlType = try { [string]$Element.Current.ControlType.ProgrammaticName } catch { "" }
-    $role = (Get-OrcaProperty $Element "LocalizedControlType").ToLowerInvariant()
-    $className = (Get-OrcaProperty $Element "ClassName").ToLowerInvariant()
-    ($controlType -match "(^|\.)Edit$") -or
-        $role -eq "edit" -or
-        $className -match "(edit|richedit)"
-}
-
-function Find-OrcaDescendant($RootElement, [scriptblock]$Predicate) {
-    if ($null -eq $RootElement) { return $null }
-    if (& $Predicate $RootElement) { return $RootElement }
-
-    try {
-        $descendants = $RootElement.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-        $limit = [Math]::Min($descendants.Count, $MaxNodes)
-        for ($i = 0; $i -lt $limit; $i++) {
-            $candidate = $descendants.Item($i)
-            if (& $Predicate $candidate) { return $candidate }
-        }
-    } catch {}
-    $null
-}
-
-function Focus-OrcaPasteTarget($RootElement) {
-    $focused = Find-OrcaDescendant $RootElement { param($Element)
-        try { [bool]$Element.Current.HasKeyboardFocus } catch { $false }
-    }
-    if (Test-OrcaEditableTextElement $focused) { return }
-
-    $editable = Find-OrcaDescendant $RootElement { param($Element)
-        Test-OrcaEditableTextElement $Element
-    }
-    if ($null -eq $editable) { return }
-
-    try {
-        # Why: newly opened Notepad can focus the window chrome while the edit
-        # document is only a descendant; Ctrl+V then leaves the document intact.
-        $editable.SetFocus()
-        Start-Sleep -Milliseconds 50
-    } catch {}
-}
-
 function Get-OrcaRequiredNumber($Value, [string]$Name) {
     if ($null -eq $Value) { throw "$Name is required" }
     $number = [double]$Value
@@ -1101,16 +1052,14 @@ function ConvertTo-OrcaSendKeysModifier([string]$Modifier) {
     }
 }
 
-function Send-OrcaPasteText([IntPtr]$WindowHandle, $RootElement, [string]$Text) {
+function Send-OrcaPasteText([IntPtr]$WindowHandle, [string]$Text) {
     $previous = $null
     $hadPrevious = $false
     try { $previous = [System.Windows.Forms.Clipboard]::GetDataObject() } catch {}
     $hadPrevious = $null -ne $previous
     try {
-        Focus-OrcaPasteTarget $RootElement
         Set-Clipboard -Value $Text
         Send-OrcaHotkey $WindowHandle "Ctrl+v"
-        Start-Sleep -Milliseconds 150
     } finally {
         if ($hadPrevious) {
             try { [System.Windows.Forms.Clipboard]::SetDataObject($previous, $true) } catch {}
@@ -1223,7 +1172,7 @@ function Invoke-OrcaOperation($Operation) {
             $action = [pscustomobject]@{ path = "synthetic"; actionName = "hotkey"; fallbackReason = $null; verification = [pscustomobject]@{ state = "unverified"; reason = "synthetic_input" } }
         }
         "paste_text" {
-            Send-OrcaPasteText $handle $root (Get-OrcaRequiredString $Operation.text "text")
+            Send-OrcaPasteText $handle (Get-OrcaRequiredString $Operation.text "text")
             $action = [pscustomobject]@{ path = "clipboard"; actionName = "paste"; fallbackReason = $null; verification = [pscustomobject]@{ state = "unverified"; reason = "clipboard_paste" } }
         }
         "set_value" {
