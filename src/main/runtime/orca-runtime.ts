@@ -252,6 +252,7 @@ import {
   listAssignableUsers
 } from '../github/client'
 import { resolveGitHubPrStartPoint } from '../github/pr-start-point'
+import { fetchPrHeadTrackingRef } from '../github/pr-head-tracking-ref'
 import { getWorkItemDetails, getPRFileContents } from '../github/work-item-details'
 import { getRateLimit } from '../github/rate-limit'
 import {
@@ -10663,6 +10664,11 @@ export class OrcaRuntimeService {
         }
       : () => getDefaultRemote(repo.path)
 
+    // Why: SSH repos can't fetch over the relay's read-only git.exec channel, so
+    // route the PR head fetch through the write-capable helper instead of gitExec.
+    const fetchRemoteTrackingRef = (remote: string, branch: string): Promise<void> =>
+      fetchPrHeadTrackingRef(repo, sshGitProvider, remote, branch)
+
     return resolveGitHubPrStartPoint({
       repoPath: repo.path,
       prNumber: args.prNumber,
@@ -10670,6 +10676,7 @@ export class OrcaRuntimeService {
       isCrossRepository: args.isCrossRepository,
       connectionId: repo.connectionId ?? null,
       gitExec,
+      fetchRemoteTrackingRef,
       resolveRemote
     })
   }
