@@ -280,6 +280,12 @@
             and remote agent detection returned <code>[]</code> without repeated handler errors.
           </li>
           <li class="pass">
+            Tasks drawer mutation routing is covered by focused source-boundary regression tests
+            for GitHub, GitLab, Linear, and Jira. The tests verify drawer actions carry the selected
+            task source context or repo selector through provider mutations and source-scoped
+            optimistic patches; live external mutations were skipped to avoid editing real issues.
+          </li>
+          <li class="pass">
             Focused locked-SSH Add Project regression test passed:
             <code>src/renderer/src/components/sidebar/AddRepoDialogStepContent.test.tsx</code>,
             9 tests.
