@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PreloadApi } from '../../../preload/api-types'
 import type { FeatureInteractionState } from '../../../shared/feature-interactions'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import type { TaskSourceContext } from '../../../shared/task-source-context'
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>()
@@ -1972,6 +1973,101 @@ describe('web GitLab preload API', () => {
         params: routeCase.expectedParams
       }))
     )
+  })
+
+  it('routes GitLab repo selectors through repo id when provided', async () => {
+    const runtimeCalls: { method: string; params: unknown }[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        call(method: string, params?: unknown): Promise<RuntimeRpcResponse<unknown>> {
+          runtimeCalls.push({ method, params })
+          return Promise.resolve({
+            id: `call-${runtimeCalls.length}`,
+            ok: true,
+            result: method === 'gitlab.workItemDetails' ? null : { ok: true, items: [] },
+            _meta: { runtimeId: 'runtime-1' }
+          })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+    const api = globals.window.api
+    const sourceContext: TaskSourceContext = {
+      kind: 'task-source',
+      provider: 'gitlab',
+      projectId: 'gitlab:gitlab.example.com/group/project',
+      hostId: 'runtime:web-env-1',
+      repoId: 'repo-gitlab-runtime',
+      providerIdentity: {
+        provider: 'gitlab',
+        projectId: '42',
+        namespace: 'group',
+        project: 'project',
+        webUrl: 'https://gitlab.example.com/group/project'
+      }
+    }
+
+    await api.gl.listIssues({
+      repoPath: '/workspace/repo',
+      repoId: 'repo-gitlab-runtime',
+      sourceContext,
+      state: 'opened'
+    })
+    await api.gl.updateMR({
+      repoPath: '/workspace/repo',
+      repoId: 'repo-gitlab-runtime',
+      sourceContext,
+      iid: 9,
+      updates: { title: 'New title' }
+    })
+    await api.gl.workItemDetails({
+      repoPath: '/workspace/repo',
+      repoId: 'repo-gitlab-runtime',
+      sourceContext,
+      iid: 9,
+      type: 'mr'
+    })
+
+    expect(runtimeCalls).toEqual([
+      {
+        method: 'gitlab.listIssues',
+        params: {
+          repoPath: '/workspace/repo',
+          repoId: 'repo-gitlab-runtime',
+          sourceContext,
+          repo: 'id:repo-gitlab-runtime',
+          state: 'opened'
+        }
+      },
+      {
+        method: 'gitlab.updateMR',
+        params: {
+          repoPath: '/workspace/repo',
+          repoId: 'repo-gitlab-runtime',
+          sourceContext,
+          repo: 'id:repo-gitlab-runtime',
+          iid: 9,
+          updates: { title: 'New title' }
+        }
+      },
+      {
+        method: 'gitlab.workItemDetails',
+        params: {
+          repoPath: '/workspace/repo',
+          repoId: 'repo-gitlab-runtime',
+          sourceContext,
+          repo: 'id:repo-gitlab-runtime',
+          iid: 9,
+          type: 'mr'
+        }
+      }
+    ])
   })
 
   it('exposes the GitLab task methods used by the shared Tasks page', async () => {

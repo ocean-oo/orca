@@ -286,6 +286,12 @@
             optimistic patches; live external mutations were skipped to avoid editing real issues.
           </li>
           <li class="pass">
+            GitLab path-only selector replacement is covered across renderer, desktop IPC, runtime
+            RPC, and web preload. The web preload regression now verifies that GitLab task/detail
+            mutation calls use <code>repo: id:&lt;repoId&gt;</code> when a repo id is supplied while
+            preserving the original task source context.
+          </li>
+          <li class="pass">
             Focused locked-SSH Add Project regression test passed:
             <code>src/renderer/src/components/sidebar/AddRepoDialogStepContent.test.tsx</code>,
             9 tests.
