@@ -23,6 +23,7 @@ export type TaskPageDialogWorkItemKey = {
 export type TaskPageRepoSourceState = {
   repoId: string
   repoPath: string
+  sourceKey: string
   sources: WorkItemsCacheSources | null
   error: WorkItemsCacheError | null
 }
@@ -70,6 +71,7 @@ export function buildTaskPageRepoSourceState(
     return {
       repoId: repo.id,
       repoPath: repo.path,
+      sourceKey: `${repo.id}::${repo.sourceCacheScope ?? repo.executionHostId ?? 'local'}`,
       sources: entry?.sources ?? null,
       error: entry?.error ?? null
     }

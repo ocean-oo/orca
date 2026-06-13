@@ -3256,33 +3256,33 @@ export default function TaskPage(): React.JSX.Element {
   // Why: on a partial-failure retry the cache still holds successful-side
   // data, so `tasksLoading` (which is gated on `anyUncached`) never flips
   // true and the Retry button would otherwise give no feedback. Track
-  // retry-in-flight per repo (keyed by `repoPath`) so that clicking Retry
-  // on one banner only flips that banner's button into its "Retrying…"
+  // retry-in-flight per selected source so that clicking Retry
+  // on one banner only flips that source's button into its "Retrying…"
   // state — other still-failing banners stay in their "Retry" state rather
   // than misleadingly flipping in lockstep. The fetch effect clears the set
   // when the nonce-driven refresh settles.
-  const [retryingRepoPaths, setRetryingRepoPaths] = useState<ReadonlySet<string>>(() => new Set())
+  const [retryingSourceKeys, setRetryingSourceKeys] = useState<ReadonlySet<string>>(() => new Set())
 
   const handleRetryIssuesFetch = useCallback(
-    (repoPath: string) => {
-      const repo = selectedRepos.find((r) => r.path === repoPath)
-      if (!repo) {
+    (sourceKey: string) => {
+      const source = perRepoSourceState.find((s) => s.sourceKey === sourceKey)
+      if (!source) {
         return
       }
       // Why: bumping the shared refresh nonce reuses the Tasks list's
       // single fetch path — nonce changes are treated as force=true so
       // retry doesn't silently dedupe onto a still-failing in-flight request.
       // The nonce bump refreshes ALL selected repos, but the Retrying…
-      // state is scoped to the clicked repo so other banners stay in their
+      // state is scoped to the clicked source so other banners stay in their
       // "Retry" state rather than misleadingly flipping to "Retrying…".
-      setRetryingRepoPaths((prev) => {
+      setRetryingSourceKeys((prev) => {
         const next = new Set(prev)
-        next.add(repoPath)
+        next.add(source.sourceKey)
         return next
       })
       setTaskRefreshNonce((n) => n + 1)
     },
-    [selectedRepos]
+    [perRepoSourceState]
   )
   const handleRefreshGithubTasks = useCallback((): void => {
     setTasksRefreshing(true)
@@ -5267,19 +5267,19 @@ export default function TaskPage(): React.JSX.Element {
     if (!taskResumeApplied) {
       return
     }
-    // Why: both early-return branches must clear `retryingRepoPaths` — if the
+    // Why: both early-return branches must clear `retryingSourceKeys` — if the
     // user clicks Retry and then switches `taskSource` away from 'github' (or
     // somehow ends up with zero repos selected) before the fetch dispatches,
     // neither the `.then` nor the `.catch` below will fire, and the Retry
     // button would stay stuck in its disabled/Retrying state indefinitely.
     if (taskSource !== 'github' || githubMode !== 'items') {
-      setRetryingRepoPaths(new Set())
+      setRetryingSourceKeys(new Set())
       setTasksRefreshing(false)
       setTasksFiltering(false)
       return
     }
     if (selectedRepos.length === 0) {
-      setRetryingRepoPaths(new Set())
+      setRetryingSourceKeys(new Set())
       setTasksRefreshing(false)
       setTasksFiltering(false)
       return
@@ -5360,29 +5360,29 @@ export default function TaskPage(): React.JSX.Element {
     // so the toolbar still shows a refresh-in-progress affordance.
     setTasksRefreshing(forcedFetch)
 
-    // Why: snapshot the retrying paths at effect-dispatch so overlapping
+    // Why: snapshot the retrying source keys at effect-dispatch so overlapping
     // retries don't clear each other's pending state. An earlier cancelled
     // effect settling after a newer retry starts would otherwise wipe the
-    // newer retry's repo from the set. Clearing only the paths captured
+    // newer retry's source from the set. Clearing only the keys captured
     // when this effect dispatched preserves later additions.
-    const dispatchedRetryPaths = retryingRepoPaths
+    const dispatchedRetrySourceKeys = retryingSourceKeys
     void fetchWorkItemsAcrossRepos(repoArgs, PER_REPO_FETCH_LIMIT, CROSS_REPO_DISPLAY_LIMIT, q, {
       ...deriveTaskPageGitHubWorkItemsFetchOptions(forcedFetch, shouldProbeOnLanding)
     })
       .then(({ items, failedCount: failed }) => {
-        // Why: clear only the repos this effect was responsible for
+        // Why: clear only the sources this effect was responsible for
         // retrying (the snapshot captured at dispatch time). Overlapping
         // retries — a second click while a prior fetch is still in flight
-        // — must not clear the newer repo from the set, so we can't just
+        // — must not clear the newer source from the set, so we can't just
         // reset the whole set here. The early-return branches above reset
         // the whole set because those branches won't dispatch a fetch.
-        setRetryingRepoPaths((prev) => {
-          if (dispatchedRetryPaths.size === 0) {
+        setRetryingSourceKeys((prev) => {
+          if (dispatchedRetrySourceKeys.size === 0) {
             return prev
           }
           const next = new Set(prev)
-          for (const p of dispatchedRetryPaths) {
-            next.delete(p)
+          for (const key of dispatchedRetrySourceKeys) {
+            next.delete(key)
           }
           return next
         })
@@ -5408,19 +5408,19 @@ export default function TaskPage(): React.JSX.Element {
       .catch((err) => {
         // Why: fetchWorkItemsAcrossRepos swallows per-repo failures, so a
         // reject here means an IPC-level or programmer error — surface it.
-        // Clear only the repos this effect was responsible for retrying
+        // Clear only the sources this effect was responsible for retrying
         // (the snapshot captured at dispatch time). Overlapping retries —
         // a second click while a prior fetch is still in flight — must
-        // not clear the newer repo from the set, so we can't just reset
+        // not clear the newer source from the set, so we can't just reset
         // the whole set here. The early-return branches above reset the
         // whole set because those branches won't dispatch a fetch.
-        setRetryingRepoPaths((prev) => {
-          if (dispatchedRetryPaths.size === 0) {
+        setRetryingSourceKeys((prev) => {
+          if (dispatchedRetrySourceKeys.size === 0) {
             return prev
           }
           const next = new Set(prev)
-          for (const p of dispatchedRetryPaths) {
-            next.delete(p)
+          for (const key of dispatchedRetrySourceKeys) {
+            next.delete(key)
           }
           return next
         })
@@ -8139,10 +8139,10 @@ export default function TaskPage(): React.JSX.Element {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleRetryIssuesFetch(s.repoPath)}
-                          disabled={tasksLoading || retryingRepoPaths.has(s.repoPath)}
+                          onClick={() => handleRetryIssuesFetch(s.sourceKey)}
+                          disabled={tasksLoading || retryingSourceKeys.has(s.sourceKey)}
                         >
-                          {retryingRepoPaths.has(s.repoPath) ? (
+                          {retryingSourceKeys.has(s.sourceKey) ? (
                             <span className="flex items-center gap-1">
                               <LoaderCircle className="h-3 w-3 animate-spin" />
                               {translate('auto.components.TaskPage.5b6b2af943', 'Retrying…')}

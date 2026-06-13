@@ -66,8 +66,31 @@ describe('task page cache selectors', () => {
       {
         repoId: 'repo-1',
         repoPath: '/repo/one',
+        sourceKey: 'repo-1::local',
         sources: null,
         error: null
+      }
+    ])
+  })
+
+  it('scopes repo source rows by source cache scope for retry ownership', () => {
+    const localRepo = {
+      id: 'repo-1',
+      path: '/same/path',
+      sourceCacheScope: 'source:local:github:stablyai/orca'
+    }
+    const sshRepo = {
+      id: 'repo-1',
+      path: '/same/path',
+      sourceCacheScope: 'source:ssh:devbox:github:stablyai/orca'
+    }
+
+    expect(buildTaskPageRepoSourceState([localRepo, sshRepo], [])).toMatchObject([
+      {
+        sourceKey: 'repo-1::source:local:github:stablyai/orca'
+      },
+      {
+        sourceKey: 'repo-1::source:ssh:devbox:github:stablyai/orca'
       }
     ])
   })
