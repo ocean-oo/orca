@@ -7,8 +7,9 @@ import { OrchestrationDb } from '../../orchestration/db'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import type { RuntimeTerminalSummary } from '../../../../shared/runtime-types'
 
-const WORKER_DONE_GROUP_RECIPIENT_ERROR =
-  'worker_done messages must be sent to a concrete coordinator terminal handle, not a group address.'
+function lifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
+  return `${type} messages must be sent to a concrete coordinator terminal handle, not a group address.`
+}
 
 describe('orchestration RPC methods', () => {
   let db: OrchestrationDb
@@ -118,7 +119,7 @@ describe('orchestration RPC methods', () => {
             subject: 'done',
             type: 'worker_done'
           })
-        ).rejects.toThrow(WORKER_DONE_GROUP_RECIPIENT_ERROR)
+        ).rejects.toThrow(lifecycleGroupRecipientError('worker_done'))
 
         expect(db.getInbox(100)).toHaveLength(0)
         expect(listTerminals).not.toHaveBeenCalled()
@@ -138,7 +139,7 @@ describe('orchestration RPC methods', () => {
           subject: 'done',
           type: 'worker_done'
         })
-      ).rejects.toThrow(WORKER_DONE_GROUP_RECIPIENT_ERROR)
+      ).rejects.toThrow(lifecycleGroupRecipientError('worker_done'))
 
       expect(listTerminals).not.toHaveBeenCalled()
       expect(db.getInbox(100)).toHaveLength(0)
@@ -162,7 +163,7 @@ describe('orchestration RPC methods', () => {
         ok: false,
         error: {
           code: 'invalid_argument',
-          message: WORKER_DONE_GROUP_RECIPIENT_ERROR
+          message: lifecycleGroupRecipientError('worker_done')
         }
       })
       expect(listTerminals).not.toHaveBeenCalled()
@@ -231,6 +232,24 @@ describe('orchestration RPC methods', () => {
       expect(result.recipients).toBe(2)
       expect(result.messages.map((m) => m.to_handle).sort()).toEqual(['term_b', 'term_c'])
       expect(result.messages.every((m) => m.type === 'status')).toBe(true)
+    })
+
+    it('rejects heartbeat group sends before inserting rows', async () => {
+      setup()
+      const listTerminals = vi.spyOn(runtime, 'listTerminals')
+
+      await expect(
+        call('orchestration.send', {
+          from: 'term_worker',
+          to: '@all',
+          subject: 'alive',
+          type: 'heartbeat',
+          payload: JSON.stringify({ taskId: 'task_1', dispatchId: 'ctx_1' })
+        })
+      ).rejects.toThrow(lifecycleGroupRecipientError('heartbeat'))
+
+      expect(listTerminals).not.toHaveBeenCalled()
+      expect(db.getInbox(100)).toHaveLength(0)
     })
 
     it('continues to send worker_done to a concrete terminal handle', async () => {

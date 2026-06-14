@@ -28,8 +28,9 @@ const TASK_STATUSES: TaskStatus[] = [
   'blocked'
 ]
 
-const WORKER_DONE_GROUP_RECIPIENT_ERROR =
-  'worker_done messages must be sent to a concrete coordinator terminal handle, not a group address.'
+function getLifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
+  return `${type} messages must be sent to a concrete coordinator terminal handle, not a group address.`
+}
 
 const SendParams = z
   .object({
@@ -55,12 +56,17 @@ const SendParams = z
     devMode: OptionalBoolean
   })
   .superRefine((params, ctx) => {
-    if (params.type !== 'worker_done' || !isGroupAddress(params.to)) {
+    if (
+      (params.type !== 'worker_done' && params.type !== 'heartbeat') ||
+      !isGroupAddress(params.to)
+    ) {
       return
     }
+    // Why: dispatch lifecycle messages are authority/liveness signals for one
+    // coordinator. Fanout creates lifecycle mail in unrelated terminals.
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: WORKER_DONE_GROUP_RECIPIENT_ERROR,
+      message: getLifecycleGroupRecipientError(params.type),
       path: ['to']
     })
   })

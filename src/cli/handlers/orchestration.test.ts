@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const callMock = vi.fn()
 const getTerminalHandleMock = vi.hoisted(() => vi.fn())
 const originalTerminalHandle = process.env.ORCA_TERMINAL_HANDLE
-const WORKER_DONE_GROUP_RECIPIENT_ERROR =
-  'worker_done messages must be sent to a concrete coordinator terminal handle, not a group address.'
+function lifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
+  return `${type} messages must be sent to a concrete coordinator terminal handle, not a group address.`
+}
 
 // Why: isolate the handler's flag-to-param mapping; printResult only writes output.
 vi.mock('../format', () => ({ printResult: vi.fn() }))
@@ -136,7 +137,27 @@ describe('orchestration send structured payload flags', () => {
       )
     ).rejects.toMatchObject({
       code: 'invalid_argument',
-      message: WORKER_DONE_GROUP_RECIPIENT_ERROR
+      message: lifecycleGroupRecipientError('worker_done')
+    })
+
+    expect(getTerminalHandleMock).not.toHaveBeenCalled()
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects heartbeat group sends before resolving a sender handle', async () => {
+    getTerminalHandleMock.mockRejectedValue(new Error('sender resolution should not run'))
+
+    await expect(
+      invokeSend(
+        new Map<string, string | boolean>([
+          ['to', '@idle'],
+          ['subject', 'alive'],
+          ['type', 'heartbeat']
+        ])
+      )
+    ).rejects.toMatchObject({
+      code: 'invalid_argument',
+      message: lifecycleGroupRecipientError('heartbeat')
     })
 
     expect(getTerminalHandleMock).not.toHaveBeenCalled()

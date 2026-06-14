@@ -14,8 +14,9 @@ import { getTerminalHandle } from '../selectors'
 // parent process the subprocess is alive without flooding logs. See design
 // doc §3.4.
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000
-const WORKER_DONE_GROUP_RECIPIENT_ERROR =
-  'worker_done messages must be sent to a concrete coordinator terminal handle, not a group address.'
+function getLifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
+  return `${type} messages must be sent to a concrete coordinator terminal handle, not a group address.`
+}
 
 // Why: test-only escape hatch so subprocess tests can verify the feature in
 // under 10 s rather than needing a full 15 s silence window. Production users
@@ -164,9 +165,9 @@ function getOptionalPositiveIntegerValueFlag(
   return value
 }
 
-function rejectWorkerDoneGroupRecipient(type: string | undefined, to: string): void {
-  if (type === 'worker_done' && to.startsWith('@')) {
-    throw new RuntimeClientError('invalid_argument', WORKER_DONE_GROUP_RECIPIENT_ERROR)
+function rejectLifecycleGroupRecipient(type: string | undefined, to: string): void {
+  if ((type === 'worker_done' || type === 'heartbeat') && to.startsWith('@')) {
+    throw new RuntimeClientError('invalid_argument', getLifecycleGroupRecipientError(type))
   }
 }
 
@@ -174,7 +175,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
   'orchestration send': async ({ flags, client, cwd, json }) => {
     const to = getRequiredStringFlag(flags, 'to')
     const type = getOptionalStringFlag(flags, 'type')
-    rejectWorkerDoneGroupRecipient(type, to)
+    rejectLifecycleGroupRecipient(type, to)
 
     const from = await resolveOrchestrationTerminalHandle(flags, cwd, client, 'from')
     const result = await client.call<
