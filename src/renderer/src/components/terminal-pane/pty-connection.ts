@@ -786,6 +786,7 @@ export function connectPanePty(
   let pendingTerminalBellNotification = false
   let reattachIdleAgentCursorResetTimer: ReturnType<typeof setTimeout> | null = null
   let synchronizedForegroundOutputActive = false
+  let synchronizedHiddenOutputActive = false
   // Why: idle callbacks are registered before the deferred PTY output plumbing
   // exists. Start with the shared scheduler, then switch to the PTY writer
   // below so hidden-tab resets keep backlog-recovery callbacks and byte order.
@@ -2442,6 +2443,10 @@ export function connectPanePty(
       // hidden xterm is dirty, skipping is safer than sending stale CPR/DECRQM.
     }
 
+    function isHiddenStartupRendererQueryWindowActive(): boolean {
+      return shouldSnapshotHiddenCodexOutput && hiddenStartupRendererQueryPending.length > 0
+    }
+
     function takeHiddenStartupRendererQueryPendingForForeground(data: string): {
       statelessQueryData: string
       statefulQueryData: string
@@ -3001,6 +3006,12 @@ export function connectPanePty(
           })
         }
         writePtyOutputToXterm(rendererData, foreground)
+      }
+      if (!foreground) {
+        synchronizedHiddenOutputActive = shouldSynchronizedOutputRemainActive(
+          data,
+          synchronizedHiddenOutputActive
+        )
       }
 
       schedulePendingStartupCommandDelivery()
