@@ -56,20 +56,29 @@ describe('SmartWorkspaceNameField repo-backed source boundaries', () => {
     expect(FIELD_SOURCE).toContain(') : allowCrossRepoProjectAdd ? (')
   })
 
-  it('keeps the repo-backed task source menu scoped to repo-backed tabs', () => {
-    const sourceMenuSection = sourceBetween(
+  it('searches repo-backed task sources through implicit repo targets instead of a menu', () => {
+    expect(FIELD_SOURCE).not.toContain('RepoBackedSourceMenu')
+    expect(FIELD_SOURCE).not.toContain('repoBackedSourceOptions')
+    expect(FIELD_SOURCE).toContain('repoBackedSearchRepos?: readonly RepoOption[]')
+
+    const targetSection = sourceBetween(
       FIELD_SOURCE,
-      'const repoBackedSourceModeActive =',
-      'useEffect(() => {\n    if (availableModes.some((item) => item.id === mode))'
+      'const repoBackedSearchTargets = useMemo',
+      'const linearSourceContext = useMemo'
     )
 
-    expect(sourceMenuSection).toContain("mode === 'smart'")
-    expect(sourceMenuSection).toContain("mode === 'github'")
-    expect(sourceMenuSection).toContain("mode === 'gitlab'")
-    expect(sourceMenuSection).toContain('!textOnly')
-    expect(sourceMenuSection).toContain('repoBackedSourceOptions.length > 1')
-    expect(sourceMenuSection).toContain('Boolean(repoBackedSourceEmptyMessage)')
-    expect(sourceMenuSection).toContain('repoBackedSourceRequiresConnection')
+    expect(targetSection).toContain('repoBackedSearchRepos.length > 0')
+    expect(targetSection).toContain('githubSourceContext')
+    expect(targetSection).toContain('gitlabSourceContext')
+
+    const githubLookupSection = sourceBetween(
+      FIELD_SOURCE,
+      'const shouldQueryGithub =',
+      'const branchSearchRequest = useMemo'
+    )
+    expect(githubLookupSection).toContain('repoBackedSearchTargets.length > 0')
+    expect(githubLookupSection).toContain('fetchWorkItemsAcrossRepos')
+    expect(githubLookupSection).toContain('repoBackedSearchTargets.map')
   })
 
   it('reports the active source mode without lifting source search state', () => {

@@ -9115,11 +9115,6 @@
             "searchLinear": "Linear 이슈 검색",
             "workspaceName": "작업 영역 이름"
           },
-          "RepoBackedSourceMenu": {
-            "chooseRepo": "저장소 선택",
-            "chooseSearchRepo": "작업 검색 저장소 선택",
-            "searchTasksIn": "작업 검색 위치"
-          },
           "ProjectHostSetupCombobox": {
             "empty": "No hosts are ready for this project.",
             "placeholder": "Choose host"

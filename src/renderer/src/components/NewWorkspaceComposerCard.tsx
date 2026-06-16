@@ -46,8 +46,8 @@ import type { TaskSourceContext } from '../../../shared/task-source-context'
 import { translate } from '@/i18n/i18n'
 
 type RepoOption = React.ComponentProps<typeof RepoCombobox>['repos'][number]
-const EMPTY_PROJECT_HOST_SETUP_OPTIONS: ProjectHostSetupOption[] = []
 const EMPTY_PROJECT_OPTIONS: NewWorkspaceProjectOption[] = []
+const EMPTY_PROJECT_HOST_SETUP_OPTIONS: ProjectHostSetupOption[] = []
 
 type NewWorkspaceComposerCardProps = {
   contextualTourSource?: string
@@ -67,15 +67,8 @@ type NewWorkspaceComposerCardProps = {
   projectHostSetupOptions?: ProjectHostSetupOption[]
   selectedProjectHostSetupId?: string | null
   onProjectHostSetupChange?: (setupId: string) => void
-  taskSourceProjectOptions?: NewWorkspaceProjectOption[]
-  selectedTaskSourceProjectId?: string | null
-  onTaskSourceProjectChange?: (projectId: string) => void
-  taskSourceEmptyMessage?: string | null
-  sourceLookupRequiresConnection?: boolean
-  sourceLookupConnectionId?: string | null
-  sourceLookupSshStatus?: SshConnectionStatus | null
-  sourceLookupConnectInProgress?: boolean
-  onConnectSourceLookupRepo?: () => Promise<void>
+  repoBackedSearchRepos?: RepoOption[]
+  repoBackedSourcesDisabled?: boolean
   allowSmartNameAddProject?: boolean
   smartNameRepoSwitchTarget?: 'project' | 'task-source'
   primaryActionLabel: string
@@ -307,15 +300,8 @@ export default function NewWorkspaceComposerCard({
   projectHostSetupOptions = EMPTY_PROJECT_HOST_SETUP_OPTIONS,
   selectedProjectHostSetupId = null,
   onProjectHostSetupChange,
-  taskSourceProjectOptions = EMPTY_PROJECT_OPTIONS,
-  selectedTaskSourceProjectId = null,
-  onTaskSourceProjectChange,
-  taskSourceEmptyMessage = null,
-  sourceLookupRequiresConnection = false,
-  sourceLookupConnectionId = null,
-  sourceLookupSshStatus = null,
-  sourceLookupConnectInProgress = false,
-  onConnectSourceLookupRepo,
+  repoBackedSearchRepos,
+  repoBackedSourcesDisabled = false,
   allowSmartNameAddProject = true,
   smartNameRepoSwitchTarget = 'project',
   primaryActionLabel,
@@ -389,13 +375,6 @@ export default function NewWorkspaceComposerCard({
     selectedRepoSshStatus === 'disconnected' || selectedRepoSshStatus === null
       ? 'Connect'
       : 'Reconnect'
-  const sourceLookupSshStatusLabel = sourceLookupSshStatus
-    ? getSshStatusLabel(sourceLookupSshStatus)
-    : translate('auto.components.NewWorkspaceComposerCard.notConnected', 'Not connected')
-  const sourceLookupConnectButtonLabel =
-    sourceLookupSshStatus === 'disconnected' || sourceLookupSshStatus === null
-      ? translate('auto.components.NewWorkspaceComposerCard.connectSourceLookup', 'Connect')
-      : translate('auto.components.NewWorkspaceComposerCard.reconnectSourceLookup', 'Reconnect')
   const setupConfigLabel =
     setupConfig?.kind === 'default-tabs'
       ? 'Default tab commands'
@@ -657,17 +636,8 @@ export default function NewWorkspaceComposerCard({
             )}
             textOnly={!selectedRepoIsGit}
             branchesEnabled={branchesEnabled}
-            repoBackedSourcesDisabled={sourceLookupRequiresConnection}
-            repoBackedSourceOptions={taskSourceProjectOptions}
-            repoBackedSourceId={selectedTaskSourceProjectId}
-            onRepoBackedSourceChange={onTaskSourceProjectChange}
-            repoBackedSourceEmptyMessage={taskSourceEmptyMessage}
-            repoBackedSourceRequiresConnection={sourceLookupRequiresConnection}
-            repoBackedSourceConnectionId={sourceLookupConnectionId}
-            repoBackedSourceSshStatusLabel={sourceLookupSshStatusLabel}
-            repoBackedSourceConnectButtonLabel={sourceLookupConnectButtonLabel}
-            repoBackedSourceConnectInProgress={sourceLookupConnectInProgress}
-            onConnectRepoBackedSource={onConnectSourceLookupRepo}
+            repoBackedSourcesDisabled={repoBackedSourcesDisabled}
+            repoBackedSearchRepos={repoBackedSearchRepos}
             allowCrossRepoProjectAdd={allowSmartNameAddProject}
             crossRepoSwitchTarget={smartNameRepoSwitchTarget}
             onPlainEnter={() => {

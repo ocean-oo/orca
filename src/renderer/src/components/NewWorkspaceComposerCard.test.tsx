@@ -39,33 +39,21 @@ vi.mock('@/components/new-workspace/SmartWorkspaceNameField', () => ({
   default: ({
     branchesEnabled,
     repoBackedSourcesDisabled,
-    repoBackedSourceOptions = [],
-    repoBackedSourceId,
-    repoBackedSourceRequiresConnection,
-    repoBackedSourceConnectionId
+    repoBackedSearchRepos = []
   }: {
     branchesEnabled?: boolean
     repoBackedSourcesDisabled?: boolean
-    repoBackedSourceOptions?: NewWorkspaceProjectOption[]
-    repoBackedSourceId?: string | null
-    repoBackedSourceRequiresConnection?: boolean
-    repoBackedSourceConnectionId?: string | null
+    repoBackedSearchRepos?: { displayName: string }[]
   }) => (
-    <>
-      <input
-        aria-label="workspace name"
-        data-branches-enabled={branchesEnabled ? 'true' : 'false'}
-        data-repo-backed-sources-disabled={repoBackedSourcesDisabled ? 'true' : 'false'}
-        data-source-requires-connection={repoBackedSourceRequiresConnection ? 'true' : 'false'}
-        data-source-connection-id={repoBackedSourceConnectionId ?? ''}
-      />
-      {repoBackedSourceOptions.length > 0 ? (
-        <button type="button" data-testid="repo-backed-source-trigger">
-          {repoBackedSourceOptions.find((option) => option.id === repoBackedSourceId)
-            ?.displayName ?? 'Task Source'}
-        </button>
-      ) : null}
-    </>
+    <input
+      aria-label="workspace name"
+      data-branches-enabled={branchesEnabled ? 'true' : 'false'}
+      data-repo-backed-search-count={repoBackedSearchRepos.length}
+      data-repo-backed-search-names={repoBackedSearchRepos
+        .map((repo) => repo.displayName)
+        .join(',')}
+      data-repo-backed-sources-disabled={repoBackedSourcesDisabled ? 'true' : 'false'}
+    />
   )
 }))
 
@@ -102,22 +90,18 @@ const projectOptions: NewWorkspaceProjectOption[] = [
   }
 ]
 
-const sourceOptions: NewWorkspaceProjectOption[] = [
+const sourceRepos = [
   {
-    kind: 'project',
-    id: 'repo-a-project',
-    projectId: 'repo-a-project',
+    id: 'repo-a',
     displayName: 'Repo A',
-    badgeColor: '#111111',
-    detail: 'org/repo-a'
+    path: '/repo-a',
+    badgeColor: '#111111'
   },
   {
-    kind: 'project',
-    id: 'repo-b-project',
-    projectId: 'repo-b-project',
+    id: 'repo-b',
     displayName: 'Repo B',
-    badgeColor: '#222222',
-    detail: 'org/repo-b'
+    path: '/repo-b',
+    badgeColor: '#222222'
   }
 ]
 
@@ -194,11 +178,9 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
     current = null
   })
 
-  it('passes folder task sources into the create-from field compact source trigger', () => {
+  it('passes folder child repos into the create-from field without a source trigger', () => {
     current = renderCard({
-      taskSourceProjectOptions: sourceOptions,
-      selectedTaskSourceProjectId: 'repo-a-project',
-      onTaskSourceProjectChange: vi.fn()
+      repoBackedSearchRepos: sourceRepos as never
     })
 
     const projectSection = current.container.querySelector(
@@ -209,8 +191,17 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
     )
     expect(projectSection?.textContent).not.toContain('Task Source')
     expect(nameSection?.textContent).toContain("Name or 'Create From'")
-    expect(nameSection?.textContent).toContain('Repo A')
-    expect(nameSection?.textContent).not.toContain('Repo B')
+    expect(
+      current.container
+        .querySelector('[aria-label="workspace name"]')
+        ?.getAttribute('data-repo-backed-search-count')
+    ).toBe('2')
+    expect(
+      current.container
+        .querySelector('[aria-label="workspace name"]')
+        ?.getAttribute('data-repo-backed-search-names')
+    ).toBe('Repo A,Repo B')
+    expect(current.container.querySelector('[data-testid="repo-backed-source-trigger"]')).toBeNull()
     expect(current.container.querySelectorAll('[data-testid="project-combobox"]')).toHaveLength(1)
   })
 
@@ -219,13 +210,8 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
       eligibleRepos: [
         { id: 'repo-a', displayName: 'Repo A', path: '/repo-a', connectionId: 'ssh-a' } as never
       ],
-      taskSourceProjectOptions: sourceOptions,
-      selectedTaskSourceProjectId: 'repo-a-project',
-      sourceLookupRequiresConnection: true,
-      sourceLookupConnectionId: 'ssh-a',
-      sourceLookupSshStatus: 'disconnected',
-      sourceLookupConnectInProgress: false,
-      onConnectSourceLookupRepo: async () => {}
+      repoBackedSearchRepos: sourceRepos as never,
+      repoBackedSourcesDisabled: false
     })
 
     const createButton = [...current.container.querySelectorAll('button')].find((button) =>
@@ -237,16 +223,6 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
       current.container
         .querySelector('[aria-label="workspace name"]')
         ?.getAttribute('data-repo-backed-sources-disabled')
-    ).toBe('true')
-    expect(
-      current.container
-        .querySelector('[aria-label="workspace name"]')
-        ?.getAttribute('data-source-requires-connection')
-    ).toBe('true')
-    expect(
-      current.container
-        .querySelector('[aria-label="workspace name"]')
-        ?.getAttribute('data-source-connection-id')
-    ).toBe('ssh-a')
+    ).toBe('false')
   })
 })

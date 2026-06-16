@@ -46,17 +46,15 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).not.toContain('repoId: repoForItem.id')
   })
 
-  it('does not use local SSH gates for runtime-owned folder targets or sources', () => {
+  it('does not use local SSH gates for runtime-owned folder targets', () => {
     const targetSection = sourceBetween(
       HOOK_SOURCE,
-      'const selectedFolderSourceProjectId',
+      'const parsedFolderTargetHost',
       'const selectedWorkspaceTarget'
     )
-    expect(targetSection).toContain('parsedFolderSourceHost')
-    expect(targetSection).toContain("parsedFolderSourceHost?.kind === 'runtime'")
     expect(targetSection).toContain("parsedFolderTargetHost?.kind === 'runtime'")
-    expect(targetSection).toContain('connectionId: folderSourceConnectionId')
     expect(targetSection).toContain('connectionId: folderTargetConnectionId')
+    expect(HOOK_SOURCE).not.toContain('folderSourceConnectionId')
   })
 
   it('routes folder target runtime ownership through detection, path status, and create', () => {
@@ -139,28 +137,31 @@ describe('useComposerState host-context boundaries', () => {
       'const resolvePendingSmartGitHubSubmit',
       'const resolution = getSmartGitHubSubmitResolution(item)'
     )
-    expect(submitLookup).toContain('sourceContext: selectedRepoGitHubSourceContext')
+    expect(submitLookup).toContain('sourceContext:')
+    expect(submitLookup).toContain('selectedRepoGitHubSourceContext')
   })
 
-  it('skips submit-time GitHub smart resolution when folder task source lookup needs SSH', () => {
+  it('resolves submit-time GitHub smart input when folder child repos exist', () => {
     expect(
       canResolveFolderSmartGitHubSubmit({
-        hasFolderSourceRepo: true,
-        folderSourceRequiresConnection: true
-      })
-    ).toBe(false)
-    expect(
-      canResolveFolderSmartGitHubSubmit({
-        hasFolderSourceRepo: true,
-        folderSourceRequiresConnection: false
+        hasFolderSourceRepos: true
       })
     ).toBe(true)
     expect(
       canResolveFolderSmartGitHubSubmit({
-        hasFolderSourceRepo: false,
-        folderSourceRequiresConnection: false
+        hasFolderSourceRepos: false
       })
     ).toBe(false)
+
+    const lookupSection = sourceBetween(
+      HOOK_SOURCE,
+      'const resolvePendingSmartGitHubSubmit',
+      'const resolution = getSmartGitHubSubmitResolution(item)'
+    )
+    expect(lookupSection).toContain('isProjectGroupTarget')
+    expect(lookupSection).toContain('folderSourceRepos.filter(isGitRepoKind)')
+    expect(lookupSection).toContain('Promise.all')
+    expect(lookupSection).toContain('buildTaskSourceContextFromRepo')
 
     const section = sourceBetween(
       HOOK_SOURCE,
@@ -168,10 +169,10 @@ describe('useComposerState host-context boundaries', () => {
       'const submit = useCallback'
     )
     expect(section).toContain('canResolveFolderSmartGitHubSubmit')
-    expect(section).toContain('folderSourceRequiresConnection')
-    expect(section).toContain('hasFolderSourceRepo: selectedFolderSourceRepo !== null')
+    expect(section).toContain('hasFolderSourceRepos: folderSourceRepos.length > 0')
     expect(section).toContain('? await resolvePendingSmartGitHubSubmit()')
     expect(section).toContain(': null')
+    expect(section).not.toContain('folderSourceRequiresConnection')
   })
 
   it('forces repo-scoped source reset when returning from folder target to a repo with the same id', () => {
@@ -240,7 +241,12 @@ describe('useComposerState host-context boundaries', () => {
       'const cardProps: ComposerCardProps = {',
       'return {'
     )
-    expect(cardProps).toContain('folderSourceRequiresConnection || folderSourceRepos.length === 0')
+    expect(cardProps).toContain(
+      'repoBackedSourcesDisabled: isProjectGroupTarget ? folderSourceRepos.length === 0 : false'
+    )
+    expect(cardProps).toContain(
+      'repoBackedSearchRepos: isProjectGroupTarget ? folderSourceRepos : undefined'
+    )
   })
 
   it('surfaces folder submit smart-resolution failures through create error UI', () => {
@@ -257,29 +263,25 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).toContain('setCreateError({')
   })
 
-  it('builds folder task source options from concrete repos instead of deduped projects', () => {
-    const section = sourceBetween(
+  it('passes folder child repos to smart lookup instead of building task source options', () => {
+    const cardProps = sourceBetween(
       HOOK_SOURCE,
-      'const folderSourceProjectOptions = useMemo',
-      'const selectedFolderSourceRepo'
+      'const cardProps: ComposerCardProps = {',
+      'return {'
     )
-    expect(section).toContain('buildNewWorkspaceFolderSourceOptions(folderSourceRepos)')
-    expect(section).not.toContain('buildNewWorkspaceProjectOptions')
-
-    const handler = sourceBetween(
-      HOOK_SOURCE,
-      'const handleFolderTaskSourceProjectChange = useCallback',
-      'const handleProjectHostSetupChange = useCallback'
+    expect(cardProps).toContain(
+      'repoBackedSearchRepos: isProjectGroupTarget ? folderSourceRepos : undefined'
     )
-    expect(handler).toContain('getRepoIdFromNewWorkspaceFolderSourceOptionId')
-    expect(handler).toContain('handleFolderSourceRepoChange(sourceRepoId)')
+    expect(HOOK_SOURCE).not.toContain('folderSourceProjectOptions')
+    expect(HOOK_SOURCE).not.toContain('handleFolderTaskSourceProjectChange')
+    expect(HOOK_SOURCE).not.toContain('getRepoIdFromNewWorkspaceFolderSourceOptionId')
   })
 
-  it('keeps folder task source changes inside the selected folder source set', () => {
+  it('keeps folder run repo changes inside the selected folder source set', () => {
     const section = sourceBetween(
       HOOK_SOURCE,
       'const handleFolderSourceRepoChange = useCallback',
-      'const handleFolderTaskSourceProjectChange = useCallback'
+      'const handleProjectHostSetupChange = useCallback'
     )
     expect(section).toContain('folderSourceRepos.some((repo) => repo.id === value)')
     expect(section).toContain('return')

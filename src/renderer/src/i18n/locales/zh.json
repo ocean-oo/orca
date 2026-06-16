@@ -9115,11 +9115,6 @@
             "searchLinear": "搜索 Linear 议题",
             "workspaceName": "工作区名称"
           },
-          "RepoBackedSourceMenu": {
-            "chooseRepo": "选择仓库",
-            "chooseSearchRepo": "选择任务搜索仓库",
-            "searchTasksIn": "搜索任务于"
-          },
           "ProjectHostSetupCombobox": {
             "empty": "No hosts are ready for this project.",
             "placeholder": "Choose host"

@@ -105,9 +105,7 @@ import {
 } from '@/lib/project-host-setup-options'
 import {
   buildNewWorkspaceCreateTargetOptions,
-  buildNewWorkspaceFolderSourceOptions,
   getProjectGroupIdFromNewWorkspaceOptionId,
-  getRepoIdFromNewWorkspaceFolderSourceOptionId,
   type NewWorkspaceProjectOption
 } from '@/lib/new-workspace-project-options'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
@@ -156,13 +154,11 @@ import {
 import { translate } from '@/i18n/i18n'
 
 export function canResolveFolderSmartGitHubSubmit({
-  hasFolderSourceRepo,
-  folderSourceRequiresConnection
+  hasFolderSourceRepos
 }: {
-  hasFolderSourceRepo: boolean
-  folderSourceRequiresConnection: boolean
+  hasFolderSourceRepos: boolean
 }): boolean {
-  return hasFolderSourceRepo && !folderSourceRequiresConnection
+  return hasFolderSourceRepos
 }
 
 export type UseComposerStateOptions = {
@@ -212,15 +208,8 @@ export type ComposerCardProps = {
   projectHostSetupOptions: ProjectHostSetupOption[]
   selectedProjectHostSetupId: string | null
   onProjectHostSetupChange: (setupId: string) => void
-  taskSourceProjectOptions?: NewWorkspaceProjectOption[]
-  selectedTaskSourceProjectId?: string | null
-  onTaskSourceProjectChange?: (projectId: string) => void
-  taskSourceEmptyMessage?: string | null
-  sourceLookupRequiresConnection?: boolean
-  sourceLookupConnectionId?: string | null
-  sourceLookupSshStatus?: SshConnectionStatus | null
-  sourceLookupConnectInProgress?: boolean
-  onConnectSourceLookupRepo?: () => Promise<void>
+  repoBackedSearchRepos?: ReturnType<typeof useAppStore.getState>['repos']
+  repoBackedSourcesDisabled?: boolean
   allowSmartNameAddProject?: boolean
   smartNameRepoSwitchTarget?: 'project' | 'task-source'
   name: string
@@ -523,31 +512,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     () => getFolderSourceRepos(repos, projectGroups, selectedProjectGroup),
     [projectGroups, repos, selectedProjectGroup]
   )
-  const folderSourceProjectOptions = useMemo(
-    () => buildNewWorkspaceFolderSourceOptions(folderSourceRepos),
-    [folderSourceRepos]
-  )
-  const selectedFolderSourceRepo =
-    folderSourceRepos.find((candidate) => candidate.id === repoId) ?? null
-  const selectedFolderSourceProjectId = selectedFolderSourceRepo
-    ? `folder-source:${selectedFolderSourceRepo.id}`
-    : null
-  const parsedFolderSourceHost = parseExecutionHostId(selectedFolderSourceRepo?.executionHostId)
-  const folderSourceConnectionId =
-    parsedFolderSourceHost?.kind === 'runtime'
-      ? null
-      : (selectedFolderSourceRepo?.connectionId ?? null)
-  const folderSourceSshState = folderSourceConnectionId
-    ? (sshConnectionStates.get(folderSourceConnectionId) ?? null)
-    : null
-  const {
-    selectedRepoSshStatus: folderSourceSshStatus,
-    selectedRepoRequiresConnection: folderSourceRequiresConnection,
-    selectedRepoConnectInProgress: folderSourceConnectInProgress
-  } = getSelectedRepoSshGate({
-    connectionId: folderSourceConnectionId,
-    status: folderSourceSshState?.status ?? null
-  })
   const parsedFolderTargetHost = parseExecutionHostId(selectedProjectGroup?.executionHostId)
   const folderTargetRuntimeEnvironmentId =
     parsedFolderTargetHost?.kind === 'runtime' ? parsedFolderTargetHost.environmentId : null
@@ -1432,27 +1396,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     }
   }, [folderTargetConnectionId])
 
-  const onConnectFolderSourceRepo = useCallback(async (): Promise<void> => {
-    if (!folderSourceConnectionId) {
-      return
-    }
-    const liveStatus = useAppStore
-      .getState()
-      .sshConnectionStates.get(folderSourceConnectionId)?.status
-    if (liveStatus === 'connected' || isSshConnectInProgress(liveStatus ?? null)) {
-      return
-    }
-    try {
-      await window.api.ssh.connect({ targetId: folderSourceConnectionId })
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : translate('auto.hooks.useComposerState.ba6cb77082', 'Failed to connect to project.')
-      )
-    }
-  }, [folderSourceConnectionId])
-
   // Why: warm the Start-from picker's PR cache on composer mount and whenever
   // the selected repo changes so opening the picker paints instantly from
   // cache.
@@ -1664,7 +1607,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
 
   const resolvePendingSmartGitHubSubmit =
     useCallback(async (): Promise<SmartGitHubSubmitResolution | null> => {
-      if (linkedWorkItem || !selectedRepo || !selectedRepoIsGit) {
+      if (linkedWorkItem) {
         return null
       }
 
@@ -1673,14 +1616,37 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         return null
       }
 
-      const item = await lookupSmartGitHubSubmitItem({
-        repoPath: selectedRepo.path,
-        repoId: selectedRepo.id,
-        sourceContext: selectedRepoGitHubSourceContext,
-        intent,
-        workItem: lookupGitHubWorkItemForSource,
-        workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
-      })
+      const item = isProjectGroupTarget
+        ? (
+            await Promise.all(
+              folderSourceRepos.filter(isGitRepoKind).map((repo) =>
+                lookupSmartGitHubSubmitItem({
+                  repoPath: repo.path,
+                  repoId: repo.id,
+                  sourceContext: buildTaskSourceContextFromRepo({
+                    provider: 'github',
+                    projectId: repo.id,
+                    repo
+                  }),
+                  intent,
+                  workItem: lookupGitHubWorkItemForSource,
+                  workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
+                }).catch(() => null)
+              )
+            )
+          )
+            .filter((candidate): candidate is GitHubWorkItem => candidate !== null)
+            .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
+        : selectedRepo && selectedRepoIsGit
+          ? await lookupSmartGitHubSubmitItem({
+              repoPath: selectedRepo.path,
+              repoId: selectedRepo.id,
+              sourceContext: selectedRepoGitHubSourceContext,
+              intent,
+              workItem: lookupGitHubWorkItemForSource,
+              workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
+            })
+          : null
       if (!item) {
         throw new Error('Could not resolve the GitHub item before creating the workspace.')
       }
@@ -1702,7 +1668,15 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       branchAutoNameRef.current = ''
       setStartFromResetHint(null)
       return resolution
-    }, [linkedWorkItem, name, selectedRepo, selectedRepoGitHubSourceContext, selectedRepoIsGit])
+    }, [
+      folderSourceRepos,
+      isProjectGroupTarget,
+      linkedWorkItem,
+      name,
+      selectedRepo,
+      selectedRepoGitHubSourceContext,
+      selectedRepoIsGit
+    ])
 
   // Why: GitHub/GitLab review routing prefers one provider identity. Clear
   // the opposite provider slots so stale hidden fields cannot win later.
@@ -2102,15 +2076,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setLinkedGitLabMR(null)
     },
     [folderSourceRepos, setRepoId]
-  )
-  const handleFolderTaskSourceProjectChange = useCallback(
-    (projectId: string): void => {
-      const sourceRepoId = getRepoIdFromNewWorkspaceFolderSourceOptionId(projectId)
-      if (sourceRepoId) {
-        handleFolderSourceRepoChange(sourceRepoId)
-      }
-    },
-    [handleFolderSourceRepoChange]
   )
   const handleProjectHostSetupChange = useCallback(
     (setupId: string): void => {
@@ -2633,8 +2598,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setCreating(true)
       try {
         const shouldResolveSmartGitHubSubmit = canResolveFolderSmartGitHubSubmit({
-          hasFolderSourceRepo: selectedFolderSourceRepo !== null,
-          folderSourceRequiresConnection
+          hasFolderSourceRepos: folderSourceRepos.length > 0
         })
         const smartGitHubResolution = shouldResolveSmartGitHubSubmit
           ? await resolvePendingSmartGitHubSubmit()
@@ -2695,15 +2659,14 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       folderCreateDisabled,
       folderTargetIsRemote,
       folderTargetRuntimeEnvironmentId,
+      folderSourceRepos.length,
       linkedWorkItem,
       name,
       note,
       onCreated,
       persistDraft,
       resolvePendingSmartGitHubSubmit,
-      selectedFolderSourceRepo,
       selectedProjectGroup,
-      folderSourceRequiresConnection,
       settings?.agentCmdOverrides,
       settings?.agentDefaultArgs,
       settings?.agentDefaultEnv,
@@ -3347,25 +3310,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     projectHostSetupOptions: isProjectGroupTarget ? [] : projectHostSetupOptions,
     selectedProjectHostSetupId: isProjectGroupTarget ? null : selectedProjectHostSetupId,
     onProjectHostSetupChange: handleProjectHostSetupChange,
-    taskSourceProjectOptions: isProjectGroupTarget ? folderSourceProjectOptions : undefined,
-    selectedTaskSourceProjectId: isProjectGroupTarget ? selectedFolderSourceProjectId : null,
-    onTaskSourceProjectChange: isProjectGroupTarget
-      ? handleFolderTaskSourceProjectChange
-      : undefined,
-    taskSourceEmptyMessage:
-      isProjectGroupTarget && folderSourceRepos.length === 0
-        ? translate(
-            'auto.components.sidebar.FolderWorkspaceComposerDialog.noRepos',
-            'Add a Git project under this folder to attach GitHub or GitLab tasks.'
-          )
-        : null,
-    sourceLookupRequiresConnection: isProjectGroupTarget
-      ? folderSourceRequiresConnection || folderSourceRepos.length === 0
-      : false,
-    sourceLookupConnectionId: isProjectGroupTarget ? folderSourceConnectionId : null,
-    sourceLookupSshStatus: isProjectGroupTarget ? folderSourceSshStatus : null,
-    sourceLookupConnectInProgress: isProjectGroupTarget ? folderSourceConnectInProgress : false,
-    onConnectSourceLookupRepo: isProjectGroupTarget ? onConnectFolderSourceRepo : undefined,
+    repoBackedSearchRepos: isProjectGroupTarget ? folderSourceRepos : undefined,
+    repoBackedSourcesDisabled: isProjectGroupTarget ? folderSourceRepos.length === 0 : false,
     allowSmartNameAddProject: !isProjectGroupTarget,
     smartNameRepoSwitchTarget: isProjectGroupTarget ? 'task-source' : 'project',
     name,
