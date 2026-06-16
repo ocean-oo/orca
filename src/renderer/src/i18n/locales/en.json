@@ -1793,7 +1793,8 @@
             "fd15491034": "Open view in GitHub",
             "22df63c393": "Sub-issue data is unavailable for your token.",
             "067119985c": "GitHub search, e.g. assignee:@me is:open",
-            "1850fceac8": "{{value0}}/{{value1}} isn't added to Orca. Add it to start work, or open in GitHub."
+            "1850fceac8": "{{value0}}/{{value1}} isn't added to Orca. Add it to start work, or open in GitHub.",
+            "1aa7c952b9": "Project view"
           },
           "slug": {
             "dialog": {
@@ -4285,7 +4286,13 @@
           "cfb3f35775": "Arguments",
           "6f99bf5dd0": "No default arguments",
           "8fbe1f37c1": "Environment",
-          "2d133152fa": "No default environment"
+          "2d133152fa": "No default environment",
+          "agentPermissions": "Agent Permissions",
+          "agentPermissionsInfo": "Agent permissions info",
+          "agentPermissionsTooltip": "Doesn't apply to agents where you've overridden launch arguments.",
+          "agentPermissionsDescription": "Choose whether Orca launches agents with fewer permission prompts or with manual checks.",
+          "agentPermissionsYolo": "Yolo",
+          "agentPermissionsManual": "Manual"
         },
         "AppIconSelector": {
           "d5a112dc9b": "Next icon",
@@ -6356,7 +6363,9 @@
             "5784ae8c43": "rename",
             "8a17fd6026": "stable",
             "a79d266f71": "session",
-            "afbf35be68": "stable session"
+            "afbf35be68": "stable session",
+            "agentPermissions": "Agent Permissions",
+            "agentPermissionsDescription": "Switch agent permission defaults between Yolo and Manual."
           }
         },
         "appearance": {
@@ -8050,7 +8059,8 @@
             "9a8b85882d": "loading",
             "62e685d5ec": "idle",
             "111e1d0db4": "error",
-            "e5e81e59a6": "Resize commits"
+            "e5e81e59a6": "Resize commits",
+            "6d1e0a7c3b": "Failed to load commit files"
           },
           "HostedReviewActions": {
             "4d5fb5a284": "Close",
@@ -8323,7 +8333,14 @@
             "e2b7a1c0d9f4": "Failed to create {{value0}}",
             "hugeRepoIgnorePrompt": "This repository has too many active changes. Add \"{{value0}}\" to .gitignore?",
             "hugeRepoIgnoreAction": "Add to .gitignore",
-            "tooManyChanges": "Too many changes detected. Only the first {{value0}} are shown."
+            "tooManyChanges": "Too many changes detected. Only the first {{value0}} are shown.",
+            "bf5082de46": "{{value0}} copied",
+            "c06193ef57": "Failed to copy {{value0}}",
+            "d172a4f068": "Commit hash",
+            "e283b50179": "Commit message",
+            "f394c6128a": "No agent available to explain this commit",
+            "04a5d7239b": "This repository has no supported web remote",
+            "15b6e834ac": "Failed to open commit in browser"
           },
           "SourceControlAgentActionDialog": {
             "8e856842d1": "Could not start the selected agent.",
@@ -8747,6 +8764,21 @@
             "copyLogPath": "Copy Log Path",
             "messageCount": "{{value0}} msgs",
             "tokenCount": "{{value0}} tok"
+          },
+          "GitHistoryCommitFiles": {
+            "a1b2c3d4e5": "Loading files…",
+            "b2c3d4e5f6": "No file changes in this commit",
+            "c3d4e5f6a7": "Open all changes together"
+          },
+          "GitHistoryRow": {
+            "2f9c41ab07": "Show files in commit {{value0}}: {{value1}}",
+            "4a8d9e0c1f": "Hide files in commit {{value0}}: {{value1}}"
+          },
+          "GitHistoryCommitContextMenu": {
+            "7b1c4e9a02": "Open commit in browser",
+            "8c2d5fab13": "Copy commit hash",
+            "9d3e60bc24": "Copy commit message",
+            "ae4f71cd35": "Explain changes"
           }
         }
       },
@@ -8816,7 +8848,10 @@
           "69af7e9c1c": "isn't on your PATH yet. Orca will set it as your default and you can install it any time.",
           "1eee1c7bd8": "No agents detected on your PATH. Pick one to install later, or continue with a blank terminal.",
           "hideAgents": "Hide agents",
-          "showMoreAgents": "Show {{value0}} more agents→"
+          "showMoreAgents": "Show {{value0}} more agents→",
+          "yoloPermissionsLabel": "Yolo / Dangerously skip permissions",
+          "yoloPermissionsInfo": "Agent permission info",
+          "yoloPermissionsTooltip": "Skip permission checks for agents for less interruptions"
         },
         "FeatureSetupChecklist": {
           "77f74946f5": "Agents can message each other, take tasks, and coordinate handoffs.",

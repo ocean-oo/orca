@@ -1793,7 +1793,8 @@
             "fd15491034": "GitHub でビューを開く",
             "22df63c393": "トークンではサブイシューデータを利用できません。",
             "067119985c": "GitHub 検索、例:担当者:@me は:開いています",
-            "1850fceac8": "{{value0}}/{{value1}} は Orca に追加されません。これを追加して作業を開始するか、GitHub で開きます。"
+            "1850fceac8": "{{value0}}/{{value1}} は Orca に追加されません。これを追加して作業を開始するか、GitHub で開きます。",
+            "1aa7c952b9": "Project view"
           },
           "slug": {
             "dialog": {
@@ -4270,7 +4271,13 @@
           "cfb3f35775": "Arguments",
           "6f99bf5dd0": "No default arguments",
           "8fbe1f37c1": "Environment",
-          "2d133152fa": "No default environment"
+          "2d133152fa": "No default environment",
+          "agentPermissions": "Agent Permissions",
+          "agentPermissionsInfo": "Agent permissions info",
+          "agentPermissionsTooltip": "Custom agent arguments stay unchanged when switching modes.",
+          "agentPermissionsDescription": "Choose whether Orca launches agents with fewer permission prompts or with manual checks.",
+          "agentPermissionsYolo": "Yolo",
+          "agentPermissionsManual": "Manual"
         },
         "AppIconSelector": {
           "d5a112dc9b": "次へのアイコン",
@@ -6341,7 +6348,9 @@
             "5784ae8c43": "名前変更",
             "8a17fd6026": "安定",
             "a79d266f71": "セッション",
-            "afbf35be68": "安定したセッション"
+            "afbf35be68": "安定したセッション",
+            "agentPermissions": "Agent Permissions",
+            "agentPermissionsDescription": "Switch agent permission defaults between Yolo and Manual."
           }
         },
         "appearance": {
@@ -8050,7 +8059,8 @@
             "9a8b85882d": "読み込み中",
             "62e685d5ec": "idle",
             "111e1d0db4": "エラー",
-            "e5e81e59a6": "commits のサイズ変更"
+            "e5e81e59a6": "commits のサイズ変更",
+            "6d1e0a7c3b": "コミットファイルを読み込めませんでした"
           },
           "HostedReviewActions": {
             "4d5fb5a284": "閉じる",
@@ -8323,7 +8333,14 @@
             "e2b7a1c0d9f4": "{{value0}} の作成に失敗しました",
             "hugeRepoIgnorePrompt": "このリポジトリにはアクティブな変更が多すぎます。「{{value0}}」を .gitignore に追加しますか？",
             "hugeRepoIgnoreAction": ".gitignore に追加",
-            "tooManyChanges": "検出された変更が多すぎます。最初の {{value0}} 件のみ表示しています。"
+            "tooManyChanges": "検出された変更が多すぎます。最初の {{value0}} 件のみ表示しています。",
+            "bf5082de46": "{{value0}}をコピーしました",
+            "c06193ef57": "{{value0}}をコピーできませんでした",
+            "d172a4f068": "コミットハッシュ",
+            "e283b50179": "コミットメッセージ",
+            "f394c6128a": "このコミットを説明できるエージェントがありません",
+            "04a5d7239b": "このリポジトリには対応するWebリモートがありません",
+            "15b6e834ac": "コミットをブラウザーで開けませんでした"
           },
           "SourceControlAgentActionDialog": {
             "8e856842d1": "選択した agent を開始できませんでした。",
@@ -8747,6 +8764,21 @@
             "copyLogPath": "Copy Log Path",
             "messageCount": "{{value0}} msgs",
             "tokenCount": "{{value0}} tok"
+          },
+          "GitHistoryCommitFiles": {
+            "a1b2c3d4e5": "ファイルを読み込み中…",
+            "b2c3d4e5f6": "このコミットにはファイルの変更がありません",
+            "c3d4e5f6a7": "すべての変更をまとめて開く"
+          },
+          "GitHistoryRow": {
+            "2f9c41ab07": "コミット{{value0}}のファイルを表示: {{value1}}",
+            "4a8d9e0c1f": "コミット{{value0}}のファイルを非表示: {{value1}}"
+          },
+          "GitHistoryCommitContextMenu": {
+            "7b1c4e9a02": "コミットをブラウザーで開く",
+            "8c2d5fab13": "コミットハッシュをコピー",
+            "9d3e60bc24": "コミットメッセージをコピー",
+            "ae4f71cd35": "変更を説明"
           }
         }
       },
@@ -8816,7 +8848,10 @@
           "69af7e9c1c": "はまだ PATH 上にありません。 Orca はこれをデフォルトとして設定し、いつでもインストールできます。",
           "1eee1c7bd8": "PATH 上に agents が検出されませんでした。後でインストールするものを選択するか、空の terminal を使用して続行します。",
           "hideAgents": "agents を非表示にする",
-          "showMoreAgents": "{{value0}} 件の agents をさらに表示→"
+          "showMoreAgents": "{{value0}} 件の agents をさらに表示→",
+          "yoloPermissionsLabel": "Yolo / Dangerously skip permissions",
+          "yoloPermissionsInfo": "Agent permission info",
+          "yoloPermissionsTooltip": "Skip permission checks for agents for less interruptions"
         },
         "FeatureSetupChecklist": {
           "77f74946f5": "Agents は相互にメッセージを送信し、タスクを実行し、引き継ぎを調整できます。",
