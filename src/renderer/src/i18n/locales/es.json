@@ -9118,7 +9118,6 @@
           "RepoBackedSourceMenu": {
             "chooseRepo": "Elegir repo",
             "chooseSearchRepo": "Elegir repo para buscar tareas",
-            "searchIn": "Buscar en",
             "searchTasksIn": "Buscar tareas en"
           },
           "ProjectHostSetupCombobox": {

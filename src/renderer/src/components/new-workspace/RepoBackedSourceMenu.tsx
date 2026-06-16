@@ -40,10 +40,6 @@ export default function RepoBackedSourceMenu({
   const triggerRepoLabel =
     selectedOption?.displayName ??
     translate('auto.components.new.workspace.RepoBackedSourceMenu.chooseRepo', 'Choose repo')
-  const searchInLabel = translate(
-    'auto.components.new.workspace.RepoBackedSourceMenu.searchIn',
-    'Search in'
-  )
   const showConnectionRow = requiresConnection && Boolean(connectionId) && onConnect !== undefined
 
   return (
@@ -53,13 +49,12 @@ export default function RepoBackedSourceMenu({
           type="button"
           variant="outline"
           size="xs"
-          className="h-7 max-w-[14rem] shrink-0 gap-1.5 px-2 text-xs font-normal"
+          className="h-7 max-w-[11rem] shrink-0 gap-1.5 px-2 text-xs font-normal"
           aria-label={translate(
             'auto.components.new.workspace.RepoBackedSourceMenu.chooseSearchRepo',
             'Choose task search repo'
           )}
         >
-          <span className="shrink-0 text-muted-foreground">{searchInLabel}:</span>
           <span className="min-w-0 truncate">{triggerRepoLabel}</span>
           <ChevronDown className="size-3 opacity-55" />
         </Button>

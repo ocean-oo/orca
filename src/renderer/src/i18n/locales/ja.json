@@ -9118,7 +9118,6 @@
           "RepoBackedSourceMenu": {
             "chooseRepo": "リポジトリを選択",
             "chooseSearchRepo": "タスク検索用リポジトリを選択",
-            "searchIn": "検索先",
             "searchTasksIn": "タスクの検索先"
           },
           "ProjectHostSetupCombobox": {
