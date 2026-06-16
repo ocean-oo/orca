@@ -7,6 +7,7 @@ import {
   isClaudeManagementTitle,
   isShellProcess
 } from '../../shared/agent-detection'
+import { extractOscTitleScanTail } from '../../shared/osc-title-scan-tail'
 import type { AgentStatus } from '../../shared/agent-detection'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -774,6 +775,7 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
   lastExitCode: number | null
   tailBuffer: string[]
   tailPartialLine: string
+  tailPendingAnsi: string
   tailTruncated: boolean
   tailLinesTotal: number
   preview: string
@@ -834,6 +836,7 @@ type RuntimePtyWorktreeRecord = {
   lastOutputAt: number | null
   tailBuffer: string[]
   tailPartialLine: string
+  tailPendingAnsi: string
   tailTruncated: boolean
   tailLinesTotal: number
   preview: string
@@ -1705,6 +1708,9 @@ export class OrcaRuntimeService {
     string,
     ReturnType<typeof createAgentStatusOscProcessor>
   >()
+  // Why: ordinary OSC 0/1/2 titles can split across PTY chunks, especially over
+  // SSH/relay buffering. Keep a small raw scan tail so status titles are not lost.
+  private oscTitleScanTailByPtyId = new Map<string, string>()
   // Why: latest agent-status payload per pane, retained so worktree.ps can serve
   // mobile the same inline agent rows the desktop sidebar renders. Cleared on pty
   // teardown so dead agents don't linger. See RuntimeAgentRowSnapshot.
@@ -2412,6 +2418,8 @@ export class OrcaRuntimeService {
         existing && existing.ptyId !== ptyId
           ? existing.ptyGeneration + 1
           : (existing?.ptyGeneration ?? 0)
+      const existingPty = ptyId ? this.ptysById.get(ptyId) : undefined
+      const tailSource = existing?.ptyId === ptyId ? existing : existingPty
 
       nextLeaves.set(leafKey, {
         ...leaf,
@@ -2419,16 +2427,17 @@ export class OrcaRuntimeService {
         ptyGeneration,
         connected: ptyId !== null,
         writable: this.graphStatus === 'ready' && ptyId !== null,
-        lastOutputAt: existing?.ptyId === ptyId ? existing.lastOutputAt : null,
-        lastExitCode: existing?.ptyId === ptyId ? existing.lastExitCode : null,
-        tailBuffer: existing?.ptyId === ptyId ? existing.tailBuffer : [],
-        tailPartialLine: existing?.ptyId === ptyId ? existing.tailPartialLine : '',
-        tailTruncated: existing?.ptyId === ptyId ? existing.tailTruncated : false,
-        tailLinesTotal: existing?.ptyId === ptyId ? existing.tailLinesTotal : 0,
-        preview: existing?.ptyId === ptyId ? existing.preview : '',
-        lastAgentStatus: existing?.ptyId === ptyId ? existing.lastAgentStatus : null,
-        lastOscTitle: existing?.ptyId === ptyId ? existing.lastOscTitle : null,
-        lastOscTitleAt: existing?.ptyId === ptyId ? existing.lastOscTitleAt : null,
+        lastOutputAt: tailSource?.lastOutputAt ?? null,
+        lastExitCode: tailSource?.lastExitCode ?? null,
+        tailBuffer: tailSource?.tailBuffer ?? [],
+        tailPartialLine: tailSource?.tailPartialLine ?? '',
+        tailPendingAnsi: tailSource?.tailPendingAnsi ?? '',
+        tailTruncated: tailSource?.tailTruncated ?? false,
+        tailLinesTotal: tailSource?.tailLinesTotal ?? 0,
+        preview: tailSource?.preview ?? '',
+        lastAgentStatus: tailSource?.lastAgentStatus ?? null,
+        lastOscTitle: tailSource?.lastOscTitle ?? null,
+        lastOscTitleAt: tailSource?.lastOscTitleAt ?? null,
         paneTitleUpdatedAt:
           existing?.ptyId === ptyId && existing.paneTitle === leaf.paneTitle
             ? existing.paneTitleUpdatedAt
@@ -3746,20 +3755,16 @@ export class OrcaRuntimeService {
     // strips the escape sequences. Agent CLIs (Claude Code, Gemini, etc.)
     // announce status via OSC 0/1/2 title sequences — this is the same
     // detection path the renderer uses for notifications and sidebar badges.
-    const oscTitle = extractLastOscTitle(data)
+    const oscTitle = this.extractLastOscTitleForPty(ptyId, data)
     const agentStatus = oscTitle ? detectAgentStatusFromTitle(oscTitle) : null
 
-    let normalizedData: string | null = null
-    const getNormalizedData = (): string => {
-      normalizedData ??= normalizeTerminalChunk(data)
-      return normalizedData
-    }
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
     let shouldTouchPtyBackedSessionTabs = false
     const ptyTailBefore = pty
       ? {
           lines: pty.tailBuffer,
           partialLine: pty.tailPartialLine,
+          pendingAnsi: pty.tailPendingAnsi,
           truncated: pty.tailTruncated,
           linesTotal: pty.tailLinesTotal
         }
@@ -3769,10 +3774,12 @@ export class OrcaRuntimeService {
       pty.connected = true
       pty.disconnectedAt = null
       pty.lastOutputAt = at
+      const normalized = normalizeTerminalChunk(data, pty.tailPendingAnsi)
+      pty.tailPendingAnsi = normalized.pendingAnsi
       const nextTail = appendNormalizedToTailBuffer(
         pty.tailBuffer,
         pty.tailPartialLine,
-        getNormalizedData()
+        normalized.text
       )
       ptyTailAfter = nextTail
       pty.tailBuffer = nextTail.lines
@@ -3814,6 +3821,7 @@ export class OrcaRuntimeService {
         tailStateMatches(
           leaf.tailBuffer,
           leaf.tailPartialLine,
+          leaf.tailPendingAnsi,
           leaf.tailTruncated,
           leaf.tailLinesTotal,
           ptyTailBefore
@@ -3823,14 +3831,17 @@ export class OrcaRuntimeService {
         // the PTY tail update instead of splitting large output twice.
         leaf.tailBuffer = pty.tailBuffer
         leaf.tailPartialLine = pty.tailPartialLine
+        leaf.tailPendingAnsi = pty.tailPendingAnsi
         leaf.tailTruncated = pty.tailTruncated
         leaf.tailLinesTotal = pty.tailLinesTotal
         leaf.preview = pty.preview
       } else {
+        const normalized = normalizeTerminalChunk(data, leaf.tailPendingAnsi)
+        leaf.tailPendingAnsi = normalized.pendingAnsi
         const nextTail = appendNormalizedToTailBuffer(
           leaf.tailBuffer,
           leaf.tailPartialLine,
-          getNormalizedData()
+          normalized.text
         )
         leaf.tailBuffer = nextTail.lines
         leaf.tailPartialLine = nextTail.partialLine
@@ -3891,6 +3902,21 @@ export class OrcaRuntimeService {
       this.agentStatusOscProcessorsByPtyId.set(ptyId, processor)
     }
     return processor(data)
+  }
+
+  private extractLastOscTitleForPty(ptyId: string, data: string): string | null {
+    const previousTail = this.oscTitleScanTailByPtyId.get(ptyId)
+    if (!previousTail && !data.includes('\x1b')) {
+      return null
+    }
+    const input = `${previousTail ?? ''}${data}`
+    const scanTail = extractOscTitleScanTail(input)
+    if (scanTail.length > 0) {
+      this.oscTitleScanTailByPtyId.set(ptyId, scanTail)
+    } else {
+      this.oscTitleScanTailByPtyId.delete(ptyId)
+    }
+    return extractLastOscTitle(input)
   }
 
   private emitTerminalAgentStatusEvents(ptyId: string, chunk: ProcessedAgentStatusChunk): void {
@@ -5193,6 +5219,7 @@ export class OrcaRuntimeService {
     this.recentPtyOutputById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
     this.agentStatusOscProcessorsByPtyId.delete(ptyId)
+    this.oscTitleScanTailByPtyId.delete(ptyId)
     this.clearAgentRowSnapshotsForPty(ptyId)
     // Layout state machine: clear `layouts` and `layoutQueues`. Any
     // already-queued applyLayout work for this ptyId will run, but every
@@ -14183,6 +14210,7 @@ export class OrcaRuntimeService {
         lastOutputAt: state.lastOutputAt ?? null,
         tailBuffer: [],
         tailPartialLine: '',
+        tailPendingAnsi: '',
         tailTruncated: false,
         tailLinesTotal: 0,
         preview: state.preview ?? ''
@@ -14301,6 +14329,7 @@ export class OrcaRuntimeService {
     // but their retained transcripts must not accumulate after the process dies.
     pty.tailBuffer = []
     pty.tailPartialLine = ''
+    pty.tailPendingAnsi = ''
     pty.tailTruncated = false
     pty.tailLinesTotal = 0
   }
@@ -14324,6 +14353,7 @@ export class OrcaRuntimeService {
     this.recentPtyOutputById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
     this.agentStatusOscProcessorsByPtyId.delete(ptyId)
+    this.oscTitleScanTailByPtyId.delete(ptyId)
     this.clearAgentRowSnapshotsForPty(ptyId)
     const handle = this.handleByPtyId.get(ptyId)
     if (handle) {
@@ -18574,6 +18604,7 @@ export class OrcaRuntimeService {
 const MAX_TAIL_LINES = 2000
 const MAX_TAIL_CHARS = 256 * 1024
 const MAX_TAIL_PARTIAL_CHARS = 4000
+const MAX_TAIL_PENDING_ANSI_CHARS = 4096
 const DEFAULT_TERMINAL_READ_LIMIT = 120
 const MAX_TERMINAL_READ_LIMIT = 2000
 const MAX_TERMINAL_PREVIEW_CHARS = 32 * 1024
@@ -18861,23 +18892,38 @@ function parseAnsiControlSequence(
     }
     return null
   }
+  if (isStTerminatedStringControlIntroducer(introducer)) {
+    for (let index = escapeIndex + 2; index < value.length; index += 1) {
+      if (value[index] === '\u001b' && value[index + 1] === '\\') {
+        return { kind: 'other', endIndex: index + 1 }
+      }
+    }
+    return null
+  }
   return { kind: 'other', endIndex: escapeIndex + 1 }
+}
+
+function isStTerminatedStringControlIntroducer(introducer: string | undefined): boolean {
+  return introducer === 'P' || introducer === 'X' || introducer === '^' || introducer === '_'
 }
 
 function tailStateMatches(
   lines: string[],
   partialLine: string,
+  pendingAnsi: string,
   truncated: boolean,
   linesTotal: number,
   snapshot: {
     lines: string[]
     partialLine: string
+    pendingAnsi: string
     truncated: boolean
     linesTotal: number
   }
 ): boolean {
   if (
     partialLine !== snapshot.partialLine ||
+    pendingAnsi !== snapshot.pendingAnsi ||
     truncated !== snapshot.truncated ||
     linesTotal !== snapshot.linesTotal ||
     lines.length !== snapshot.lines.length
@@ -19475,18 +19521,50 @@ function mergeWorktreeStatus(
   return WORKTREE_STATUS_PRIORITY[next] > WORKTREE_STATUS_PRIORITY[current] ? next : current
 }
 
-function normalizeTerminalChunk(chunk: string): string {
+function normalizeTerminalChunk(
+  chunk: string,
+  pendingAnsi: string = ''
+): { text: string; pendingAnsi: string } {
   // Why: most high-throughput PTY chunks are plain printable text. Avoid
   // running every ANSI/OSC regex over megabytes that do not need normalization.
-  if (!terminalChunkNeedsNormalization(chunk)) {
-    return chunk
+  if (pendingAnsi.length === 0 && !terminalChunkNeedsNormalization(chunk)) {
+    return { text: chunk, pendingAnsi: '' }
   }
-  return chunk
-    .replace(/\r\n/g, '\n')
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[@-_]/g, '')
-    .replace(/[^\x08\x09\x0a\x0d\x20-\x7e]/g, '')
+  const combined = `${pendingAnsi}${chunk}`
+  let text = ''
+  for (let index = 0; index < combined.length; index += 1) {
+    const char = combined[index]
+    if (char === '\x1b') {
+      if (index + 1 >= combined.length) {
+        return { text, pendingAnsi: combined.slice(index) }
+      }
+      const parsed = parseAnsiControlSequence(combined, index)
+      if (!parsed) {
+        return {
+          text,
+          pendingAnsi: trimPendingAnsiControl(combined.slice(index))
+        }
+      }
+      index = parsed.endIndex
+      continue
+    }
+    if (char === '\r' && combined[index + 1] === '\n') {
+      text += '\n'
+      index += 1
+      continue
+    }
+    const code = combined.charCodeAt(index)
+    if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0d) {
+      text += char
+    } else if (isTerminalPreviewPrintableCodeUnit(code)) {
+      text += char
+    }
+  }
+  return { text, pendingAnsi: '' }
+}
+
+function isTerminalPreviewPrintableCodeUnit(code: number): boolean {
+  return code >= 0x20 && code !== 0x7f && (code < 0x80 || code > 0x9f)
 }
 
 function terminalChunkNeedsNormalization(chunk: string): boolean {
@@ -19494,15 +19572,25 @@ function terminalChunkNeedsNormalization(chunk: string): boolean {
     const code = chunk.charCodeAt(index)
     if (
       code === 0x1b ||
+      code === 0x7f ||
       code === 0x0d ||
       code < 0x09 ||
       (code > 0x0a && code < 0x20) ||
-      code > 0x7e
+      (code >= 0x80 && code <= 0x9f)
     ) {
       return true
     }
   }
   return false
+}
+
+function trimPendingAnsiControl(value: string): string {
+  if (value.length <= MAX_TAIL_PENDING_ANSI_CHARS) {
+    return value
+  }
+  const introducer = value.slice(0, Math.min(2, value.length))
+  const suffixBudget = Math.max(0, MAX_TAIL_PENDING_ANSI_CHARS - introducer.length)
+  return `${introducer}${value.slice(-suffixBudget)}`
 }
 
 function maxTimestamp(left: number | null, right: number | null): number | null {

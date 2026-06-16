@@ -6411,6 +6411,140 @@ describe('OrcaRuntimeService', () => {
     expect(read.latestCursor).toBe('1')
   })
 
+  it('does not retain split ANSI controls as visible terminal preview text', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+    runtime.onPtyData('pty-1', 'Working\r\x1b[', 100)
+    runtime.onPtyData('pty-1', '38;2;190;210;223;49mWo', 101)
+
+    const colorRead = await runtime.readTerminal(terminal.handle)
+    const colorRetained = colorRead.tail.join('\n')
+    expect(colorRetained).toContain('Wo')
+    expect(colorRetained).not.toContain('38;2')
+    expect(colorRetained).not.toContain('49m')
+
+    runtime.onPtyData('pty-1', 'rking\x1b[?2026', 102)
+    runtime.onPtyData('pty-1', 'l', 103)
+
+    const modeRead = await runtime.readTerminal(terminal.handle)
+    const retained = modeRead.tail.join('\n')
+    expect(retained).toContain('Working')
+    expect(retained).not.toContain('38;2')
+    expect(retained).not.toContain('?2026')
+    expect(retained).not.toContain('49m')
+
+    runtime.onPtyData('pty-1', ` done\x1b]0;${'x'.repeat(5000)}`, 104)
+    runtime.onPtyData('pty-1', '\u0007\n', 105)
+
+    const longRead = await runtime.readTerminal(terminal.handle)
+    const longRetained = longRead.tail.join('\n')
+    expect(longRetained).toContain('Working done')
+    expect(longRetained).not.toContain('x'.repeat(100))
+    const pty = (
+      runtime as unknown as {
+        ptysById: Map<string, { lastOscTitle: string | null }>
+      }
+    ).ptysById.get('pty-1')
+    expect(pty?.lastOscTitle).toBe('x'.repeat(4092))
+  })
+
+  it('does not retain split ST-terminated string controls as preview text', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+    runtime.onPtyData('pty-1', 'Before \x1b_Gi=31337,s=1,', 100)
+    runtime.onPtyData('pty-1', 'v=1,a=q,t=d,f=24;AAAA\x1b\\After\n', 101)
+
+    const read = await runtime.readTerminal(terminal.handle)
+    const retained = read.tail.join('\n')
+    expect(retained).toContain('BeforeAfter')
+    expect(retained).not.toContain('Gi=31337')
+    expect(retained).not.toContain('AAAA')
+  })
+
+  it('preserves non-ASCII terminal preview text in chunks with controls', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+    runtime.onPtyData('pty-1', '\x1b[32mHéllo 🌊\x1b[0m\n', 100)
+
+    const read = await runtime.readTerminal(terminal.handle)
+    expect(read.tail).toEqual(['Héllo 🌊'])
+  })
+
+  it('detects split OSC titles before retaining terminal previews', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    runtime.onPtyData('pty-1', '\x1b]0;Codex work', 100)
+    runtime.onPtyData('pty-1', 'ing\x07Visible\n', 101)
+
+    const pty = (
+      runtime as unknown as {
+        ptysById: Map<string, { lastOscTitle: string | null; lastAgentStatus: string | null }>
+      }
+    ).ptysById.get('pty-1')
+    expect(pty?.lastOscTitle).toBe('Codex working')
+    expect(pty?.lastAgentStatus).toBe('working')
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+    const read = await runtime.readTerminal(terminal.handle)
+    expect(read.tail.join('\n')).toContain('Visible')
+    expect(read.tail.join('\n')).not.toContain('Codex working')
+  })
+
+  it('detects ST-terminated OSC titles split before the final backslash', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    runtime.onPtyData('pty-1', '\x1b]0;Codex working\x1b', 100)
+    runtime.onPtyData('pty-1', '\\Visible\n', 101)
+
+    const pty = (
+      runtime as unknown as {
+        ptysById: Map<string, { lastOscTitle: string | null; lastAgentStatus: string | null }>
+      }
+    ).ptysById.get('pty-1')
+    expect(pty?.lastOscTitle).toBe('Codex working')
+    expect(pty?.lastAgentStatus).toBe('working')
+  })
+
+  it('preserves a trailing escape after a completed OSC title', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    syncSinglePty(runtime)
+
+    runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07\x1b', 100)
+    runtime.onPtyData('pty-1', ']0;Codex done\x07Visible\n', 101)
+
+    const pty = (
+      runtime as unknown as {
+        ptysById: Map<string, { lastOscTitle: string | null; lastAgentStatus: string | null }>
+      }
+    ).ptysById.get('pty-1')
+    expect(pty?.lastOscTitle).toBe('Codex done')
+    expect(pty?.lastAgentStatus).toBe('idle')
+  })
+
+  it('seeds newly synced leaves from PTY pending ANSI state', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.registerPty('pty-1', TEST_WORKTREE_ID)
+    runtime.onPtyData('pty-1', 'Working\r\x1b[', 100)
+
+    syncSinglePty(runtime)
+    const [terminal] = (await runtime.listTerminals()).terminals
+    runtime.onPtyData('pty-1', '38;2;190;210;223;49mDone\n', 101)
+
+    const read = await runtime.readTerminal(terminal.handle)
+    const retained = read.tail.join('\n')
+    expect(retained).toContain('Done')
+    expect(retained).not.toContain('38;2')
+    expect(retained).not.toContain('49m')
+  })
+
   it('bounds retained partial terminal output before preview reads', async () => {
     const runtime = new OrcaRuntimeService(store)
 
