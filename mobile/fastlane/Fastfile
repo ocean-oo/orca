@@ -43,7 +43,9 @@ platform :ios do
       app_identifier: BUNDLE_ID,
       force: true,
     )
-    profile_name = lane_context[SharedValues::SIGH_PROFILE_MAPPING][BUNDLE_ID]
+    # sigh exposes the chosen profile's name in SIGH_NAME (SIGH_PROFILE_MAPPING
+    # doesn't exist in this fastlane version).
+    profile_name = lane_context[SharedValues::SIGH_NAME]
 
     build_app(
       workspace: WORKSPACE,
