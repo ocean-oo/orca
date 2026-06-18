@@ -382,6 +382,7 @@ describe('TabBar PowerShell launch wiring', () => {
 
   it('hides the WSL terminal row for local host-runtime projects', async () => {
     appStoreSnapshot.activeRepoId = 'repo-1'
+    appStoreSnapshot.activeWorktreeId = 'wt-1'
     appStoreSnapshot.projects = [
       {
         id: 'project-1',

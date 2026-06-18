@@ -73,14 +73,12 @@ describe('slow daemon session verification', () => {
   const clients: DaemonClient[] = []
 
   beforeEach(() => {
-    const parentDir = process.platform === 'win32' ? tmpdir() : '/tmp'
-    dir = mkdtempSync(join(parentDir, 'orca-dsv-'))
-    const daemonDir = join(dir, 'daemon')
-    const proxyDir = join(dir, 'proxy')
-    mkdirSync(daemonDir, { recursive: true })
-    mkdirSync(proxyDir, { recursive: true })
-    daemonSocketPath = getDaemonSocketPath(daemonDir)
-    proxySocketPath = getDaemonSocketPath(proxyDir)
+    // Why: real Unix socket paths have tight platform limits, especially on macOS.
+    dir = mkdtempSync(join(tmpdir(), 'ds-'))
+    mkdirSync(join(dir, 'daemon'), { recursive: true })
+    mkdirSync(join(dir, 'proxy'), { recursive: true })
+    daemonSocketPath = getDaemonSocketPath(join(dir, 'daemon'))
+    proxySocketPath = getDaemonSocketPath(join(dir, 'proxy'))
     tokenPath = join(dir, 'daemon.token')
   })
 
