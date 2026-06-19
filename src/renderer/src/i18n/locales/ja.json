@@ -4803,6 +4803,12 @@
             "description": "更新された worktree カードのレイアウト、メタデータ配置、カード表示メニュー項目、ステータス表示をプレビューします。",
             "title": "新しいカードスタイル",
             "toggleLabel": "新しいカードスタイルを切り替え"
+          },
+          "largerSidebarSections": {
+            "title": "Larger sidebar sections",
+            "description": "Preview larger project and section headers in the worktree sidebar.",
+            "copy": "Increases project and section header type, repo icons, and slightly pulls grouped workspace cards left.",
+            "toggleLabel": "Toggle larger sidebar sections"
           }
         },
         "FloatingWorkspacePane": {
@@ -6917,6 +6923,10 @@
               "title": "新しいカードスタイル",
               "worktree": "worktree",
               "worktrees": "worktrees"
+            },
+            "largerSidebarSections": {
+              "title": "Larger sidebar sections",
+              "description": "Preview larger project and section headers in the worktree sidebar, including repo icons."
             }
           }
         },

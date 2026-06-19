@@ -4803,6 +4803,12 @@
             "description": "预览更新后的 worktree 卡片布局、元数据位置、卡片显示菜单选项和状态呈现。",
             "title": "新卡片样式",
             "toggleLabel": "切换新卡片样式"
+          },
+          "largerSidebarSections": {
+            "title": "Larger sidebar sections",
+            "description": "Preview larger project and section headers in the worktree sidebar.",
+            "copy": "Increases project and section header type, repo icons, and slightly pulls grouped workspace cards left.",
+            "toggleLabel": "Toggle larger sidebar sections"
           }
         },
         "FloatingWorkspacePane": {
@@ -6880,6 +6886,10 @@
               "title": "新卡片样式",
               "worktree": "worktree",
               "worktrees": "worktrees"
+            },
+            "largerSidebarSections": {
+              "title": "Larger sidebar sections",
+              "description": "Preview larger project and section headers in the worktree sidebar, including repo icons."
             }
           }
         },

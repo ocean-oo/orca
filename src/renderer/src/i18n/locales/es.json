@@ -4818,6 +4818,12 @@
             "description": "Previsualiza el diseño actualizado de tarjetas de worktree, la ubicación de metadatos, las opciones del menú de visualización de tarjeta y la presentación de estado.",
             "title": "Nuevo estilo de tarjeta",
             "toggleLabel": "Alternar nuevo estilo de tarjeta"
+          },
+          "largerSidebarSections": {
+            "title": "Larger sidebar sections",
+            "description": "Preview larger project and section headers in the worktree sidebar.",
+            "copy": "Increases project and section header type, repo icons, and slightly pulls grouped workspace cards left.",
+            "toggleLabel": "Toggle larger sidebar sections"
           }
         },
         "FloatingWorkspacePane": {
@@ -6895,6 +6901,10 @@
               "title": "Nuevo estilo de tarjeta",
               "worktree": "worktree",
               "worktrees": "worktrees"
+            },
+            "largerSidebarSections": {
+              "title": "Larger sidebar sections",
+              "description": "Preview larger project and section headers in the worktree sidebar, including repo icons."
             }
           }
         },

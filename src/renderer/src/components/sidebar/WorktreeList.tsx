@@ -90,10 +90,7 @@ import {
   shouldUseHeaderTopSpacing,
   type RenderRow
 } from './worktree-list-virtual-rows'
-import {
-  revealElementInScrollContainer,
-  WORKTREE_SIDEBAR_REVEAL_TOP_INSET
-} from './worktree-sidebar-reveal'
+import { revealElementInScrollContainer } from './worktree-sidebar-reveal'
 import {
   getWorkspaceStatus,
   getWorkspaceStatusFromGroupKey,
@@ -235,6 +232,12 @@ import { HostSectionHeaderMenu } from './HostSectionHeaderMenu'
 import { ProjectHeaderActions } from './ProjectHeaderActions'
 import { translate } from '@/i18n/i18n'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import {
+  getHostSectionHeaderTitleClassName,
+  getSidebarSectionHeaderTitleClassName,
+  resolveSidebarSectionHeaderAppearance,
+  SHOW_SIDEBAR_ACTIVE_REPO_HIGHLIGHT
+} from './sidebar-section-header-appearance'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
 import {
   isConfirmedStaleFolderPathStatus,
@@ -423,7 +426,8 @@ function revealMountedWorktreeElement(
   container: HTMLElement,
   worktreeId: string,
   behavior: ScrollBehavior,
-  optionId?: string
+  optionId?: string,
+  topInset?: number
 ): HTMLElement | null {
   const element = optionId
     ? document.getElementById(optionId)
@@ -431,7 +435,7 @@ function revealMountedWorktreeElement(
   if (!element || !container.contains(element)) {
     return null
   }
-  return revealElementInScrollContainer(container, element, behavior) ? element : null
+  return revealElementInScrollContainer(container, element, behavior, topInset) ? element : null
 }
 
 function getWorktreeVisibilityMenuLabel(repo: Repo): string {
@@ -446,6 +450,7 @@ const SIDEBAR_POINTER_DRAG_THRESHOLD_PX = 4
 type VirtualizedWorktreeViewportProps = {
   rows: HostSectionRow[]
   activeWorktreeId: string | null
+  activeRepoId: string | null
   currentWorktreeId: string | null
   groupBy: WorktreeGroupBy
   projectOrderBy: ProjectOrderBy
@@ -613,12 +618,14 @@ function HostSectionHeader({
   row,
   onToggle,
   onDragPointerDown,
-  dragging
+  dragging,
+  largerSidebarSections
 }: {
   row: HostHeaderRow
   onToggle: () => void
   onDragPointerDown?: (event: React.PointerEvent<HTMLElement>) => void
   dragging?: boolean
+  largerSidebarSections: boolean
 }): React.JSX.Element {
   const isBlocked = row.health === 'blocked'
   const isDisconnected = row.health === 'disconnected'
@@ -663,7 +670,7 @@ function HostSectionHeader({
         <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span
             className={cn(
-              'min-w-0 truncate text-[12px] font-semibold leading-none',
+              getHostSectionHeaderTitleClassName(largerSidebarSections),
               isDisconnected ? 'text-muted-foreground' : 'text-foreground'
             )}
           >
@@ -1072,6 +1079,7 @@ function getVirtualRowKey(element: Element): string | null {
 const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
   rows,
   activeWorktreeId,
+  activeRepoId,
   currentWorktreeId,
   groupBy,
   projectOrderBy,
@@ -1212,6 +1220,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const prVisibleRefreshGeneration = useAppStore((s) => s.prVisibleRefreshGeneration)
   const settings = useAppStore((s) => s.settings)
   const newCardStyle = settings?.experimentalNewWorktreeCardStyle === true
+  const sidebarSectionAppearance = useMemo(
+    () => resolveSidebarSectionHeaderAppearance(settings),
+    [settings]
+  )
   const reorderRepos = useAppStore((s) => s.reorderRepos)
 
   useEffect(
@@ -1628,7 +1640,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             renderRowsRef.current,
             index ?? -1,
             firstHeaderIndexRef.current,
-            activeStickyHeaderIndexRef.current
+            activeStickyHeaderIndexRef.current,
+            sidebarSectionAppearance.headerRowHeight
           )
         )
       }
@@ -1642,12 +1655,13 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
           renderRowsRef.current,
           index,
           firstHeaderIndexRef.current,
-          activeStickyHeaderIndexRef.current
+          activeStickyHeaderIndexRef.current,
+          sidebarSectionAppearance.headerRowHeight
         )
       }
       return measureVirtualElementSize(element, entry, instance)
     },
-    [isCurrentVirtualRowElement]
+    [isCurrentVirtualRowElement, sidebarSectionAppearance.headerRowHeight]
   )
   const markScrollMovement = useCallback(() => {
     suppressMeasurementAdjustmentUntilRef.current =
@@ -1677,7 +1691,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         renderRows,
         index,
         firstHeaderIndex,
-        activeStickyHeaderIndexRef.current
+        activeStickyHeaderIndexRef.current,
+        sidebarSectionAppearance.headerRowHeight
       ),
     measureElement: measureCurrentVirtualRowElement,
     // Why: TanStack memoizes range extraction by function identity. Header
@@ -1698,7 +1713,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     gap: 6,
     // Why: the active sticky group header is rendered inside the virtual list,
     // so TanStack's scroll math needs the same top inset as the exact DOM reveal.
-    scrollPaddingStart: WORKTREE_SIDEBAR_REVEAL_TOP_INSET,
+    scrollPaddingStart: sidebarSectionAppearance.revealTopInset,
     isScrollingResetDelay: USER_SCROLL_MEASUREMENT_ADJUSTMENT_SUPPRESS_MS,
     // Why: the sidebar rows are rich cards. Flushing their React render inside
     // TanStack's native scroll listener can make wheel input wait on card work;
@@ -1848,7 +1863,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               container,
               pendingRevealWorktree.worktreeId,
               pendingRevealWorktree.behavior,
-              getRenderRowOptionId(targetRow, pendingRevealWorktree.worktreeId)
+              getRenderRowOptionId(targetRow, pendingRevealWorktree.worktreeId),
+              sidebarSectionAppearance.revealTopInset
             )
           : null
         if (revealedOption) {
@@ -1919,7 +1935,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     flashRevealedWorktree,
     setRenamingWorktreeId,
     schedulePendingRevealFrame,
-    cancelPendingRevealFrames
+    cancelPendingRevealFrames,
+    sidebarSectionAppearance.revealTopInset
   ])
 
   const prCacheLen = useAppStore((s) => countRecordKeysByReference(s.prCache))
@@ -3603,6 +3620,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         : undefined
                     }
                     dragging={hostDrag.state.draggingHostId === row.hostId}
+                    largerSidebarSections={sidebarSectionAppearance.enabled}
                   />
                 </div>
               )
@@ -3686,6 +3704,24 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 isRepoHeader || isProjectGroupHeader
                   ? getProjectGroupHeaderPaddingLeft(projectGroupDepth)
                   : WORKTREE_SECTION_HEADER_PADDING_LEFT
+              const isActiveRepoHeader =
+                SHOW_SIDEBAR_ACTIVE_REPO_HIGHLIGHT &&
+                sidebarSectionAppearance.enabled &&
+                isRepoHeader &&
+                activeRepoId !== null &&
+                row.repo?.id === activeRepoId
+              const sectionHeaderIconShellClassName = sidebarSectionAppearance.enabled
+                ? 'size-5'
+                : 'size-4'
+              const sectionHeaderRepoIconClassName = sidebarSectionAppearance.enabled
+                ? 'size-5'
+                : 'size-4'
+              const sectionHeaderRepoIconGlyphClassName = sidebarSectionAppearance.enabled
+                ? 'size-4'
+                : 'size-3.5'
+              const sectionHeaderLucideIconClassName = sidebarSectionAppearance.enabled
+                ? 'size-4'
+                : 'size-3'
               return (
                 <div
                   key={vItem.key}
@@ -3722,12 +3758,19 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     data-repo-header-id={projectIdForHeader}
                     data-repo-header-index={repoHeaderIndex}
                     data-repo-header-bucket={repoHeaderBucketKey}
+                    data-current={isActiveRepoHeader ? 'true' : undefined}
+                    aria-current={isActiveRepoHeader ? 'true' : undefined}
                     data-workspace-status-drop-target={headerWorkspaceStatus ? '' : undefined}
                     data-workspace-status={headerWorkspaceStatus ?? undefined}
                     data-workspace-pin-drop-target={isPinnedHeader ? '' : undefined}
                     className={cn(
-                      'group relative flex h-7 w-full items-center gap-1.5 pr-2 text-left transition-all',
+                      'group relative flex w-full items-center gap-1.5 pr-2 text-left transition-all',
+                      sidebarSectionAppearance.enabled ? 'h-8' : 'h-7',
                       'cursor-pointer',
+                      // Why: inset shadow keeps the left accent without border width
+                      // shifting header icons/text away from workspace cards.
+                      isActiveRepoHeader &&
+                        'bg-worktree-sidebar-accent text-worktree-sidebar-accent-foreground shadow-[inset_2px_0_0_0_var(--worktree-sidebar-ring)]',
                       isDraggingThis &&
                         'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
                       headerWorkspaceStatus &&
@@ -3778,7 +3821,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                       <div
                         data-repo-header-drag-handle={isDraggableRepoHeader ? '' : undefined}
                         className={cn(
-                          'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
+                          'flex shrink-0 items-center justify-center rounded-[4px]',
+                          sectionHeaderIconShellClassName,
                           repoHeaderColor ? 'text-muted-foreground' : row.tone,
                           isDraggableRepoHeader && 'hover:cursor-grab active:cursor-grabbing'
                         )}
@@ -3792,18 +3836,22 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           <RepoIconGlyph
                             repoIcon={row.repo.repoIcon}
                             color={repoHeaderColor}
-                            className="size-4"
-                            iconClassName="size-3.5"
+                            className={sectionHeaderRepoIconClassName}
+                            iconClassName={sectionHeaderRepoIconGlyphClassName}
                           />
                         ) : (
-                          <row.icon className="size-3" />
+                          <row.icon className={sectionHeaderLucideIconClassName} />
                         )}
                       </div>
                     ) : null}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <div className="min-w-0 truncate text-[13px] font-semibold leading-none">
+                        <div
+                          className={getSidebarSectionHeaderTitleClassName(
+                            sidebarSectionAppearance.enabled
+                          )}
+                        >
                           {row.label}
                         </div>
                         <RepoForkIndicator upstream={row.repo?.upstream} />
@@ -4599,6 +4647,7 @@ const WorktreeList = React.memo(function WorktreeList({
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const detectedWorktreesByRepo = useAppStore((s) => s.detectedWorktreesByRepo)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+  const activeRepoId = useAppStore((s) => s.activeRepoId)
   const currentSidebarWorktreeId = activeWorktreeId
   const groupBy = useAppStore((s) => s.groupBy)
   const workspaceHostScope = useAppStore((s) => s.workspaceHostScope)
@@ -6009,6 +6058,7 @@ const WorktreeList = React.memo(function WorktreeList({
         key={viewportResetKey}
         rows={sectionRows}
         activeWorktreeId={selectedSidebarWorktreeId}
+        activeRepoId={activeRepoId}
         currentWorktreeId={currentSidebarWorktreeId}
         groupBy={groupBy}
         projectOrderBy={projectOrderBy}
