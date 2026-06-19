@@ -5297,8 +5297,7 @@
           "9bedd2a6e5": "Enables agents to hand off context and coordinate work through Orca.",
           "07641b9768": "Orchestration skill",
           "2aacdb0517": "Coordinate coding agents across handoffs, worktree handovers, and child-agent work.",
-          "191ac34567": "Agent Orchestration",
-          "copyUpdateCommand": "Copy update command"
+          "191ac34567": "Agent Orchestration"
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",
@@ -5316,12 +5315,7 @@
           "b99f375eb2": "Run this command in a terminal to install the orchestration skill for your agents.",
           "2914abcfa2": "Install orchestration skill",
           "d3dc559225": "Failed to copy install command.",
-          "239bf9132b": "Copied install command.",
-          "copiedUpdateCommand": "Copied update command.",
-          "failedUpdateCommand": "Failed to copy update command.",
-          "updateTitle": "Update orchestration skill",
-          "updateDescription": "Run this command in a terminal to update the orchestration skill for your agents.",
-          "copyUpdateCommandAria": "Copy orchestration skill update command"
+          "239bf9132b": "Copied install command."
         },
         "PrivacyDiagnosticBundleControls": {
           "dc8404a930": "Create diagnostic file",

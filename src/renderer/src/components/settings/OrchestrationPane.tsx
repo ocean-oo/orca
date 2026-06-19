@@ -43,8 +43,6 @@ export function OrchestrationPane(): React.JSX.Element {
   const showOrchestration = matchesSettingsSearch(searchQuery, getOrchestrationPaneSearchEntries())
   const [selectedExampleId, setSelectedExampleId] = useState<string | null>(null)
   const [skillPromptOpen, setSkillPromptOpen] = useState(false)
-  const [skillPromptCommand, setSkillPromptCommand] = useState(ORCHESTRATION_SKILL_INSTALL_COMMAND)
-  const [skillPromptMode, setSkillPromptMode] = useState<'install' | 'update'>('install')
   const activeSkillRuntime = useActiveProjectSkillRuntime()
   const orchestrationInstallCommand =
     activeSkillRuntime.agentRuntime && !activeSkillRuntime.installDisabledReason
@@ -124,7 +122,8 @@ export function OrchestrationPane(): React.JSX.Element {
             : ensureOrcaCliAvailableForAgentSkillTerminal())
         }}
         actionHint={
-          activeSkillRuntime.installDisabledReason ? null : (
+          // Installed updates stay on the primary panel so there is only one update path.
+          activeSkillRuntime.installDisabledReason || orchestrationSkillDetected ? null : (
             <p className="text-[12px] leading-snug text-muted-foreground">
               {translate(
                 'auto.components.settings.OrchestrationPane.832f1f3ee6',
@@ -134,24 +133,13 @@ export function OrchestrationPane(): React.JSX.Element {
                 type="button"
                 className="font-medium text-foreground underline-offset-2 hover:underline"
                 onClick={() => {
-                  setSkillPromptCommand(
-                    orchestrationSkillDetected
-                      ? orchestrationUpdateCommand
-                      : orchestrationInstallCommand
-                  )
-                  setSkillPromptMode(orchestrationSkillDetected ? 'update' : 'install')
                   setSkillPromptOpen(true)
                 }}
               >
-                {orchestrationSkillDetected
-                  ? translate(
-                      'auto.components.settings.OrchestrationPane.copyUpdateCommand',
-                      'Copy update command'
-                    )
-                  : translate(
-                      'auto.components.settings.OrchestrationPane.7bc082f4de',
-                      'Copy install command'
-                    )}
+                {translate(
+                  'auto.components.settings.OrchestrationPane.7bc082f4de',
+                  'Copy install command'
+                )}
               </button>
             </p>
           )
@@ -167,8 +155,7 @@ export function OrchestrationPane(): React.JSX.Element {
       />
 
       <OrchestrationSkillPromptDialog
-        command={skillPromptCommand}
-        mode={skillPromptMode}
+        command={orchestrationInstallCommand}
         open={skillPromptOpen}
         onOpenChange={setSkillPromptOpen}
       />
