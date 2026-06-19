@@ -1044,8 +1044,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
     !!conflictOperation && conflictOperation !== 'unknown' && conflictOperation !== 'rebase'
   const hasMetadataBadge = showConflictOperationBadge
   const showUnreadQuickAction = !affiliateListMode && showStatus
-  // Why: the activity dot and unread bell compete for the same tiny sidebar
-  // lane. Keep one slot, and let an active unread bell visually win.
+  // Why: the slot owns the tiny unread/status lane; legacy keeps the bell,
+  // while the experimental card keeps the status glyph visible.
   const showCombinedStatusSlot = showStatus
   const showTitleRowPrimary = compactCards && worktree.isMainWorktree && !isFolder
   const showMetaRowDetails = !newCardStyle && !compactCards && (hasDetails || hasPorts)
@@ -1312,13 +1312,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
               </RepoIdentityChip>
             )}
 
-            {/* Why: weight alone carries the unread signal; color stays
-                 at text-foreground in both states so the title keeps hierarchy
-                 against nearby status chips. */}
+            {/* Why: in the experimental card, weight carries unread without a
+                 bell, so read titles step back slightly for scan contrast. */}
             <WorktreeTitleInlineRename
               displayName={visibleCardTitle}
               disabled={isDeleting || affiliateListMode}
               showUnreadEmphasis={showUnreadEmphasis}
+              dimReadTitle={newCardStyle}
               className="text-[13px] leading-5"
               editingClassName="flex-1"
               titleWrapper={titleWrapper}
