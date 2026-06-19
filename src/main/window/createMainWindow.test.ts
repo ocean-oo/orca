@@ -286,6 +286,51 @@ describe('createMainWindow', () => {
     }
   })
 
+  it('disables renderer background throttling on every platform so backgrounded agents do not freeze', () => {
+    // Why: a backgrounded renderer otherwise throttles rAF/timers, freezing
+    // terminal rendering and agent status — Claude Code sessions in a minimized
+    // floating workspace looked stuck mid-turn on Windows/Linux. The macOS-only
+    // compositor repaint stays gated to darwin.
+    for (const platform of ['darwin', 'win32', 'linux'] satisfies NodeJS.Platform[]) {
+      browserWindowMock.mockReset()
+      const windowHandlers: Record<string, (...args: any[]) => void> = {}
+      const webContents = {
+        on: vi.fn(),
+        setZoomLevel: vi.fn(),
+        setBackgroundThrottling: vi.fn(),
+        invalidate: vi.fn(),
+        setWindowOpenHandler: vi.fn(),
+        send: vi.fn()
+      }
+      const browserWindowInstance = {
+        webContents,
+        on: vi.fn((event: string, handler: (...args: any[]) => void) => {
+          windowHandlers[event] = handler
+        }),
+        isDestroyed: vi.fn(() => false),
+        isMaximized: vi.fn(() => true),
+        isFullScreen: vi.fn(() => false),
+        getSize: vi.fn(() => [1200, 800]),
+        setSize: vi.fn(),
+        setWindowButtonPosition: vi.fn(),
+        maximize: vi.fn(),
+        show: vi.fn(),
+        loadFile: vi.fn(),
+        loadURL: vi.fn()
+      }
+      browserWindowMock.mockImplementation(function () {
+        return browserWindowInstance
+      })
+
+      withPlatform(platform, () => createMainWindow(null))
+
+      expect(webContents.setBackgroundThrottling).toHaveBeenCalledWith(false)
+      const hasRepaintHandlers =
+        typeof windowHandlers.restore === 'function' && typeof windowHandlers.show === 'function'
+      expect(hasRepaintHandlers).toBe(platform === 'darwin')
+    }
+  })
+
   it('supports all minus key variants for terminal zoom out', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {

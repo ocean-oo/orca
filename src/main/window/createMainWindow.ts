@@ -294,13 +294,21 @@ export function createMainWindow(
   })
   const rendererWebContentsId = mainWindow.webContents.id
 
+  // Why: when the renderer is backgrounded (window minimized/occluded), Chromium
+  // stops requestAnimationFrame and throttles timers to ~1Hz, freezing xterm
+  // rendering and the agent status/elapsed timers. A long-running agent (e.g. a
+  // Claude Code session in the often-minimized floating workspace) then looks
+  // stuck mid-turn even though its subprocess keeps running. Keep the renderer
+  // unthrottled on every platform so background agents keep flowing and the UI
+  // resumes cleanly; this previously shipped macOS-only and left Windows/Linux
+  // exposed to the freeze.
+  mainWindow.webContents.setBackgroundThrottling(false)
+
   if (process.platform === 'darwin') {
     // Why: persistent browser webviews use separate compositor layers, and on
     // recent macOS releases those layers can fail to repaint after occlusion or
-    // restore. Disabling main-window throttling and forcing a repaint on
-    // visibility transitions hardens Orca against black-surface failures during
-    // browser-tab restore and tab switching.
-    mainWindow.webContents.setBackgroundThrottling(false)
+    // restore. Force a repaint on visibility transitions to harden against
+    // black-surface failures during browser-tab restore and tab switching.
     mainWindow.on('restore', () => {
       forceRepaint(mainWindow)
     })
