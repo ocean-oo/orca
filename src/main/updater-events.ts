@@ -158,6 +158,9 @@ export function registerAutoUpdaterHandlers({
     // would block a renderer-side fetch to onorca.dev, and ensures the
     // card can render immediately without an async loading gap.
     const attemptId = getActiveUpdateCheckAttemptId()
+    if (attemptId === null) {
+      return
+    }
     markUpdateAvailableEventPending(attemptId)
     void (async () => {
       try {
@@ -167,7 +170,7 @@ export function registerAutoUpdaterHandlers({
         // fetch. If another autoUpdater event (e.g., 'error') fired and updated
         // the attempt during that window, broadcasting 'available' here would
         // overwrite a more recent check. Guard on the attempt before state.
-        if (attemptId !== null && !isActiveUpdateCheckAttempt(attemptId)) {
+        if (!isActiveUpdateCheckAttempt(attemptId)) {
           return
         }
         if (getCurrentStatus().state !== 'checking' && getCurrentStatus().state !== 'idle') {

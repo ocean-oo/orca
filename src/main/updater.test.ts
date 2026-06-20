@@ -396,6 +396,35 @@ describe('updater', () => {
     expect(setLastUpdateCheckAt).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores a stale update-available event after a silent background settle', async () => {
+    vi.useFakeTimers()
+    fetchNewerReleaseTagsMock.mockResolvedValue({ tags: [], state: 'no-newer' })
+    autoUpdaterMock.checkForUpdates.mockResolvedValue(undefined)
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+
+    const { setupAutoUpdater } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, {
+      getLastUpdateCheckAt: () => null,
+      setLastUpdateCheckAt: vi.fn()
+    })
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    autoUpdaterMock.emit('update-available', { version: '1.0.61' })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fetchChangelogMock).not.toHaveBeenCalled()
+    expect(sendMock).not.toHaveBeenCalledWith(
+      'updater:status',
+      expect.objectContaining({ state: 'available', version: '1.0.61' })
+    )
+  })
+
   it('does not let a stale silent settle finish a later manual check', async () => {
     vi.useFakeTimers()
     fetchNewerReleaseTagsMock.mockResolvedValue({ tags: [], state: 'no-newer' })
