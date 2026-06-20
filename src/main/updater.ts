@@ -66,6 +66,8 @@ let updateCheckStallTimer: ReturnType<typeof setTimeout> | null = null
 let updateCheckSilentSettleTimer: ReturnType<typeof setTimeout> | null = null
 let updateCheckAttemptSequence = 0
 let activeUpdateCheckAttemptId: number | null = null
+let activeUpdateCheckLaunchAttemptId: number | null = null
+let activeUpdateCheckEventAttemptId: number | null = null
 let updateAvailableEventPendingAttemptId: number | null = null
 let pendingPrereleaseUserInitiatedCheckAfterInFlight = false
 let activeUpdateNudgeId: string | null = null
@@ -274,15 +276,41 @@ function clearUpdateCheckTimers(): void {
 
 function finishActiveUpdateCheckAttempt(): void {
   activeUpdateCheckAttemptId = null
+  activeUpdateCheckLaunchAttemptId = null
+  activeUpdateCheckEventAttemptId = null
   clearUpdateCheckTimers()
 }
 
-function getActiveUpdateCheckAttemptId(): number | null {
+function getActiveUpdateCheckEventAttemptId(): number | null {
+  if (activeUpdateCheckAttemptId === null) {
+    return null
+  }
+  if (activeUpdateCheckEventAttemptId !== activeUpdateCheckAttemptId) {
+    return null
+  }
   return activeUpdateCheckAttemptId
 }
 
 function isActiveUpdateCheckAttempt(attemptId: number): boolean {
   return activeUpdateCheckAttemptId === attemptId
+}
+
+function markUpdateCheckEventAttempt(): boolean {
+  if (activeUpdateCheckAttemptId === null) {
+    return false
+  }
+  if (activeUpdateCheckLaunchAttemptId !== activeUpdateCheckAttemptId) {
+    return false
+  }
+  activeUpdateCheckEventAttemptId = activeUpdateCheckAttemptId
+  return true
+}
+
+function markUpdateCheckLaunched(attemptId: number): void {
+  if (!isActiveUpdateCheckAttempt(attemptId)) {
+    return
+  }
+  activeUpdateCheckLaunchAttemptId = attemptId
 }
 
 function markUpdateAvailableEventPending(attemptId: number | null): void {
@@ -364,19 +392,20 @@ function consumeSilentCheckShortRetryReason(): boolean {
   return consumeMissingManifestPrereleaseFallbackResult() !== null
 }
 
-function completeSilentUpdateCheck(userInitiated: boolean | undefined): void {
+function completeSilentUpdateCheck(userInitiated: boolean | undefined): boolean {
   const shouldRetrySoon = consumeSilentCheckShortRetryReason()
   clearAvailableUpdateContext()
   if (shouldRetrySoon) {
     // Why: a silent result against a temporary last-good feed is still part of
     // a release transition, so it must not suppress the short publish retry.
     scheduleAutomaticUpdateCheck(AUTO_UPDATE_RETRY_INTERVAL_MS)
-    return
+    return true
   }
   recordCompletedUpdateCheck()
   if (!userInitiated) {
     scheduleAutomaticUpdateCheck(AUTO_UPDATE_CHECK_INTERVAL_MS)
   }
+  return false
 }
 
 function settleSilentUpdateCheck(attemptId: number, userInitiated: boolean | undefined): void {
@@ -392,7 +421,14 @@ function settleSilentUpdateCheck(attemptId: number, userInitiated: boolean | und
       clearBackgroundCheckLaunchPending()
       backgroundCheckPromotedToUserInitiated = false
       userInitiatedCheck = false
-      completeSilentUpdateCheck(userInitiated)
+      const shouldRetrySoon = completeSilentUpdateCheck(userInitiated)
+      if (awaitingNudgeCheckOutcome) {
+        if (shouldRetrySoon) {
+          deferPendingUpdateNudgeUntilRetry()
+          return
+        }
+        sendStatus({ state: 'not-available', userInitiated })
+      }
     }
     return
   }
@@ -408,15 +444,27 @@ function handleSettledUpdateCheckPromise(attemptId: number): void {
   if (!isActiveUpdateCheckAttempt(attemptId)) {
     return
   }
-  const wasUserInitiated = getSettledCheckUserInitiated()
   clearUpdateCheckSilentSettleTimer()
   // Why: electron-updater can resolve its promise before the terminal event
   // reaches our handlers. Give that event a short grace period, then unstick
   // checks that genuinely resolved without one.
   updateCheckSilentSettleTimer = setTimeout(() => {
     updateCheckSilentSettleTimer = null
-    settleSilentUpdateCheck(attemptId, wasUserInitiated)
+    settleSilentUpdateCheck(attemptId, getSettledCheckUserInitiated())
   }, UPDATE_CHECK_SILENT_SETTLE_DELAY_MS)
+}
+
+function shouldHandleUpdaterErrorEvent(): boolean {
+  if (getActiveUpdateCheckEventAttemptId() !== null) {
+    return true
+  }
+  // Why: electron-updater emits check errors globally. Once a check has
+  // settled, only active download/install flows should keep consuming errors.
+  return (
+    downloadInFlight ||
+    currentStatus.state === 'downloading' ||
+    currentStatus.state === 'downloaded'
+  )
 }
 
 function sendErrorStatus(message: string, userInitiated?: boolean): void {
@@ -834,6 +882,7 @@ function retryPrereleaseFallbackAfterMissingManifest(
   userInitiatedCheck = Boolean(userInitiated)
   backgroundCheckLaunchPending = !userInitiated
   armUpdateCheckStallTimer(attemptId)
+  markUpdateCheckLaunched(attemptId)
   void autoUpdater
     .checkForUpdates()
     .then(() => handleSettledUpdateCheckPromise(attemptId))
@@ -884,6 +933,7 @@ function runBackgroundUpdateCheck(
     if (!isActiveUpdateCheckAttempt(attemptId)) {
       return undefined
     }
+    markUpdateCheckLaunched(attemptId)
     return autoUpdater.checkForUpdates()
   }
   const run = pinDefaultReleaseFeed().then(launch)
@@ -973,6 +1023,7 @@ export function checkForUpdatesFromMenu(options?: { includePrerelease?: boolean 
     if (!isActiveUpdateCheckAttempt(attemptId)) {
       return undefined
     }
+    markUpdateCheckLaunched(attemptId)
     return autoUpdater.checkForUpdates()
   }
   const run = pinDefaultReleaseFeed().then(launch)
@@ -1161,15 +1212,17 @@ export function setupAutoUpdater(
     consumeMissingManifestPrereleaseFallbackResult,
     getMissingManifestPrereleaseFallbackUserInitiated,
     getPublishingWindowLastGoodCheck,
-    getActiveUpdateCheckAttemptId,
+    getActiveUpdateCheckEventAttemptId,
     getCurrentStatus: () => currentStatus,
     getKnownReleaseUrl,
     getPendingInstallVersion,
     getUserInitiatedCheck: () => userInitiatedCheck,
     hasNewerDownloadedVersion,
+    shouldHandleUpdaterErrorEvent,
     performQuitAndInstall,
     clearUpdateAvailableEventPending,
     isActiveUpdateCheckAttempt,
+    markUpdateCheckEventAttempt,
     markUpdateAvailableEventPending,
     sendCheckFailureStatus,
     sendErrorStatus,

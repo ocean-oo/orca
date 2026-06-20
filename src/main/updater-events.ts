@@ -23,13 +23,15 @@ type UpdaterHandlerContext = {
   getPublishingWindowLastGoodCheck: () => { lastGoodTag: string } | null
   getMissingManifestPrereleaseFallbackUserInitiated: () => boolean | null
   getCurrentStatus: () => UpdateStatus
-  getActiveUpdateCheckAttemptId: () => number | null
+  getActiveUpdateCheckEventAttemptId: () => number | null
   getKnownReleaseUrl: () => string | undefined
   getPendingInstallVersion: () => string
   getUserInitiatedCheck: () => boolean
   hasNewerDownloadedVersion: () => boolean
+  shouldHandleUpdaterErrorEvent: () => boolean
   clearUpdateAvailableEventPending: (attemptId: number | null) => void
   isActiveUpdateCheckAttempt: (attemptId: number) => boolean
+  markUpdateCheckEventAttempt: () => boolean
   markUpdateAvailableEventPending: (attemptId: number | null) => void
   markMissingManifestPrereleaseFallbackChecking: () => void
   performQuitAndInstall: () => void | Promise<void>
@@ -58,13 +60,15 @@ export function registerAutoUpdaterHandlers({
   getPublishingWindowLastGoodCheck,
   getMissingManifestPrereleaseFallbackUserInitiated,
   getCurrentStatus,
-  getActiveUpdateCheckAttemptId,
+  getActiveUpdateCheckEventAttemptId,
   getKnownReleaseUrl,
   getPendingInstallVersion,
   getUserInitiatedCheck,
   hasNewerDownloadedVersion,
+  shouldHandleUpdaterErrorEvent,
   clearUpdateAvailableEventPending,
   isActiveUpdateCheckAttempt,
+  markUpdateCheckEventAttempt,
   markUpdateAvailableEventPending,
   markMissingManifestPrereleaseFallbackChecking,
   performQuitAndInstall,
@@ -120,6 +124,9 @@ export function registerAutoUpdaterHandlers({
   })
 
   autoUpdater.on('checking-for-update', () => {
+    if (!markUpdateCheckEventAttempt()) {
+      return
+    }
     clearBackgroundCheckLaunchPending()
     resetMacInstallState()
     clearAvailableUpdateContext()
@@ -130,6 +137,10 @@ export function registerAutoUpdaterHandlers({
   })
 
   autoUpdater.on('update-available', (info) => {
+    const attemptId = getActiveUpdateCheckEventAttemptId()
+    if (attemptId === null) {
+      return
+    }
     clearBackgroundCheckLaunchPending()
     // --- synchronous preamble (runs before any await) ---
     const missingManifestFallback = consumeMissingManifestPrereleaseFallbackResult()
@@ -157,10 +168,6 @@ export function registerAutoUpdaterHandlers({
     // Why: fetching changelog in the main process avoids CORS issues that
     // would block a renderer-side fetch to onorca.dev, and ensures the
     // card can render immediately without an async loading gap.
-    const attemptId = getActiveUpdateCheckAttemptId()
-    if (attemptId === null) {
-      return
-    }
     markUpdateAvailableEventPending(attemptId)
     void (async () => {
       try {
@@ -205,6 +212,9 @@ export function registerAutoUpdaterHandlers({
   })
 
   autoUpdater.on('update-not-available', () => {
+    if (getActiveUpdateCheckEventAttemptId() === null) {
+      return
+    }
     clearBackgroundCheckLaunchPending()
     resetMacInstallState()
     const missingManifestFallback = consumeMissingManifestPrereleaseFallbackResult()
@@ -262,6 +272,9 @@ export function registerAutoUpdaterHandlers({
     // Why: primary/fallback promise handlers may already own this failure; do
     // not let their delayed paired error event consume fallback context.
     if (shouldSuppressMissingManifestPrereleaseFallbackEvent(message, err)) {
+      return
+    }
+    if (!shouldHandleUpdaterErrorEvent()) {
       return
     }
     clearBackgroundCheckLaunchPending()
