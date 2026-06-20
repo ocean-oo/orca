@@ -2307,7 +2307,7 @@
           "TerminalContextMenu": {
             "b4cdd9314e": "クリアスクリーン",
             "8c17d6786d": "ペインを閉じる",
-            "copyTerminalId": "Terminal ID をコピー",
+            "copyTerminalId": "Copy Terminal ID",
             "2cf85a6a55": "ペインIDのコピー",
             "39809d152f": "タイトルを設定…",
             "06c2b0f043": "ペインのサイズを均等化する",
@@ -2322,8 +2322,7 @@
             "f3eeb1de13": "コピー",
             "c2f0b72b8d": "入れる",
             "925f49f210": "ペインを展開する",
-            "df766809e0": "ペインを折りたたむ",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "ペインを折りたたむ"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "デーモンを再起動します",
@@ -8321,7 +8320,8 @@
             "42e10cbf57": "相対パスのコピー",
             "b5d436aa30": "パスのコピー",
             "f9d7ca753d": "パスのコピー",
-            "3161c4e425": "フォルダ"
+            "3161c4e425": "フォルダ",
+            "submodule": "Submodule"
           },
           "FileExplorerToolbar": {
             "d238264654": "Git で無視されたファイルを表示",
@@ -8469,8 +8469,8 @@
             "a1f2c8d901": "表示"
           },
           "SourceControl": {
-            "conflictsSection": "競合",
             "1406954883": "すべてのメモをクリアします...",
+            "conflictsSection": "競合",
             "cc05b2d088": "ファイルエクスプローラーで開く",
             "03194cfff4": "ここで開いた競合から派生したローカル セッション状態。",
             "413a3ba113": "競合",
@@ -8600,6 +8600,7 @@
             "a0cc0e6b4e": "読み込み中",
             "9339382454": "すべてのステージを解除する",
             "24d2598eff": "すべてのステージ",
+            "submoduleRepoLabel": "{{value0}} Git",
             "ce41708855": "すべて破棄",
             "2f609a2e7c": "追跡されていないものをすべて削除",
             "9bb062a886": "commit されていない",
@@ -9106,7 +9107,16 @@
             "daysAgo": "{{value0}}d ago",
             "monthsAgo": "{{value0}}mo ago",
             "yearsAgo": "{{value0}}y ago",
-            "sessionId": "セッション ID"
+            "sessionId": "セッション ID",
+            "originalAsk": "Original ask",
+            "latestTurns": "Latest turns",
+            "noPreviewAvailable": "No conversation preview available",
+            "messageCount": "{{value0}} msgs",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "Resume {{value0}} session",
@@ -9123,7 +9133,14 @@
             "hideDetails": "詳細を非表示",
             "showDetails": "詳細を表示",
             "moreSessionActions": "セッションのその他の操作",
-            "moreActions": "その他の操作"
+            "moreActions": "その他の操作",
+            "noPreviewAvailable": "No conversation preview available",
+            "dragToResume": "Drag to resume in a new tab",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "ファイルを検索",
@@ -9167,9 +9184,6 @@
                 "copyCommand": "Copy command"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "表示"
           }
         }
       },

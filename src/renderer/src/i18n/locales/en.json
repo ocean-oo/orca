@@ -2322,8 +2322,7 @@
             "f3eeb1de13": "Copy",
             "c2f0b72b8d": "Insert",
             "925f49f210": "Expand Pane",
-            "df766809e0": "Collapse Pane",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "Collapse Pane"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "Restart daemon",
@@ -8321,7 +8320,8 @@
             "42e10cbf57": "Copy Relative Paths",
             "b5d436aa30": "Copy Path",
             "f9d7ca753d": "Copy Paths",
-            "3161c4e425": "folder"
+            "3161c4e425": "folder",
+            "submodule": "Submodule"
           },
           "FileExplorerToolbar": {
             "d238264654": "Show Git Ignored Files",
@@ -8469,8 +8469,8 @@
             "a1f2c8d901": "View"
           },
           "SourceControl": {
-            "conflictsSection": "Conflicts",
             "1406954883": "Clear all notes...",
+            "conflictsSection": "Conflicts",
             "cc05b2d088": "Open in File Explorer",
             "03194cfff4": "Local session state derived from a conflict you opened here.",
             "413a3ba113": "conflict",
@@ -8600,6 +8600,7 @@
             "a0cc0e6b4e": "loading",
             "9339382454": "Unstage all",
             "24d2598eff": "Stage all",
+            "submoduleRepoLabel": "{{value0}} Git",
             "ce41708855": "Discard all",
             "2f609a2e7c": "Delete all untracked",
             "9bb062a886": "uncommitted",
@@ -9183,9 +9184,6 @@
                 "copyCommand": "Copy command"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "View"
           }
         }
       },
