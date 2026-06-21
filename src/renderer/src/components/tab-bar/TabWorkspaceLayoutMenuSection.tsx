@@ -49,7 +49,7 @@ export function TabWorkspaceLayoutMenuSection({
         <DropdownMenuSubTrigger>
           {translate(
             'auto.components.tab.bar.TabWorkspaceLayoutMenuSection.moveToPaneColumn',
-            'Move to new pane column'
+            'Move Tab to Split'
           )}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>

@@ -44,11 +44,15 @@ export function useTabStripPointerActivation({
         onActivateRef.current()
       }
     }
+    const cancelPointerPress = (): void => {
+      pendingActivationRef.current = false
+      setIsPressed(false)
+    }
     window.addEventListener('pointerup', finishPointerPress)
-    window.addEventListener('pointercancel', finishPointerPress)
+    window.addEventListener('pointercancel', cancelPointerPress)
     return () => {
       window.removeEventListener('pointerup', finishPointerPress)
-      window.removeEventListener('pointercancel', finishPointerPress)
+      window.removeEventListener('pointercancel', cancelPointerPress)
     }
   }, [isPressed, isTabDragActiveRef])
 

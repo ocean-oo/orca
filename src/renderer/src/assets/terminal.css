@@ -279,8 +279,8 @@
 .pane-title-drag-handle {
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
+  left: 50%;
+  width: 32px;
   height: var(--orca-pane-title-height);
   z-index: 2;
   display: flex;
@@ -289,6 +289,7 @@
   cursor: grab;
   opacity: 0;
   background: color-mix(in srgb, var(--orca-pane-title-fg) 36%, transparent);
+  transform: translateX(-50%);
   transition: opacity 150ms ease;
 }
 
@@ -392,7 +393,11 @@
 .pane-title-close:hover,
 .pane-title-close:active,
 .pane-title-close[data-state='delayed-open'],
-.pane-title-close[data-state='instant-open'] {
+.pane-title-close[data-state='instant-open'],
+.pane-title-split-trigger:hover,
+.pane-title-split-trigger:active,
+.pane-title-split-trigger[data-state='delayed-open'],
+.pane-title-split-trigger[data-state='instant-open'] {
   background: transparent;
   color: var(--orca-pane-title-button-hover-fg, rgb(255 255 255 / 0.8));
 }

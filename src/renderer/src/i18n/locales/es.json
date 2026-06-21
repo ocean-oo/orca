@@ -2322,8 +2322,7 @@
             "f3eeb1de13": "Copiar",
             "c2f0b72b8d": "Insertar",
             "925f49f210": "Expandir panel",
-            "df766809e0": "Contraer panel",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "Contraer panel"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "Reiniciar demonio",
@@ -2432,7 +2431,9 @@
             "9acaf92093": "Acciones del panel",
             "1bce81dba6": "simulador",
             "1ff1c77616": "navegador",
-            "586d2ac445": "terminal"
+            "586d2ac445": "terminal",
+            "addSplitPane": "Add split pane",
+            "closePaneColumn": "Close pane column"
           },
           "AiVaultSessionDropLayer": {
             "dropOntoTerminalPane": "Drop onto a terminal pane to resume this session.",
@@ -2440,6 +2441,9 @@
             "localWorkspacesOnly": "Resume from history is only available in local workspaces.",
             "openLocalWorkspace": "Open a local workspace before resuming a session.",
             "sessionQueued": "Session queued"
+          },
+          "TabGroupDropOverlay": {
+            "paneColumnLabel": "New pane column"
           }
         },
         "bar": {
@@ -2510,7 +2514,10 @@
             "cb3eadefd2": "Azul",
             "20baa43c05": "Ninguno",
             "60f958ec75": "Pestaña Fijar",
-            "417722e9c2": "Desanclar pestaña"
+            "417722e9c2": "Desanclar pestaña",
+            "thisTerminalTab": "This terminal tab",
+            "splitTerminalRight": "Split terminal right",
+            "splitTerminalDown": "Split terminal down"
           },
           "TabBar": {
             "b1a132357f": "Nueva pestaña",
@@ -2602,6 +2609,14 @@
                 }
               }
             }
+          },
+          "TabWorkspaceLayoutMenuSection": {
+            "right": "Right",
+            "left": "Left",
+            "down": "Down",
+            "up": "Up",
+            "workspaceLayout": "Workspace layout",
+            "moveToPaneColumn": "Move Tab to Split"
           }
         }
       },
@@ -8469,8 +8484,8 @@
             "a1f2c8d901": "Ver"
           },
           "SourceControl": {
-            "conflictsSection": "Conflictos",
             "1406954883": "Borrar todas las notas...",
+            "conflictsSection": "Conflictos",
             "cc05b2d088": "Abrir en el Explorador de archivos",
             "03194cfff4": "Estado de la sesión local derivado de un conflicto que abrió aquí.",
             "413a3ba113": "conflicto",
@@ -9106,7 +9121,16 @@
             "daysAgo": "{{value0}}d ago",
             "monthsAgo": "{{value0}}mo ago",
             "yearsAgo": "{{value0}}y ago",
-            "sessionId": "ID de sesión"
+            "sessionId": "ID de sesión",
+            "originalAsk": "Original ask",
+            "latestTurns": "Latest turns",
+            "noPreviewAvailable": "No conversation preview available",
+            "messageCount": "{{value0}} msgs",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "Resume {{value0}} session",
@@ -9123,7 +9147,14 @@
             "hideDetails": "Ocultar detalles",
             "showDetails": "Mostrar detalles",
             "moreSessionActions": "Más acciones de sesión",
-            "moreActions": "Más acciones"
+            "moreActions": "Más acciones",
+            "noPreviewAvailable": "No conversation preview available",
+            "dragToResume": "Drag to resume in a new tab",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "Buscar archivos",
@@ -9167,9 +9198,6 @@
                 "copyCommand": "Copy command"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "Ver"
           }
         }
       },

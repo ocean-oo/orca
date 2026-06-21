@@ -2322,8 +2322,7 @@
             "f3eeb1de13": "복사",
             "c2f0b72b8d": "삽입",
             "925f49f210": "창 확장",
-            "df766809e0": "창 축소",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "창 축소"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "데몬 재시작",
@@ -2432,7 +2431,9 @@
             "9acaf92093": "창 작업",
             "1bce81dba6": "시뮬레이터",
             "1ff1c77616": "브라우저",
-            "586d2ac445": "terminal"
+            "586d2ac445": "terminal",
+            "addSplitPane": "Add split pane",
+            "closePaneColumn": "Close pane column"
           },
           "AiVaultSessionDropLayer": {
             "dropOntoTerminalPane": "이 세션을 재개하려면 terminal 창에 놓으세요.",
@@ -2440,6 +2441,9 @@
             "localWorkspacesOnly": "기록에서 재개하기는 로컬 워크스페이스에서만 사용할 수 있습니다.",
             "openLocalWorkspace": "세션을 재개하기 전에 로컬 워크스페이스를 여세요.",
             "sessionQueued": "세션이 대기열에 추가됨"
+          },
+          "TabGroupDropOverlay": {
+            "paneColumnLabel": "New pane column"
           }
         },
         "bar": {
@@ -2510,7 +2514,10 @@
             "cb3eadefd2": "파란색",
             "20baa43c05": "없음",
             "60f958ec75": "탭 고정",
-            "417722e9c2": "탭 고정 해제"
+            "417722e9c2": "탭 고정 해제",
+            "thisTerminalTab": "This terminal tab",
+            "splitTerminalRight": "Split terminal right",
+            "splitTerminalDown": "Split terminal down"
           },
           "TabBar": {
             "b1a132357f": "새 탭",
@@ -2602,6 +2609,14 @@
                 }
               }
             }
+          },
+          "TabWorkspaceLayoutMenuSection": {
+            "right": "Right",
+            "left": "Left",
+            "down": "Down",
+            "up": "Up",
+            "workspaceLayout": "Workspace layout",
+            "moveToPaneColumn": "Move Tab to Split"
           }
         }
       },
@@ -8469,8 +8484,8 @@
             "a1f2c8d901": "보기"
           },
           "SourceControl": {
-            "conflictsSection": "충돌",
             "1406954883": "모든 메모 지우기...",
+            "conflictsSection": "충돌",
             "cc05b2d088": "파일 탐색기에서 열기",
             "03194cfff4": "여기에서 연 충돌에서 파생된 로컬 세션 상태입니다.",
             "413a3ba113": "충돌",
@@ -9106,7 +9121,16 @@
             "daysAgo": "{{value0}}일 전",
             "monthsAgo": "{{value0}}개월 전",
             "yearsAgo": "{{value0}}년 전",
-            "sessionId": "세션 ID"
+            "sessionId": "세션 ID",
+            "originalAsk": "Original ask",
+            "latestTurns": "Latest turns",
+            "noPreviewAvailable": "No conversation preview available",
+            "messageCount": "{{value0}} msgs",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "{{value0}} 세션 재개",
@@ -9123,7 +9147,14 @@
             "hideDetails": "세부정보 숨기기",
             "showDetails": "세부정보 표시",
             "moreSessionActions": "세션 추가 작업",
-            "moreActions": "추가 작업"
+            "moreActions": "추가 작업",
+            "noPreviewAvailable": "No conversation preview available",
+            "dragToResume": "Drag to resume in a new tab",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "파일 찾기",
@@ -9167,9 +9198,6 @@
                 "copyCommand": "명령 복사"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "보기"
           }
         }
       },

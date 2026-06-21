@@ -2322,8 +2322,7 @@
             "f3eeb1de13": "コピー",
             "c2f0b72b8d": "入れる",
             "925f49f210": "ペインを展開する",
-            "df766809e0": "ペインを折りたたむ",
-            "copyTerminalId": "Copy Terminal ID"
+            "df766809e0": "ペインを折りたたむ"
           },
           "TerminalErrorToast": {
             "e4aa243f8c": "デーモンを再起動します",
@@ -2432,7 +2431,9 @@
             "9acaf92093": "ペインの操作",
             "1bce81dba6": "シミュレータ",
             "1ff1c77616": "ブラウザ",
-            "586d2ac445": "terminal"
+            "586d2ac445": "terminal",
+            "addSplitPane": "Add split pane",
+            "closePaneColumn": "Close pane column"
           },
           "AiVaultSessionDropLayer": {
             "dropOntoTerminalPane": "Drop onto a terminal pane to resume this session.",
@@ -2440,6 +2441,9 @@
             "localWorkspacesOnly": "Resume from history is only available in local workspaces.",
             "openLocalWorkspace": "Open a local workspace before resuming a session.",
             "sessionQueued": "Session queued"
+          },
+          "TabGroupDropOverlay": {
+            "paneColumnLabel": "New pane column"
           }
         },
         "bar": {
@@ -2510,7 +2514,10 @@
             "cb3eadefd2": "青",
             "20baa43c05": "なし",
             "60f958ec75": "ピンタブ",
-            "417722e9c2": "タブの固定を解除する"
+            "417722e9c2": "タブの固定を解除する",
+            "thisTerminalTab": "This terminal tab",
+            "splitTerminalRight": "Split terminal right",
+            "splitTerminalDown": "Split terminal down"
           },
           "TabBar": {
             "b1a132357f": "新規タブ",
@@ -2602,6 +2609,14 @@
                 }
               }
             }
+          },
+          "TabWorkspaceLayoutMenuSection": {
+            "right": "Right",
+            "left": "Left",
+            "down": "Down",
+            "up": "Up",
+            "workspaceLayout": "Workspace layout",
+            "moveToPaneColumn": "Move Tab to Split"
           }
         }
       },
@@ -8469,8 +8484,8 @@
             "a1f2c8d901": "表示"
           },
           "SourceControl": {
-            "conflictsSection": "競合",
             "1406954883": "すべてのメモをクリアします...",
+            "conflictsSection": "競合",
             "cc05b2d088": "ファイルエクスプローラーで開く",
             "03194cfff4": "ここで開いた競合から派生したローカル セッション状態。",
             "413a3ba113": "競合",
@@ -9106,7 +9121,16 @@
             "daysAgo": "{{value0}}d ago",
             "monthsAgo": "{{value0}}mo ago",
             "yearsAgo": "{{value0}}y ago",
-            "sessionId": "セッション ID"
+            "sessionId": "セッション ID",
+            "originalAsk": "Original ask",
+            "latestTurns": "Latest turns",
+            "noPreviewAvailable": "No conversation preview available",
+            "messageCount": "{{value0}} msgs",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "Resume {{value0}} session",
@@ -9123,7 +9147,14 @@
             "hideDetails": "詳細を非表示",
             "showDetails": "詳細を表示",
             "moreSessionActions": "セッションのその他の操作",
-            "moreActions": "その他の操作"
+            "moreActions": "その他の操作",
+            "noPreviewAvailable": "No conversation preview available",
+            "dragToResume": "Drag to resume in a new tab",
+            "userRole": "You",
+            "agentRole": "Agent",
+            "toolRole": "Tool",
+            "systemRole": "System",
+            "sessionRole": "Session"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "ファイルを検索",
@@ -9167,9 +9198,6 @@
                 "copyCommand": "Copy command"
               }
             }
-          },
-          "SourceControlEntryContextMenu": {
-            "a1f2c8d901": "表示"
           }
         }
       },
