@@ -1,11 +1,4 @@
 import { useMemo } from 'react'
-import {
-  ALL_EXECUTION_HOSTS_SCOPE,
-  getRepoExecutionHostId,
-  LOCAL_EXECUTION_HOST_ID,
-  normalizeExecutionHostId,
-  type ExecutionHostId
-} from '../../../src/shared/execution-host'
 import type { MobileGroupMode, MobileSortMode } from './workspace-view-settings'
 import {
   buildSections,
@@ -14,6 +7,11 @@ import {
   type Worktree
 } from './workspace-list-sections'
 import { repoColor } from './repo-color'
+
+const ALL_EXECUTION_HOSTS_SCOPE = 'all'
+const LOCAL_EXECUTION_HOST_ID = 'local'
+
+type ExecutionHostId = typeof LOCAL_EXECUTION_HOST_ID | `ssh:${string}` | `runtime:${string}`
 
 export type WorkspaceSectionRepo = {
   name: string
@@ -45,6 +43,34 @@ function getVisibleHostIds(args: {
   }
   const normalized = normalizeExecutionHostId(scope)
   return normalized ? new Set([normalized]) : null
+}
+
+function normalizeExecutionHostId(value: string | null | undefined): ExecutionHostId | null {
+  const normalized = value?.trim()
+  if (!normalized) {
+    return null
+  }
+  if (
+    normalized === LOCAL_EXECUTION_HOST_ID ||
+    normalized.startsWith('ssh:') ||
+    normalized.startsWith('runtime:')
+  ) {
+    return normalized as ExecutionHostId
+  }
+  return null
+}
+
+function getRepoExecutionHostId(
+  repo: Pick<RepoSectionSummary, 'connectionId' | 'executionHostId'>
+): ExecutionHostId {
+  const executionHostId = normalizeExecutionHostId(repo.executionHostId)
+  if (executionHostId) {
+    return executionHostId
+  }
+  const connectionId = repo.connectionId?.trim()
+  return connectionId
+    ? (`ssh:${encodeURIComponent(connectionId)}` as ExecutionHostId)
+    : LOCAL_EXECUTION_HOST_ID
 }
 
 export function getVisibleRepoIdsByName(args: {
