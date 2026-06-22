@@ -119,6 +119,38 @@ test('held phone-fit state mounts restore overlay without collapse', async ({
   await expect(overlay).toBeHidden({ timeout: 15_000 })
 })
 
+test('restore this terminal refits the active restored pane', async ({ orcaPage, electronApp }) => {
+  await waitForSessionReady(orcaPage)
+  await waitForActiveWorktree(orcaPage)
+  await ensureTerminalVisible(orcaPage)
+  await waitForActiveTerminalManager(orcaPage)
+  const ptyId = await waitForActivePanePtyId(orcaPage)
+  await installRestoreTerminalFitAutoRestoreRecorder(electronApp)
+
+  await sendHeldPhoneFitIpc(electronApp, { ptyId, cols: 45, rows: 20 })
+  await expect(orcaPage.locator('.mobile-driver-banner')).toHaveCount(1, { timeout: 15_000 })
+
+  await forcePaneToOneColumn(orcaPage, ptyId)
+  await expect
+    .poll(() => getPaneTerminalCols(orcaPage, ptyId), {
+      message: 'test harness should force the active pane into the bad narrow state'
+    })
+    .toBeLessThanOrEqual(2)
+
+  await orcaPage
+    .locator(`[data-pty-id="${ptyId}"] .mobile-driver-banner`)
+    .getByRole('button', { name: /restore this terminal/i })
+    .click()
+
+  await expectRestoreTerminalFitCalls(electronApp, [ptyId])
+  await expect
+    .poll(() => getPaneTerminalCols(orcaPage, ptyId), {
+      timeout: 5_000,
+      message: 'Restore this terminal should refit the active restored pane'
+    })
+    .toBeGreaterThan(20)
+})
+
 test('restore all refits non-focused restored terminal panes', async ({
   orcaPage,
   electronApp
