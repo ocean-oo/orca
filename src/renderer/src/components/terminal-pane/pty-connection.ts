@@ -875,9 +875,16 @@ export function connectPanePty(
       .sort(([, a], [, b]) => a.capturedAt - b.capturedAt || a.updatedAt - b.updatedAt)[0]
     // Why: duplicate legacy aliases can point at one provider session; consume
     // the oldest capture as canonical and clear its aliases after resume.
+    // The non-exact fallback only resolves the record for a pane whose current
+    // id does not match the captured numeric pane id, which is safe only when
+    // this tab restored with a single pane. With two+ split panes restored, a
+    // sibling pane would otherwise claim the same single record via this
+    // fallback while the exact pane also claims it directly — duplicate-resuming
+    // one provider session in both panes. Restrict the fallback to single-pane
+    // restores so only the exact-matching pane resumes a legacy record.
     const selectedLegacyMatch =
       exactLegacyMatch ??
-      (providerSessionKeys.size === 1
+      (providerSessionKeys.size === 1 && manager.getPanes().length <= 1
         ? legacyMatches.length === 1
           ? legacyMatches[0]
           : oldestLegacyMatch
