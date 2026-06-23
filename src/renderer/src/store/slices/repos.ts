@@ -394,6 +394,46 @@ function projectCompatibilityFromRepos(
   }
 }
 
+function mergeProjectCompatibilityProject(base: Project, overlay: Project): Project {
+  const localWindowsRuntimePreference =
+    'localWindowsRuntimePreference' in overlay
+      ? overlay.localWindowsRuntimePreference
+      : base.localWindowsRuntimePreference
+  const project: Project = {
+    ...base,
+    ...overlay,
+    // Why: all-host startup fetches hosts separately; one host's project record
+    // must not erase repo ownership learned from another host with the same id.
+    sourceRepoIds: [...new Set([...base.sourceRepoIds, ...overlay.sourceRepoIds])],
+    createdAt: Math.min(base.createdAt, overlay.createdAt),
+    updatedAt: Math.max(base.updatedAt, overlay.updatedAt)
+  }
+  if (localWindowsRuntimePreference === undefined) {
+    delete project.localWindowsRuntimePreference
+  } else {
+    project.localWindowsRuntimePreference = localWindowsRuntimePreference
+  }
+  return project
+}
+
+function mergeProjectCompatibilityProjects(
+  base: readonly Project[],
+  overlay: readonly Project[]
+): Project[] {
+  const merged = [...base]
+  const indexById = new Map(merged.map((entry, index) => [entry.id, index]))
+  for (const entry of overlay) {
+    const index = indexById.get(entry.id)
+    if (index === undefined) {
+      indexById.set(entry.id, merged.length)
+      merged.push(entry)
+    } else {
+      merged[index] = mergeProjectCompatibilityProject(merged[index]!, entry)
+    }
+  }
+  return merged
+}
+
 function mergeProjectHostSetupCompatibility(
   derived: Pick<RepoSlice, 'projects' | 'projectHostSetups'>,
   fetched: ProjectHostSetupProjection
@@ -406,7 +446,7 @@ function mergeProjectHostSetupCompatibility(
   const setupProjectIds = new Set(projectHostSetups.map((setup) => setup.projectId))
   const fetchedProjectIds = new Set(fetched.projects.map((project) => project.id))
   return {
-    projects: mergeById(derived.projects, fetched.projects).filter(
+    projects: mergeProjectCompatibilityProjects(derived.projects, fetched.projects).filter(
       (project) => fetchedProjectIds.has(project.id) || setupProjectIds.has(project.id)
     ),
     projectHostSetups
@@ -462,7 +502,7 @@ function mergeFetchedProjectCompatibilityForHost({
     (project) => !getProjectHostIds(project, previous.projectHostSetups, repos).has(hostId)
   )
   return {
-    projects: mergeById(preservedProjects, fetchedProjectsForHost),
+    projects: mergeProjectCompatibilityProjects(preservedProjects, fetchedProjectsForHost),
     projectHostSetups
   }
 }

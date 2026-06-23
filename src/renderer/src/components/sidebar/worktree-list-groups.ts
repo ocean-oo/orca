@@ -1153,8 +1153,17 @@ export function buildRows(
     appendProjectGroup(projectGroup, 0)
   }
 
+  const remainingRepoEntries = [...(groupByProjectGroupId.get(null) ?? [])]
+  for (const [projectGroupId, entries] of groupByProjectGroupId) {
+    if (projectGroupId === null) {
+      continue
+    }
+    // Why: startup can have repos from hosts whose project-group metadata was
+    // not fetched yet; missing metadata must not make those repos disappear.
+    remainingRepoEntries.push(...entries)
+  }
   appendOrderedGroups(
-    withRepoSectionDisplayLabels(sortRepoEntriesWithinGroup(groupByProjectGroupId.get(null) ?? [])),
+    withRepoSectionDisplayLabels(sortRepoEntriesWithinGroup(remainingRepoEntries)),
     0
   )
 

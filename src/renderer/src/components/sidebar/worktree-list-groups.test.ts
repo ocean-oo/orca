@@ -1365,6 +1365,46 @@ describe('project groups', () => {
     ])
   })
 
+  it('renders repos whose Project Group metadata is missing as top-level repo rows', () => {
+    const group: ProjectGroup = {
+      id: 'group-1',
+      name: 'Platform',
+      parentPath: '/platform',
+      parentGroupId: null,
+      createdFrom: 'folder-scan',
+      tabOrder: 0,
+      isCollapsed: false,
+      color: null,
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const repoWithMissingGroup: Repo = { ...repo, projectGroupId: 'missing-group' }
+
+    const rows = buildRows(
+      'repo',
+      [worktree],
+      new Map([[repoWithMissingGroup.id, repoWithMissingGroup]]),
+      null,
+      new Set(),
+      new Map([[repoWithMissingGroup.id, 0]]),
+      undefined,
+      'manual',
+      {},
+      new Map([[worktree.id, worktree]]),
+      false,
+      undefined,
+      [group]
+    )
+
+    expect(rows.filter((row) => row.type === 'header').map((row) => row.key)).toEqual([
+      'project-group:group-1',
+      'repo:repo-1'
+    ])
+    expect(rows.find((row) => row.type === 'header' && row.key === 'repo:repo-1')).toMatchObject({
+      projectGroupDepth: 0
+    })
+  })
+
   it('disambiguates duplicate top-level repo basenames without renaming repos', () => {
     const group: ProjectGroup = {
       id: 'group-1',
