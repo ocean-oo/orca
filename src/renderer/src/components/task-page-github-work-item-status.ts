@@ -24,6 +24,8 @@ export function getTaskPageGitHubWorkItemStateLabel(item: GitHubWorkItemStatusIt
 
 // Why: mirror GitHub Primer StateLabel tones — draft is neutral gray, open is
 // green, merged purple, closed red. No custom amber/dashed treatment.
+// Note: Draft uses a different pattern (muted-foreground bg on border bg) because
+// it's a non-actionable "meta" state, while other states use solid color fills.
 export function getTaskPageGitHubWorkItemStateTone(item: GitHubWorkItemStatusItem): string {
   if (item.type === 'pr') {
     if (item.state === 'merged') {
@@ -52,17 +54,19 @@ export function getTaskPageGitHubPRIconTone(item: GitHubWorkItemStatusItem): str
   if (item.type !== 'pr') {
     return 'text-muted-foreground'
   }
-  if (item.state === 'draft') {
-    return 'text-muted-foreground'
+
+  // Exhaustive switch ensures TypeScript will error if new states are added
+  switch (item.state) {
+    case 'draft':
+      return 'text-muted-foreground'
+    case 'open':
+      return 'text-emerald-600 dark:text-emerald-400'
+    case 'merged':
+      return 'text-purple-600 dark:text-purple-300'
+    case 'closed':
+      return 'text-rose-600 dark:text-rose-300'
+    default:
+      // Fallback for any unexpected state
+      return 'text-muted-foreground'
   }
-  if (item.state === 'open') {
-    return 'text-emerald-600 dark:text-emerald-400'
-  }
-  if (item.state === 'merged') {
-    return 'text-purple-600 dark:text-purple-300'
-  }
-  if (item.state === 'closed') {
-    return 'text-rose-600 dark:text-rose-300'
-  }
-  return 'text-muted-foreground'
 }

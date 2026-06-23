@@ -8820,19 +8820,24 @@ export default function TaskPage(): React.JSX.Element {
                         ? getGithubWorkItemWorkspaceAttachmentLabel(attachedWorkspace)
                         : null
                       const githubTaskIdPill = (
-                        <span className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-muted/40 px-1.5 py-0.5 text-muted-foreground">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-muted/40 px-1.5 py-0.5 text-muted-foreground"
+                          aria-label={`${item.type === 'pr' ? (isTaskPageGitHubDraftPR(item) ? 'Draft pull request' : 'Pull request') : 'Issue'} #${item.number}`}
+                        >
                           {item.type === 'pr' ? (
                             isTaskPageGitHubDraftPR(item) ? (
                               <GitPullRequestDraft
                                 className={cn('size-3', getTaskPageGitHubPRIconTone(item))}
+                                aria-hidden="true"
                               />
                             ) : (
                               <GitPullRequest
                                 className={cn('size-3', getTaskPageGitHubPRIconTone(item))}
+                                aria-hidden="true"
                               />
                             )
                           ) : (
-                            <CircleDot className="size-3" />
+                            <CircleDot className="size-3" aria-hidden="true" />
                           )}
                           <span className="font-mono text-[11px] font-normal">#{item.number}</span>
                         </span>

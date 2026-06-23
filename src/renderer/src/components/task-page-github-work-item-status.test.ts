@@ -37,4 +37,31 @@ describe('task-page-github-work-item-status', () => {
     expect(getTaskPageGitHubWorkItemStateTone({ type: 'pr', state: 'merged' })).toContain('purple')
     expect(getTaskPageGitHubWorkItemStateTone({ type: 'pr', state: 'open' })).toContain('emerald')
   })
+
+  it('handles edge cases gracefully', () => {
+    // Issues don't have draft state - should fallback to open styling
+    expect(getTaskPageGitHubWorkItemStateLabel({ type: 'issue', state: 'open' })).toBe('Open')
+    expect(getTaskPageGitHubWorkItemStateLabel({ type: 'issue', state: 'closed' })).toBe('Closed')
+
+    // Unknown state should fallback to 'Open' for PRs
+    expect(getTaskPageGitHubWorkItemStateLabel({ type: 'pr', state: 'unknown' as 'open' })).toBe(
+      'Open'
+    )
+
+    // Icon tones for issues should always be muted
+    expect(getTaskPageGitHubPRIconTone({ type: 'issue', state: 'open' })).toContain(
+      'muted-foreground'
+    )
+    expect(getTaskPageGitHubPRIconTone({ type: 'issue', state: 'closed' })).toContain(
+      'muted-foreground'
+    )
+
+    // Draft PR check
+    expect(isTaskPageGitHubDraftPR({ type: 'pr', state: 'draft' })).toBe(true)
+    expect(isTaskPageGitHubDraftPR({ type: 'pr', state: 'open' })).toBe(false)
+    expect(isTaskPageGitHubDraftPR({ type: 'pr', state: 'merged' })).toBe(false)
+    expect(isTaskPageGitHubDraftPR({ type: 'pr', state: 'closed' })).toBe(false)
+    expect(isTaskPageGitHubDraftPR({ type: 'issue', state: 'open' })).toBe(false)
+    expect(isTaskPageGitHubDraftPR({ type: 'issue', state: 'closed' })).toBe(false)
+  })
 })
