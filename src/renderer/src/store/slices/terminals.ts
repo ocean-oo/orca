@@ -2595,22 +2595,14 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       // reconnectPersistedTerminals() after all eager PTY spawns complete.
       // This prevents TerminalPane from mounting and spawning duplicate PTYs
       // before the reconnect phase has set ptyId on each tab.
-      const remoteSessionIds = session.remoteSessionIdsByTabId ?? {}
-      // Why: activeWorktreeIdsOnShutdown is only the eager-remount hint. Any
-      // tab with a persisted PTY or relay session can still reattach when
-      // opened, so it must also advertise liveness to Hide sleeping.
-      const tabHasRestorableSession = (tab: TerminalTab): boolean => {
-        const leafPtyIds = Object.values(
-          session.terminalLayoutsByTabId?.[tab.id]?.ptyIdsByLeafId ?? {}
-        ).filter(Boolean)
-        return Boolean(tab.ptyId || remoteSessionIds[tab.id] || leafPtyIds.length > 0)
-      }
-      const sessionBackedWorktreeIds = Object.entries(session.tabsByWorktree)
-        .filter(([, tabs]) => tabs.some(tabHasRestorableSession))
-        .map(([wId]) => wId)
-      const shutdownIds = Array.from(
-        new Set([...(session.activeWorktreeIdsOnShutdown ?? []), ...sessionBackedWorktreeIds])
-      )
+      // Why: match the pre-idle-runtime-optimization startup contract.
+      // activeWorktreeIdsOnShutdown is authoritative when present; persisted
+      // tab/layout PTY IDs are wake hints, not a broader active-workspace list.
+      const shutdownIds =
+        session.activeWorktreeIdsOnShutdown ??
+        Object.entries(session.tabsByWorktree)
+          .filter(([, tabs]) => tabs.some((t) => t.ptyId))
+          .map(([wId]) => wId)
       const pendingReconnectWorktreeIds = shutdownIds.filter((id) => validWorktreeIds.has(id))
 
       // Why: capture which specific tabs had live PTYs per worktree from the
@@ -2620,11 +2612,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       // Also include tabs whose relay session IDs were preserved in
       // remoteSessionIdsByTabId — those tabs were disconnected before shutdown
       // (ptyId was null) but the relay still has their PTY alive.
+      const remoteSessionIds = session.remoteSessionIdsByTabId ?? {}
       const pendingReconnectTabByWorktree: Record<string, string[]> = {}
       for (const worktreeId of pendingReconnectWorktreeIds) {
         const rawTabs = session.tabsByWorktree[worktreeId] ?? []
         const liveTabIds = rawTabs
-          .filter((t) => tabHasRestorableSession(t) && validTabIds.has(t.id))
+          .filter((t) => (t.ptyId || remoteSessionIds[t.id]) && validTabIds.has(t.id))
           .map((t) => t.id)
         if (liveTabIds.length > 0) {
           pendingReconnectTabByWorktree[worktreeId] = liveTabIds
@@ -2873,16 +2866,11 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         console.debug(
           `[reconnect-terminals] tab=${tabId} tabLevelPtyId=${tabLevelPtyId} supportsDeferredReattach=${supportsDeferredReattach} hasLeafMappings=${hasLeafMappings}`
         )
-        if (tabLevelPtyId || hasLeafMappings) {
+        if (tabLevelPtyId) {
           set((s) => {
             const next = { ...s.tabsByWorktree }
             if (!next[worktreeId]) {
               return {}
-            }
-            if (tabLevelPtyId) {
-              next[worktreeId] = next[worktreeId].map((t) =>
-                t.id === tabId ? { ...t, ptyId: tabLevelPtyId } : t
-              )
             }
 
             // Why: populate ptyIdsByTabId so the sessions status segment
@@ -2892,6 +2880,9 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
             const allPtyIds = hasLeafMappings
               ? (Object.values(leafPtyMap).filter(Boolean) as string[])
               : [tabLevelPtyId!]
+            next[worktreeId] = next[worktreeId].map((t) =>
+              t.id === tabId ? { ...t, ptyId: tabLevelPtyId } : t
+            )
             return {
               tabsByWorktree: next,
               // Why: hide-sleeping uses ptyIdsByTabId as the liveness source.

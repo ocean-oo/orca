@@ -1498,7 +1498,7 @@ describe('reconnectPersistedTerminals', () => {
     expect(store.getState().workspaceSessionReady).toBe(false)
     expect(store.getState().tabsByWorktree[wt1][0].ptyId).toBeNull()
     expect(store.getState().tabsByWorktree[wt2][0].ptyId).toBeNull()
-    expect(store.getState().pendingReconnectWorktreeIds).toEqual([wt1, wt2])
+    expect(store.getState().pendingReconnectWorktreeIds).toEqual([wt1])
 
     await store.getState().reconnectPersistedTerminals()
 
@@ -1508,9 +1508,9 @@ describe('reconnectPersistedTerminals', () => {
     // records daemon session IDs as tab-level ptyIds so connectPanePty
     // can pass them as sessionId to the daemon's createOrAttach.
     expect(s.tabsByWorktree[wt1][0].ptyId).toBe('old-pty-1')
-    expect(s.tabsByWorktree[wt2][0].ptyId).toBe('old-pty-2')
+    expect(s.tabsByWorktree[wt2][0].ptyId).toBeNull()
     expect(s.ptyIdsByTabId.tab1).toEqual(['old-pty-1'])
-    expect(s.ptyIdsByTabId.tab2).toEqual(['old-pty-2'])
+    expect(s.ptyIdsByTabId.tab2).toEqual([])
     expect(
       computeVisibleWorktreeIds(s.worktreesByRepo, [wt1, wt2], {
         filterRepoIds: [],
@@ -1525,7 +1525,7 @@ describe('reconnectPersistedTerminals', () => {
         defaultHostId: LOCAL_EXECUTION_HOST_ID,
         worktreeLineageById: {}
       })
-    ).toEqual([wt1, wt2])
+    ).toEqual([wt1])
     expect(s.pendingReconnectWorktreeIds).toEqual([])
     // No eager spawn — PTY creation deferred to pane mount
     expect((mockApi.pty as Record<string, unknown>).spawn).not.toHaveBeenCalled()
@@ -1817,7 +1817,7 @@ describe('reconnectPersistedTerminals', () => {
     expect(s.workspaceSessionReady).toBe(true)
   })
 
-  it('advertises split-pane-only restored sessions for hide-sleeping visibility', async () => {
+  it('does not advertise split-pane-only wake hints as hide-sleeping activity', async () => {
     const store = createDaemonEnabledStore()
     const wt1 = 'repo1::/path/wt1'
 
@@ -1852,12 +1852,13 @@ describe('reconnectPersistedTerminals', () => {
       activeWorktreeIdsOnShutdown: []
     })
 
-    expect(store.getState().pendingReconnectWorktreeIds).toEqual([wt1])
+    expect(store.getState().pendingReconnectWorktreeIds).toEqual([])
 
     await store.getState().reconnectPersistedTerminals()
 
     const s = store.getState()
-    expect(s.ptyIdsByTabId.tab1?.sort()).toEqual(['daemon-session-A', 'daemon-session-B'])
+    expect(s.terminalLayoutsByTabId.tab1?.ptyIdsByLeafId).toBeDefined()
+    expect(s.ptyIdsByTabId.tab1).toEqual([])
     expect(
       computeVisibleWorktreeIds(s.worktreesByRepo, [wt1], {
         filterRepoIds: [],
@@ -1872,7 +1873,7 @@ describe('reconnectPersistedTerminals', () => {
         defaultHostId: LOCAL_EXECUTION_HOST_ID,
         worktreeLineageById: {}
       })
-    ).toEqual([wt1])
+    ).toEqual([])
   })
 })
 
