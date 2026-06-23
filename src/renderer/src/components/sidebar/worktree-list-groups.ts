@@ -159,8 +159,8 @@ function buildProjectGroupingIndex(model?: ProjectGroupingModel): ProjectGroupin
   if (cached !== undefined) {
     return cached
   }
-  const projects = model.projects
-  const projectHostSetups = model.projectHostSetups
+  const projects = model.projects ?? []
+  const projectHostSetups = model.projectHostSetups ?? []
   if (projects.length === 0 || projectHostSetups.length === 0) {
     projectGroupingIndexCache.set(model, null)
     return null
