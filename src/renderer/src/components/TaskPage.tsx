@@ -230,10 +230,7 @@ import {
   type TaskPageJiraLoadError
 } from '@/components/task-page-jira-load-state'
 import { deriveTaskPagePRCheckSummary } from '@/components/task-page-pr-check-summary'
-import {
-  presentGitHubPRMergeState,
-  type GitHubPRMergeStatePresentation
-} from '@/components/github-pr-merge-state'
+import { presentGitHubPRMergeState } from '@/components/github-pr-merge-state'
 import { buildJiraCreateTextAdf } from '@/components/jira-create-adf'
 import {
   GITHUB_PR_MERGE_METHOD_LABELS,
@@ -2019,34 +2016,18 @@ function getChecksLabel(item: GitHubWorkItem): string {
   return `${summary.passed}/${summary.total} passed`
 }
 
-const PR_LIST_NEUTRAL_PILL_TONE =
-  'border-border/60 bg-background/70 text-muted-foreground hover:text-foreground'
-
-function getChecksIconTone(item: GitHubWorkItem): string {
+function getChecksPillTone(item: GitHubWorkItem): string {
   const state = item.checksSummary?.state
   if (state === 'success') {
-    return 'text-emerald-500'
+    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
   }
   if (state === 'failure') {
-    return 'text-rose-500'
+    return 'border-rose-500/40 bg-rose-500/10 text-rose-200'
   }
   if (state === 'pending') {
-    return 'text-amber-500'
+    return 'border-amber-500/40 bg-amber-500/10 text-amber-200'
   }
-  return 'text-muted-foreground'
-}
-
-function getMergeIconTone(presentation: GitHubPRMergeStatePresentation): string {
-  if (presentation.tone.includes('emerald')) {
-    return 'text-emerald-500'
-  }
-  if (presentation.tone.includes('rose')) {
-    return 'text-rose-500'
-  }
-  if (presentation.tone.includes('amber')) {
-    return 'text-amber-500'
-  }
-  return 'text-muted-foreground'
+  return 'border-border/60 bg-background/70 text-muted-foreground'
 }
 
 function sameOptionalGitHubOwnerRepo(
@@ -2715,10 +2696,10 @@ function PRChecksCell({
           }}
           className={cn(
             'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition hover:brightness-110',
-            PR_LIST_NEUTRAL_PILL_TONE
+            getChecksPillTone(item)
           )}
         >
-          <Icon className={cn('size-3', getChecksIconTone(item))} />
+          <Icon className="size-3" />
           <span className="truncate">{getChecksLabel(item)}</span>
         </button>
       </TooltipTrigger>
@@ -2890,13 +2871,13 @@ function PRMergeCell({
               onClick={(event) => event.stopPropagation()}
               className={cn(
                 'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition hover:brightness-110',
-                PR_LIST_NEUTRAL_PILL_TONE
+                mergePresentation.tone
               )}
             >
               {merging ? (
                 <LoaderCircle className="size-3 animate-spin text-muted-foreground" />
               ) : (
-                <GitMerge className={cn('size-3', getMergeIconTone(mergePresentation))} />
+                <GitMerge className="size-3" />
               )}
               <span className="truncate">{mergePresentation.label}</span>
               <ChevronDown className="size-2.5 opacity-60" />
