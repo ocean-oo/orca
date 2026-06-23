@@ -2304,6 +2304,8 @@ async function getTrackedUpstreamBranch(
   connectionId?: string | null,
   localGitOptions: { wslDistro?: string } = {}
 ): Promise<TrackedUpstreamBranch | null> {
+  // Why: branches without configured upstreams are stable misses during PR
+  // polling; cache only nulls so positive PR discovery stays fresh.
   const cacheKey = getTrackedUpstreamBranchCacheKey(
     repoPath,
     branchName,

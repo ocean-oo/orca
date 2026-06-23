@@ -10,8 +10,13 @@ export function registerWorktreeChangeInvalidator(
 }
 
 export function runWorktreeChangeInvalidators(repoId: string): void {
-  for (const invalidator of worktreeChangeInvalidators) {
-    invalidator(repoId)
+  const invalidators = Array.from(worktreeChangeInvalidators)
+  for (const invalidator of invalidators) {
+    try {
+      invalidator(repoId)
+    } catch (error) {
+      console.warn('[worktrees] worktree change invalidator failed:', error)
+    }
   }
 }
 

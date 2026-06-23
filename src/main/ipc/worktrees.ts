@@ -388,6 +388,8 @@ function getPreservedBranchCleanupTarget(
 const loggedUnavailableSshGitProviders = new Set<string>()
 const loggedWorktreeListFailures = new Set<string>()
 const loggedMalformedWorktreeMetaKeys = new Set<string>()
+// Why: absorb renderer polling bursts while keeping external worktree-change
+// lag bounded to one short refresh window.
 const DETECTED_WORKTREE_SCAN_CACHE_TTL_MS = 5_000
 
 type DetectedWorktreeScanCacheEntry = {
