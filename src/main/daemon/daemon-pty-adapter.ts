@@ -539,9 +539,21 @@ export class DaemonPtyAdapter implements IPtyProvider {
     }
 
     const exitedIds = idsAtDisconnect.filter((id) => !aliveSessionIds.has(id))
+    const survivedIds = idsAtDisconnect.filter((id) => aliveSessionIds.has(id))
     this.fanoutSyntheticExitIds(exitedIds, -1)
-    if (exitedIds.length < idsAtDisconnect.length) {
-      await this.client.ensureConnected()
+
+    if (survivedIds.length > 0) {
+      // Why: if the probe can see live sessions but the primary client still
+      // cannot reconnect, keeping those sessions "active" would black-hole input.
+      try {
+        await this.client.ensureConnected()
+      } catch {
+        if (this.isDisposed || generation !== this.disconnectReconcileGeneration) {
+          return
+        }
+        this.fanoutSyntheticExitIds(survivedIds, -1)
+        return
+      }
       if (this.isDisposed || generation !== this.disconnectReconcileGeneration) {
         // Why: a newer disconnect/dispose won the race while reconnecting; undo
         // this stale reconnect so it cannot keep sockets alive behind teardown.

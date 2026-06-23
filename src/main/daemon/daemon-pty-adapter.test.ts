@@ -406,6 +406,35 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       await expect(internals.reconcileAfterDaemonDisconnect()).rejects.toThrow('listener failed')
       expect(adapter.getActiveSessionIds()).toEqual(['live-session'])
     })
+
+    it('exits surviving sessions if the primary client cannot reconnect after probing', async () => {
+      const exits: { id: string; code: number }[] = []
+      adapter.onExit((payload) => exits.push(payload))
+
+      const internals = adapter as unknown as {
+        activeSessionIds: Set<string>
+        probeAliveSessionIds: () => Promise<Set<string>>
+        reconcileAfterDaemonDisconnect: () => Promise<void>
+        client: { ensureConnected: () => Promise<void>; disconnect: () => void }
+      }
+      internals.activeSessionIds.add('dead-session')
+      internals.activeSessionIds.add('live-session')
+      internals.probeAliveSessionIds = vi.fn(async () => new Set(['live-session']))
+      internals.client = {
+        ensureConnected: vi.fn(async () => {
+          throw new Error('reconnect failed')
+        }),
+        disconnect: vi.fn()
+      }
+
+      await internals.reconcileAfterDaemonDisconnect()
+
+      expect(exits).toEqual([
+        { id: 'dead-session', code: -1 },
+        { id: 'live-session', code: -1 }
+      ])
+      expect(adapter.getActiveSessionIds()).toEqual([])
+    })
   })
 
   describe('spawn with sessionId (reattach)', () => {
