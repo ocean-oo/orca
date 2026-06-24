@@ -96,6 +96,7 @@ const COMMENT_AVATAR =
 const RESOLVED_SECTION_LABEL =
   'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
+// Why: cards and focus vary spacing only; PR comment text stays at dense sidebar scale.
 const CARD_COMMENT_BODY_SIZE = 'text-[13px] leading-relaxed'
 const CARD_COMMENT_AUTHOR_SIZE = 'text-[13px]'
 
