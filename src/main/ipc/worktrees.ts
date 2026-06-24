@@ -583,10 +583,13 @@ function pruneLineageForMissingRepoWorktrees(
       store.removeWorktreeLineage(childId)
       store.removeWorkspaceLineage?.(worktreeWorkspaceKey(childId))
     }
-    if (
+    const parentMissingFromLegacyScan =
       lineage.parentWorktreeId.startsWith(repoPrefix) &&
       !legacyLiveIds.has(lineage.parentWorktreeId)
-    ) {
+    const parentMissingFromCanonicalScan =
+      isCanonicalWorktreeIdForRepoHost(repo, lineage.parentWorktreeId) &&
+      !liveIds.has(lineage.parentWorktreeId)
+    if (parentMissingFromLegacyScan || parentMissingFromCanonicalScan) {
       const parentMeta = store.getWorktreeMeta(lineage.parentWorktreeId)
       if (!parentMeta || parentMeta.instanceId === lineage.parentWorktreeInstanceId) {
         // Why: keep the child lineage so the UI can show "Missing parent", but
@@ -842,12 +845,16 @@ function getCanonicalFolderWorkspaceId(repo: Repo, worktreeId: string): string {
 }
 
 function migrateLegacyFolderWorkspaceMetaIfSafe(store: Store, repo: Repo): void {
+  const hasAmbiguousHost = hasAmbiguousRepoHost(store.getRepos(), repo)
   for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta())) {
     if (!isLegacyFolderWorkspaceIdForRepo(repo, worktreeId)) {
       continue
     }
     const repoHostId = getRepoExecutionHostId(repo)
     if (meta.hostId !== undefined && meta.hostId !== repoHostId) {
+      continue
+    }
+    if (meta.hostId === undefined && hasAmbiguousHost) {
       continue
     }
     store.migrateWorktreeIdentity(worktreeId, getCanonicalFolderWorkspaceId(repo, worktreeId))

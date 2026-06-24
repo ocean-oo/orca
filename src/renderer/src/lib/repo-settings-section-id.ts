@@ -18,7 +18,13 @@ export function parseRepoSettingsSectionId(
   if (separatorIndex <= 0 || separatorIndex >= payload.length - 1) {
     return null
   }
-  const repoHostId = decodeURIComponent(payload.slice(0, separatorIndex))
-  const repoId = decodeURIComponent(payload.slice(separatorIndex + 1))
+  let repoHostId: string
+  let repoId: string
+  try {
+    repoHostId = decodeURIComponent(payload.slice(0, separatorIndex))
+    repoId = decodeURIComponent(payload.slice(separatorIndex + 1))
+  } catch {
+    return null
+  }
   return repoId && repoHostId ? { repoId, repoHostId } : null
 }

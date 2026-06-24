@@ -147,9 +147,18 @@ export function resolveWorkspaceCreationTarget(
   const setups = model?.setups ?? []
 
   if (projectHostSetupId) {
-    const setup = setups.find(
+    const matchingSetups = setups.filter(
       (entry) => entry.id === projectHostSetupId && (!hostId || entry.hostId === hostId)
     )
+    const focusedHostId =
+      focusedHostScope && focusedHostScope !== ALL_EXECUTION_HOSTS_SCOPE ? focusedHostScope : null
+    const setup = hostId
+      ? matchingSetups[0]
+      : focusedHostId
+        ? matchingSetups.find((entry) => entry.hostId === focusedHostId)
+        : matchingSetups.length === 1
+          ? matchingSetups[0]
+          : undefined
     if (!setup) {
       return { status: 'unavailable', reason: 'setup-not-found' }
     }

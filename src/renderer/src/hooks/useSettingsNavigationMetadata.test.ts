@@ -153,6 +153,7 @@ describe('settings navigation metadata', () => {
       repoHostId: 'ssh:openclaw%202'
     })
     expect(parseRepoSettingsSectionId('repo-repo-1')).toBeNull()
+    expect(parseRepoSettingsSectionId('repo-local:%ZZ')).toBeNull()
   })
 
   it('keeps Windows client-only terminal settings out of Windows-host metadata', () => {

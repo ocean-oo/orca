@@ -744,8 +744,11 @@ function getAutomationContextsForRepo(
   const projection = projectHostSetupProjectionFromRepos([repo])
   const projectedProject = projection.projects[0]
   const projectedSetup = projection.setups[0]
+  const repoHostId = getRepoExecutionHostId(repo)
   const setup =
-    projectHostSetups.find((candidate) => candidate.repoId === repo.id) ?? projectedSetup
+    projectHostSetups.find(
+      (candidate) => candidate.repoId === repo.id && candidate.hostId === repoHostId
+    ) ?? projectedSetup
   const runContext = setup
     ? buildWorkspaceRunContext({
         projectId: setup.projectId,

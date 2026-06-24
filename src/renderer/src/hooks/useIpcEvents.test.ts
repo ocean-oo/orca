@@ -3331,8 +3331,65 @@ describe('useIpcEvents CLI-created worktree activation', () => {
   })
 
   it('refreshes active runtime worktrees from remote client events', async () => {
-    const fetchWorktrees = vi.fn()
-    const fetchWorktreeLineage = vi.fn()
+    const purgeWorktreeTerminalState = vi.fn()
+    const removeWorkspaceSpaceWorktrees = vi.fn()
+    const storeState = {
+      fetchRepos: vi.fn(),
+      fetchRuntimeEnvironmentRepos: vi.fn(),
+      fetchProjectGroups: vi.fn(),
+      fetchWorktrees: vi.fn().mockImplementation(async () => {
+        storeState.detectedWorktreesByRepo = {
+          'repo-1': {
+            repoId: 'repo-1',
+            authoritative: true,
+            source: 'git',
+            worktrees: [{ id: 'runtime-wt', hostId: 'runtime:env-1' }]
+          }
+        }
+      }),
+      fetchWorktreeLineage: vi.fn(),
+      repos: [
+        { id: 'repo-1', executionHostId: 'local' },
+        { id: 'repo-1', executionHostId: 'runtime:env-1' }
+      ],
+      detectedWorktreesByRepo: {},
+      worktreesByRepo: {
+        'repo-1': [
+          { id: 'local-wt', repoId: 'repo-1', path: '/local', hostId: 'local' },
+          { id: 'runtime-wt', repoId: 'repo-1', path: '/runtime', hostId: 'runtime:env-1' }
+        ]
+      },
+      purgeWorktreeTerminalState,
+      removeWorkspaceSpaceWorktrees,
+      setUpdateStatus: vi.fn(),
+      activeModal: null,
+      closeModal: vi.fn(),
+      openModal: vi.fn(),
+      getKnownWorktreeById: vi.fn(),
+      activeWorktreeId: 'runtime-wt',
+      activeView: 'terminal',
+      setActiveView: vi.fn(),
+      setActiveRepo: vi.fn(),
+      setActiveWorktree: vi.fn(),
+      revealWorktreeInSidebar: vi.fn(),
+      setIsFullScreen: vi.fn(),
+      updateBrowserPageState: vi.fn(),
+      activeTabType: 'terminal',
+      editorFontZoomLevel: 0,
+      setEditorFontZoomLevel: vi.fn(),
+      setRateLimitsFromPush: vi.fn(),
+      setSshConnectionState: vi.fn(),
+      setSshTargetLabels: vi.fn(),
+      setPortForwards: vi.fn(),
+      clearPortForwards: vi.fn(),
+      setDetectedPorts: vi.fn(),
+      enqueueSshCredentialRequest: vi.fn(),
+      removeSshCredentialRequest: vi.fn(),
+      clearTabPtyId: vi.fn(),
+      settings: { activeRuntimeEnvironmentId: 'env-1', terminalFontSize: 13 }
+    }
+    const fetchWorktrees = storeState.fetchWorktrees
+    const fetchWorktreeLineage = storeState.fetchWorktreeLineage
     let runtimeOnResponse: ((response: unknown) => void) | undefined
     const runtimeSubscribe = vi.fn(async (_args, callbacks) => {
       runtimeOnResponse = (callbacks as { onResponse: (response: unknown) => void }).onResponse
@@ -3352,54 +3409,7 @@ describe('useIpcEvents CLI-created worktree activation', () => {
     vi.doMock('../store', () => ({
       useAppStore: {
         subscribe: vi.fn(() => () => {}),
-        getState: () => ({
-          fetchRepos: vi.fn(),
-          fetchRuntimeEnvironmentRepos: vi.fn(),
-          fetchProjectGroups: vi.fn(),
-          fetchWorktrees,
-          fetchWorktreeLineage,
-          repos: [
-            { id: 'repo-1', executionHostId: 'local' },
-            { id: 'repo-1', executionHostId: 'runtime:env-1' }
-          ],
-          detectedWorktreesByRepo: {
-            'repo-1': {
-              repoId: 'repo-1',
-              authoritative: true,
-              source: 'git',
-              worktrees: [{ id: 'wt-old' }]
-            }
-          },
-          worktreesByRepo: {},
-          purgeWorktreeTerminalState: vi.fn(),
-          removeWorkspaceSpaceWorktrees: vi.fn(),
-          setUpdateStatus: vi.fn(),
-          activeModal: null,
-          closeModal: vi.fn(),
-          openModal: vi.fn(),
-          getKnownWorktreeById: vi.fn(),
-          activeWorktreeId: 'wt-old',
-          activeView: 'terminal',
-          setActiveView: vi.fn(),
-          setActiveRepo: vi.fn(),
-          setActiveWorktree: vi.fn(),
-          revealWorktreeInSidebar: vi.fn(),
-          setIsFullScreen: vi.fn(),
-          updateBrowserPageState: vi.fn(),
-          activeTabType: 'terminal',
-          editorFontZoomLevel: 0,
-          setEditorFontZoomLevel: vi.fn(),
-          setRateLimitsFromPush: vi.fn(),
-          setSshConnectionState: vi.fn(),
-          setSshTargetLabels: vi.fn(),
-          setPortForwards: vi.fn(),
-          clearPortForwards: vi.fn(),
-          setDetectedPorts: vi.fn(),
-          enqueueSshCredentialRequest: vi.fn(),
-          removeSshCredentialRequest: vi.fn(),
-          clearTabPtyId: vi.fn(),
-          settings: { activeRuntimeEnvironmentId: 'env-1', terminalFontSize: 13 }
-        })
+        getState: () => storeState
       }
     }))
 
@@ -3549,6 +3559,8 @@ describe('useIpcEvents CLI-created worktree activation', () => {
 
     expect(fetchWorktrees).toHaveBeenCalledWith('repo-1', { ownerHostId: 'runtime:env-1' })
     expect(fetchWorktreeLineage).toHaveBeenCalledTimes(1)
+    expect(purgeWorktreeTerminalState).not.toHaveBeenCalledWith(['local-wt'])
+    expect(removeWorkspaceSpaceWorktrees).not.toHaveBeenCalledWith(['local-wt'])
   })
 })
 

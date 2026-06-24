@@ -248,16 +248,38 @@ function isAgentStatusForRecentlyClosedTab(
   return store.recentlyClosedAgentStatusTabIds[tabId] === true
 }
 
-function getAuthoritativeDetectedWorktreeIds(state: AppState, repoId: string): Set<string> | null {
+function getAuthoritativeDetectedWorktreeIds(
+  state: AppState,
+  repoId: string,
+  ownerHostId?: ExecutionHostId
+): Set<string> | null {
   const detected = state.detectedWorktreesByRepo[repoId]
   if (detected?.authoritative !== true) {
     return null
   }
-  return new Set(detected.worktrees.map((worktree) => worktree.id))
+  return new Set(
+    detected.worktrees
+      .filter(
+        (worktree) =>
+          ownerHostId === undefined || (worktree.hostId ?? LOCAL_EXECUTION_HOST_ID) === ownerHostId
+      )
+      .map((worktree) => worktree.id)
+  )
 }
 
-function getVisibleWorktreeIdsForRepo(state: AppState, repoId: string): Set<string> {
-  return new Set((state.worktreesByRepo[repoId] ?? []).map((worktree) => worktree.id))
+function getVisibleWorktreeIdsForRepo(
+  state: AppState,
+  repoId: string,
+  ownerHostId?: ExecutionHostId
+): Set<string> {
+  return new Set(
+    (state.worktreesByRepo[repoId] ?? [])
+      .filter(
+        (worktree) =>
+          ownerHostId === undefined || (worktree.hostId ?? LOCAL_EXECUTION_HOST_ID) === ownerHostId
+      )
+      .map((worktree) => worktree.id)
+  )
 }
 
 function resolveActiveBrowserPageId(state: AppState): string | null {
@@ -870,8 +892,8 @@ export function useIpcEvents(): void {
       // misclassifying the zombie as bound (design §2c, §4.4).
       const state = useAppStore.getState()
       const before =
-        getAuthoritativeDetectedWorktreeIds(state, repoId) ??
-        getVisibleWorktreeIdsForRepo(state, repoId)
+        getAuthoritativeDetectedWorktreeIds(state, repoId, ownerHostId) ??
+        getVisibleWorktreeIdsForRepo(state, repoId, ownerHostId)
       await state.fetchWorktrees(repoId, { ownerHostId })
       await useAppStore.getState().fetchWorktreeLineage()
       // Why: changing the worktree's id unmounts the active pane without
@@ -882,7 +904,7 @@ export function useIpcEvents(): void {
         useAppStore.getState().setActiveWorktree(renamed.newWorktreeId)
       }
       const afterState = useAppStore.getState()
-      const after = getAuthoritativeDetectedWorktreeIds(afterState, repoId)
+      const after = getAuthoritativeDetectedWorktreeIds(afterState, repoId, ownerHostId)
       if (!after) {
         return
       }

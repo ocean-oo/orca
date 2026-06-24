@@ -35,13 +35,13 @@ function encodeKeyPart(value: string): string {
   return encodeURIComponent(value)
 }
 
-function readSingleParam(params: URLSearchParams, key: string): string | null {
-  const values = params.getAll(key)
-  if (values.length !== 1) {
+function decodeStrictKeyPart(value: string): string | null {
+  try {
+    const decoded = decodeURIComponent(value)
+    return decoded.length > 0 ? decoded : null
+  } catch {
     return null
   }
-  const [value] = values
-  return value.length > 0 ? value : null
 }
 
 export function makeLegacyWorktreeId(repoId: string, path: string): string {
@@ -91,14 +91,30 @@ export function parseWorktreeKey(worktreeId: string): ParsedCanonicalWorktreeKey
     return null
   }
   const query = worktreeId.slice(WORKTREE_KEY_PREFIX.length)
-  const params = new URLSearchParams(query)
-  const keys = [...params.keys()]
-  if (keys.length !== 3 || keys[0] !== 'hostId' || keys[1] !== 'repoId' || keys[2] !== 'path') {
+  const parts = query.split('&')
+  if (parts.length !== 3) {
     return null
   }
-  const rawHostId = readSingleParam(params, 'hostId')
-  const rawRepoId = readSingleParam(params, 'repoId')
-  const rawPath = readSingleParam(params, 'path')
+  const expectedKeys = ['hostId', 'repoId', 'path'] as const
+  const values: Partial<Record<(typeof expectedKeys)[number], string>> = {}
+  for (const [index, part] of parts.entries()) {
+    const separatorIndex = part.indexOf('=')
+    if (separatorIndex <= 0) {
+      return null
+    }
+    const key = part.slice(0, separatorIndex)
+    if (key !== expectedKeys[index]) {
+      return null
+    }
+    const decoded = decodeStrictKeyPart(part.slice(separatorIndex + 1))
+    if (decoded === null) {
+      return null
+    }
+    values[key] = decoded
+  }
+  const rawHostId = values.hostId
+  const rawRepoId = values.repoId
+  const rawPath = values.path
   if (!rawHostId || !rawRepoId || !rawPath) {
     return null
   }

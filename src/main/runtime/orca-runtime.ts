@@ -1457,16 +1457,24 @@ function mergeRuntimeFolderWorkspace(repo: Repo, worktreeId: string, meta: Workt
 function listRuntimeFolderWorkspaces(
   store: Pick<
     RuntimeStore,
-    'getAllWorktreeMeta' | 'getWorktreeMeta' | 'setWorktreeMeta' | 'migrateWorktreeIdentity'
+    | 'getAllWorktreeMeta'
+    | 'getWorktreeMeta'
+    | 'setWorktreeMeta'
+    | 'migrateWorktreeIdentity'
+    | 'getRepos'
   >,
   repo: Repo
 ): Worktree[] {
+  const hasAmbiguousHost = hasRuntimeAmbiguousRepoHost(store.getRepos(), repo)
   for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta())) {
     if (!isRuntimeLegacyFolderWorkspaceIdForRepo(repo, worktreeId)) {
       continue
     }
     const repoHostId = getRepoExecutionHostId(repo)
     if (meta.hostId !== undefined && meta.hostId !== repoHostId) {
+      continue
+    }
+    if (meta.hostId === undefined && hasAmbiguousHost) {
       continue
     }
     store.migrateWorktreeIdentity?.(

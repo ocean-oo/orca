@@ -1600,6 +1600,7 @@ function Settings(): React.JSX.Element {
 
                 {repos.map((repo) => {
                   const repoSectionId = getRepoSettingsSectionId(repo)
+                  const repoHostId = getRepoExecutionHostId(repo)
                   const repoHooksState = repoHooksMap[repoSectionId]
                   const project = projectByRepoId.get(repo.id) ?? null
 
@@ -1622,12 +1623,15 @@ function Settings(): React.JSX.Element {
                           hasHooksFile={repoHooksState?.hasHooks ?? false}
                           hooksInspectionReady={Boolean(repoHooksState)}
                           mayNeedUpdate={repoHooksState?.mayNeedUpdate ?? false}
-                          updateRepo={updateRepo}
-                          removeProject={removeProject}
+                          updateRepo={(repoId, updates) =>
+                            updateRepo(repoId, updates, { ownerHostId: repoHostId })
+                          }
+                          removeProject={(repoId) =>
+                            removeProject(repoId, { ownerHostId: repoHostId })
+                          }
                           project={project}
                           isLocalWindowsProject={
-                            getRepoExecutionHostId(repo) === LOCAL_EXECUTION_HOST_ID &&
-                            isWindowsTerminalHost
+                            repoHostId === LOCAL_EXECUTION_HOST_ID && isWindowsTerminalHost
                           }
                           wslAvailable={windowsTerminalCapabilities.wslAvailable}
                           wslDistros={windowsTerminalCapabilities.wslDistros}

@@ -114,6 +114,11 @@ describe('parseWorktreeKey', () => {
     expect(parseWorktreeKey('orca-worktree://v2?hostId=local&repoId=repo&path=%2Fx')).toBeNull()
     expect(parseWorktreeKey('orca-worktree://v1?hostId=bogus&repoId=repo&path=%2Fx')).toBeNull()
   })
+
+  it('rejects malformed percent encoding', () => {
+    expect(parseWorktreeKey('orca-worktree://v1?hostId=local&repoId=repo%ZZ&path=%2Fx')).toBeNull()
+    expect(parseWorktreeKey('orca-worktree://v1?hostId=local&repoId=repo&path=%E0%A4%A')).toBeNull()
+  })
 })
 
 describe('parseAnyWorktreeId', () => {

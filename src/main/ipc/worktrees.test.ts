@@ -3860,6 +3860,50 @@ describe('registerWorktreeHandlers', () => {
     )
   })
 
+  it('rotates stale canonical parent lineage after a successful SSH worktree scan proves the parent is missing', async () => {
+    const repo = {
+      id: 'repo-ssh',
+      path: '/remote/repo',
+      displayName: 'ssh',
+      badgeColor: '#000',
+      addedAt: 0,
+      connectionId: 'conn-1'
+    }
+    const liveChildId = sshWorktreeKey('/remote/live-child', 'repo-ssh', 'conn-1')
+    const missingParentId = sshWorktreeKey('/remote/missing-parent', 'repo-ssh', 'conn-1')
+    const provider = {
+      listWorktrees: vi.fn().mockResolvedValue([
+        {
+          path: '/remote/live-child',
+          head: 'def456',
+          branch: 'refs/heads/live-child',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ])
+    }
+    store.getRepos.mockReturnValue([repo])
+    store.getRepo.mockReturnValue(repo)
+    getSshGitProviderMock.mockReturnValue(provider)
+    store.getAllWorktreeLineage.mockReturnValue({
+      [liveChildId]: {
+        parentWorktreeId: missingParentId,
+        parentWorktreeInstanceId: 'old-parent-instance'
+      }
+    })
+    store.getWorktreeMeta.mockImplementation((worktreeId: string) =>
+      worktreeId === missingParentId ? { instanceId: 'old-parent-instance' } : undefined
+    )
+
+    await handlers['worktrees:list'](null, { repoId: 'repo-ssh' })
+
+    expect(store.removeWorktreeLineage).not.toHaveBeenCalledWith(liveChildId)
+    expect(store.setWorktreeMeta).toHaveBeenCalledWith(
+      missingParentId,
+      expect.objectContaining({ instanceId: expect.any(String) })
+    )
+  })
+
   it('does not repeatedly rotate already-invalid missing parent metadata', async () => {
     const repo = {
       id: 'repo-ssh',
@@ -4170,6 +4214,36 @@ describe('registerWorktreeHandlers', () => {
       })
     ])
     expect(listWorktreesMock).not.toHaveBeenCalled()
+  })
+
+  it('does not migrate hostless legacy folder workspace metadata when the repo id spans hosts', async () => {
+    const localRepo = {
+      id: 'repo-1',
+      path: '/workspace/folder',
+      displayName: 'folder',
+      badgeColor: '#000',
+      addedAt: 0,
+      kind: 'folder' as const
+    }
+    store.getRepos.mockReturnValue([
+      localRepo,
+      {
+        ...localRepo,
+        path: '/runtime/folder',
+        executionHostId: 'runtime:gpu'
+      }
+    ])
+    store.getRepo.mockReturnValue(localRepo)
+    store.getAllWorktreeMeta.mockReturnValue({
+      'repo-1::/workspace/folder': makeWorktreeMeta({
+        instanceId: 'legacy-folder-instance',
+        lastActivityAt: 42
+      })
+    })
+
+    await handlers['worktrees:list'](null, { repoId: 'repo-1' })
+
+    expect(store.migrateWorktreeIdentity).not.toHaveBeenCalled()
   })
 
   it('returns reconstructed rows when an SSH provider is unavailable', async () => {

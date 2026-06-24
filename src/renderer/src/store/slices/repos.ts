@@ -71,7 +71,8 @@ import {
   normalizeExecutionHostId,
   parseExecutionHostId,
   toRuntimeExecutionHostId,
-  toSshExecutionHostId
+  toSshExecutionHostId,
+  type ExecutionHostId
 } from '../../../../shared/execution-host'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { formatFolderWorkspaceCreateError } from '../../lib/folder-workspace-path-status'
@@ -1150,9 +1151,13 @@ export type RepoSlice = {
     groupId: string | null,
     order?: number
   ) => Promise<boolean>
-  removeProject: (projectId: string) => Promise<void>
+  removeProject: (projectId: string, options?: { ownerHostId?: ExecutionHostId }) => Promise<void>
   updateProject: (projectId: string, updates: ProjectUpdate) => Promise<boolean>
-  updateRepo: (projectId: string, updates: RepoUpdate) => Promise<boolean>
+  updateRepo: (
+    projectId: string,
+    updates: RepoUpdate,
+    options?: { ownerHostId?: ExecutionHostId }
+  ) => Promise<boolean>
   setActiveRepo: (projectId: string | null) => void
   reorderRepos: (orderedIds: string[]) => Promise<void>
 }
@@ -2241,14 +2246,19 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  removeProject: async (projectId) => {
+  removeProject: async (projectId, options) => {
     try {
-      const ownerRepo = findRepoForHost(get().repos, projectId, { settings: get().settings })
+      const ownerRepo = findRepoForHost(get().repos, projectId, {
+        hostId: options?.ownerHostId,
+        settings: get().settings
+      })
       if (!ownerRepo) {
         return
       }
       const ownerHostId = getRepoExecutionHostId(ownerRepo)
-      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
+      const target = options?.ownerHostId
+        ? getProjectSetupRuntimeTarget(ownerHostId)
+        : getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
       await (target.kind === 'local'
         ? window.api.repos.remove({ repoId: projectId })
         : callRuntimeRpc(target, 'repo.rm', { repo: projectId }, { timeoutMs: 15_000 }))
@@ -2452,9 +2462,12 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  updateRepo: async (projectId, updates) => {
+  updateRepo: async (projectId, updates, options) => {
     const updateRepoChains = getRepoUpdateChains(get)
-    const ownerRepo = findRepoForHost(get().repos, projectId, { settings: get().settings })
+    const ownerRepo = findRepoForHost(get().repos, projectId, {
+      hostId: options?.ownerHostId,
+      settings: get().settings
+    })
     if (!ownerRepo) {
       return false
     }
