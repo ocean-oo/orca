@@ -15,7 +15,8 @@ describe('pr-comment-presentation', () => {
   it('returns card layout tokens for cards and focus variants', () => {
     const cards = getPRCommentPresentationClasses('cards')
     expect(cards.useCardLayout).toBe(true)
-    expect(cards.commentBody).toContain('text-[13px]')
+    expect(cards.commentBody).toContain('text-xs')
+    expect(cards.commentBody).toContain('leading-5')
     expect(cards.commentBody).toContain('text-foreground')
     expect(cards.group).toContain('bg-secondary')
     expect(cards.group).toContain('shadow-xs')
@@ -24,8 +25,10 @@ describe('pr-comment-presentation', () => {
 
     const focus = getPRCommentPresentationClasses('focus')
     expect(focus.useCardLayout).toBe(true)
-    expect(focus.commentBody).toContain('text-[13px]')
-    expect(focus.commentBodyReply).toContain('text-[13px]')
+    expect(focus.commentBody).toContain('text-xs')
+    expect(focus.commentBody).toContain('leading-5')
+    expect(focus.commentBodyReply).toContain('text-xs')
+    expect(focus.commentBodyReply).toContain('leading-5')
     expect(focus.author).toContain('text-[13px]')
     expect(focus.list).toContain('gap-2')
     expect(focus.commentBody).toContain('px-4 py-2.5')

@@ -96,8 +96,8 @@ const COMMENT_AVATAR =
 const RESOLVED_SECTION_LABEL =
   'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
 
-// Why: cards and focus share dense sidebar scale so PR comments do not read oversized.
-const CARD_COMMENT_BODY_SIZE = 'text-[13px] leading-relaxed'
+// Why: markdown bodies need the secondary sidebar scale; 13px relaxed copy reads oversized in narrow comment cards.
+const CARD_COMMENT_BODY_SIZE = 'text-xs leading-5'
 const CARD_COMMENT_AUTHOR_SIZE = 'text-[13px]'
 const CARD_COMMENT_LIST_GAP = 'gap-2'
 const CARD_COMMENT_BODY_PADDING = 'px-4 py-2.5'
