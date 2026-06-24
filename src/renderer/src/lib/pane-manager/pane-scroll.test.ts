@@ -192,6 +192,24 @@ describe('scroll state', () => {
     expect(marker.dispose).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores a drifted marker when the buffer base has not changed', () => {
+    const terminal = createTerminal({ viewportY: 10, baseY: 154 })
+    const marker = createMarker(28)
+    const state: ScrollState = {
+      bufferType: 'normal',
+      wasAtBottom: false,
+      viewportY: 148,
+      baseY: 154,
+      firstVisibleLineMarker: marker
+    }
+
+    restoreScrollState(terminal, state)
+
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(148)
+    expect(terminal.buffer.active.viewportY).toBe(148)
+    expect(marker.dispose).toHaveBeenCalledTimes(1)
+  })
+
   it('reapplies a layout restore after xterm settles asynchronously', () => {
     vi.useFakeTimers()
     const rafCallbacks: FrameRequestCallback[] = []

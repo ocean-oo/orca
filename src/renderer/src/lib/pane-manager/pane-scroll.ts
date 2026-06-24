@@ -195,7 +195,10 @@ function restoreScrollStateNow(
     state.firstVisibleLineMarker && !state.firstVisibleLineMarker.isDisposed
       ? state.firstVisibleLineMarker.line
       : -1
-  const targetLine = Math.min(markerLine >= 0 ? markerLine : state.viewportY, buf.baseY)
+  // Why: xterm markers can drift while TUIs rewrite/reflow the same scrollback
+  // base. Prefer the exact numeric viewport unless the buffer base changed.
+  const shouldUseMarkerLine = markerLine >= 0 && buf.baseY !== state.baseY
+  const targetLine = Math.min(shouldUseMarkerLine ? markerLine : state.viewportY, buf.baseY)
   // Why: deferred rAF/timeout restores re-invoke this function after xterm
   // reflow settles; keep the original viewport and marker alive so later
   // retries can recover after snapshot replay grows the buffer. Callers
