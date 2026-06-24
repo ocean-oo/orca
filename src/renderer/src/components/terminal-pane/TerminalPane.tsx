@@ -15,6 +15,7 @@ import {
   resolveEffectiveTerminalAppearance
 } from '@/lib/terminal-theme'
 import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
+import { captureScrollState, restoreScrollStateAfterLayout } from '@/lib/pane-manager/pane-scroll'
 import TerminalSearch from '@/components/TerminalSearch'
 import type { PtyTransport } from './pty-transport'
 import { fitPanes, isWindowsUserAgent } from './pane-helpers'
@@ -456,6 +457,7 @@ export default function TerminalPane({
     getCachedTerminalTabForWorktree(store.tabsByWorktree, worktreeId, tabId)
   )
   const setTabLayout = useAppStore((store) => store.setTabLayout)
+  const updateTabScrollStates = useAppStore((store) => store.updateTabScrollStates)
   const restoredLayout = useMemo(
     () => (terminalTab ? sanitizeTerminalLayoutPaneTitles(savedLayout, terminalTab) : savedLayout),
     [savedLayout, terminalTab]
@@ -697,6 +699,23 @@ export default function TerminalPane({
     if (Object.keys(mergedScrollbackRefs).length > 0) {
       layout.scrollbackRefsByLeafId = mergedScrollbackRefs
     }
+    // Why: hidden xterm instances can transiently report viewportY=0 during
+    // WebGL suspend/refit; keep the last visible leaf state durable instead.
+    const scrollStatesByLeafId = isVisibleRef.current
+      ? Object.fromEntries(
+          currentPanes.map((pane) => {
+            const { bufferType, wasAtBottom, viewportY, baseY } = captureScrollState(pane.terminal)
+            return [pane.leafId, { bufferType, wasAtBottom, viewportY, baseY }]
+          })
+        )
+      : mergeCapturedLeafState({
+          prior: existing?.scrollStatesByLeafId,
+          fresh: {},
+          currentLeafIds
+        })
+    if (Object.keys(scrollStatesByLeafId).length > 0) {
+      layout.scrollStatesByLeafId = scrollStatesByLeafId
+    }
     // Why: between pane creation and the deferred rAF where PTYs actually
     // attach, all transports have getPtyId() === null. The merge below
     // preserves the *prior* snapshot's leaf→PTY mappings while still letting
@@ -762,6 +781,92 @@ export default function TerminalPane({
       clearedScrollbackLeafIds.delete(leafId)
     }
   }, [tabId, setTabLayout, worktreeId])
+
+  const persistCurrentScrollStates = useCallback((): void => {
+    const manager = managerRef.current
+    if (!manager) {
+      return
+    }
+    const scrollStatesByLeafId = Object.fromEntries(
+      manager.getPanes().map((pane) => {
+        const { bufferType, wasAtBottom, viewportY, baseY } = captureScrollState(pane.terminal)
+        return [pane.leafId, { bufferType, wasAtBottom, viewportY, baseY }]
+      })
+    )
+    if (Object.keys(scrollStatesByLeafId).length > 0) {
+      updateTabScrollStates(tabId, scrollStatesByLeafId)
+    }
+  }, [tabId, updateTabScrollStates])
+
+  useLayoutEffect(() => {
+    if (!isVisible) {
+      return
+    }
+    return () => {
+      // Why: workspace switches can hide terminals before the next scroll rAF.
+      // Persist the last visible xterm viewport without serializing layout.
+      persistCurrentScrollStates()
+    }
+  }, [isVisible, persistCurrentScrollStates])
+
+  useEffect(() => {
+    if (!isVisible) {
+      return
+    }
+    const scrollDisposables: IDisposable[] = []
+    const persistScrolledLayout = (event: Event): void => {
+      const root = containerRef.current
+      const target = event.target
+      if (!root || !(target instanceof Node) || !root.contains(target)) {
+        return
+      }
+      persistCurrentScrollStates()
+    }
+    const persistScrolledTerminal = (): void => {
+      persistCurrentScrollStates()
+    }
+    const manager = managerRef.current
+    if (manager) {
+      for (const pane of manager.getPanes()) {
+        const onScroll = (
+          pane.terminal as typeof pane.terminal & {
+            onScroll?: (listener: (position: number) => void) => IDisposable
+          }
+        ).onScroll
+        if (typeof onScroll === 'function') {
+          scrollDisposables.push(onScroll.call(pane.terminal, persistScrolledTerminal))
+        }
+      }
+    }
+    // Why: workspace switches can remount or refit xterm before passive
+    // visibility effects run; keep the durable leaf state current as the user scrolls.
+    window.addEventListener('scroll', persistScrolledLayout, true)
+    return () => {
+      window.removeEventListener('scroll', persistScrolledLayout, true)
+      for (const disposable of scrollDisposables) {
+        disposable.dispose()
+      }
+    }
+  }, [isVisible, paneCount, persistCurrentScrollStates])
+
+  const wasVisibleForScrollRestoreRef = useRef(isVisible)
+  useEffect(() => {
+    const wasVisible = wasVisibleForScrollRestoreRef.current
+    wasVisibleForScrollRestoreRef.current = isVisible
+    if (!isVisible || wasVisible || !savedLayout.scrollStatesByLeafId) {
+      return
+    }
+    const manager = managerRef.current
+    if (!manager) {
+      return
+    }
+    for (const pane of manager.getPanes()) {
+      const scrollState = savedLayout.scrollStatesByLeafId[pane.leafId]
+      if (scrollState) {
+        restoreScrollStateAfterLayout(pane.terminal, scrollState)
+      }
+    }
+  }, [isVisible, savedLayout.scrollStatesByLeafId])
 
   const clearPaneScrollback = useCallback(
     (pane: ManagedPane): void => {

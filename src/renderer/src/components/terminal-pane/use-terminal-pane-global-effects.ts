@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import {
   FOCUS_TERMINAL_PANE_EVENT,
   PASTE_TERMINAL_TEXT_EVENT,
@@ -80,6 +80,17 @@ export function useTerminalPaneGlobalEffects({
     paneCount
   })
   useTerminalContainerFitSync({ isVisible, isSyncFitEnabled, managerRef, containerRef })
+
+  useLayoutEffect(() => {
+    if (!isVisible) {
+      return
+    }
+    return () => {
+      // Why: passive visibility effects run after React has already hidden the
+      // terminal, when xterm can transiently report viewportY=0.
+      captureViewportPositions(true)
+    }
+  }, [captureViewportPositions, isVisible])
 
   useEffect(() => {
     const manager = managerRef.current
