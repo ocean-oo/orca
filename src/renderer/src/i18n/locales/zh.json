@@ -4508,7 +4508,11 @@
           "workspaceCardLayoutGuidance": "使用工作区侧边栏选项菜单 > 卡片布局 > 紧凑。",
           "872af9556e": "系统托盘",
           "2edf606c46": "关闭时最小化到托盘",
-          "b707773a0d": "启用后，关闭窗口会让 Orca 继续在系统托盘中运行，而不是退出。"
+          "b707773a0d": "启用后，关闭窗口会让 Orca 继续在系统托盘中运行，而不是退出。",
+          "showPinnedWorktreesInGroups": {
+            "title": "在其他分组中显示已固定的工作树",
+            "description": "已固定的工作树也会显示在全部、项目、状态和 PR 分组中。"
+          }
         },
         "AutoRenameBranchFromWorkSetting": {
           "1626524572": "Nautilus",
@@ -6630,7 +6634,11 @@
               "detailed": "详细"
             },
             "9a115966d3": "关闭时最小化到托盘",
-            "4d5b9427b5": "启用后，关闭窗口会让 Orca 继续在系统托盘中运行，而不是退出。"
+            "4d5b9427b5": "启用后，关闭窗口会让 Orca 继续在系统托盘中运行，而不是退出。",
+            "showPinnedWorktreesInGroups": {
+              "title": "在其他分组中显示已固定的工作树",
+              "description": "已固定的工作树也会显示在全部、项目、状态和 PR 分组中。"
+            }
           }
         },
         "auto": {

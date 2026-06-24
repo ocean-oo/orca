@@ -52,7 +52,10 @@ import {
 import { translate } from '@/i18n/i18n'
 import type { UiLanguage } from '../../../../shared/ui-language'
 import { LeftSidebarAppearanceSetting } from './LeftSidebarAppearanceSetting'
-import { getWorkspaceCardLayoutEntry } from './appearance-sidebar-search'
+import {
+  getShowPinnedWorktreesInGroupsEntry,
+  getWorkspaceCardLayoutEntry
+} from './appearance-sidebar-search'
 export { getAppearancePaneSearchEntries }
 
 type AppearancePaneProps = {
@@ -117,6 +120,7 @@ export function AppearancePane({
   const systemTrayEntries = getSystemTrayEntries({ showSystemTray: isDesktopWindows })
   const leftSidebarAppearanceEntry = getLeftSidebarAppearanceEntry()
   const workspaceCardLayoutEntry = getWorkspaceCardLayoutEntry()
+  const showPinnedWorktreesInGroupsEntry = getShowPinnedWorktreesInGroupsEntry()
   const visibleSections = [
     matchesSettingsSearch(searchQuery, getThemeEntries()) ||
     (SHOW_UI_LANGUAGE_SETTING && matchesSettingsSearch(searchQuery, getLanguageEntries())) ||
@@ -566,6 +570,29 @@ export function AppearancePane({
               checked={settings.showMobileButton !== false}
               onChange={() =>
                 updateSettings({ showMobileButton: !(settings.showMobileButton !== false) })
+              }
+            />
+          </SearchableSetting>
+
+          <SearchableSetting
+            title={showPinnedWorktreesInGroupsEntry.title}
+            description={showPinnedWorktreesInGroupsEntry.description}
+            keywords={showPinnedWorktreesInGroupsEntry.keywords}
+          >
+            <SettingsSwitchRow
+              label={translate(
+                'auto.components.settings.AppearancePane.showPinnedWorktreesInGroups.title',
+                'Show pinned worktrees in other groups'
+              )}
+              description={translate(
+                'auto.components.settings.AppearancePane.showPinnedWorktreesInGroups.description',
+                'Pinned worktrees also appear in All, Project, Status, and PR groups.'
+              )}
+              checked={settings.showPinnedWorktreesInGroups === true}
+              onChange={() =>
+                updateSettings({
+                  showPinnedWorktreesInGroups: !(settings.showPinnedWorktreesInGroups === true)
+                })
               }
             />
           </SearchableSetting>

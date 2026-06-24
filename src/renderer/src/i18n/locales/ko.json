@@ -4508,7 +4508,11 @@
             "tintOpacity": "색조 강도",
             "tintOpacityDescription": "사이드바에 색조를 얼마나 강하게 섞을지 조절합니다."
           },
-          "workspaceCardLayoutGuidance": "워크스페이스 사이드바 옵션 메뉴 > 카드 레이아웃 > 컴팩트를 사용하세요."
+          "workspaceCardLayoutGuidance": "워크스페이스 사이드바 옵션 메뉴 > 카드 레이아웃 > 컴팩트를 사용하세요.",
+          "showPinnedWorktreesInGroups": {
+            "title": "고정된 워크트리를 다른 그룹에도 표시",
+            "description": "고정된 워크트리는 전체, 프로젝트, 상태 및 PR 그룹에도 표시됩니다."
+          }
         },
         "AutoRenameBranchFromWorkSetting": {
           "1626524572": "Nautilus",
@@ -6630,6 +6634,10 @@
               "cardLayout": "카드 레이아웃",
               "workspaceOptions": "워크스페이스 옵션",
               "detailed": "상세"
+            },
+            "showPinnedWorktreesInGroups": {
+              "title": "고정된 워크트리를 다른 그룹에도 표시",
+              "description": "고정된 워크트리는 전체, 프로젝트, 상태 및 PR 그룹에도 표시됩니다."
             }
           }
         },
