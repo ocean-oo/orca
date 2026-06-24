@@ -66,6 +66,7 @@ import {
 import {
   getCombinedBranchEntries,
   getCombinedUncommittedEntries,
+  resolveCombinedUncommittedSnapshotEntries,
   shouldAutoReloadCombinedDiffFromGitStatus
 } from './combined-diff-entries'
 import { getCombinedDiffCommitMessageBody } from './combined-diff-commit-message'
@@ -423,10 +424,35 @@ export default function CombinedDiffViewer({
     () => file.uncommittedEntriesSnapshot?.filter((e) => e.conflictStatus !== 'unresolved'),
     [file.uncommittedEntriesSnapshot]
   )
+  const retainedResolvedSnapshotEntries = React.useMemo(
+    () =>
+      new Map(
+        sectionsRef.current
+          .filter((section) => section.area !== undefined)
+          .map((section) => [
+            section.path,
+            {
+              path: section.path,
+              status: section.status as GitStatusEntry['status'],
+              area: section.area!,
+              oldPath: section.oldPath,
+              added: section.added,
+              removed: section.removed
+            }
+          ])
+      ),
+    [sections]
+  )
   const uncommittedEntries = React.useMemo(
     () =>
-      snapshotEntries ?? getCombinedUncommittedEntries(gitStatusEntries, file.combinedAreaFilter),
-    [snapshotEntries, gitStatusEntries, file.combinedAreaFilter]
+      snapshotEntries
+        ? resolveCombinedUncommittedSnapshotEntries(
+            snapshotEntries,
+            gitStatusEntries,
+            retainedResolvedSnapshotEntries
+          )
+        : getCombinedUncommittedEntries(gitStatusEntries, file.combinedAreaFilter),
+    [snapshotEntries, gitStatusEntries, retainedResolvedSnapshotEntries, file.combinedAreaFilter]
   )
   const branchEntries = React.useMemo<GitBranchChangeEntry[]>(() => {
     return getCombinedBranchEntries(file.branchEntriesSnapshot, liveBranchEntries)
