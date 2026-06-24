@@ -1,5 +1,8 @@
 import type { FeatureInteractionId } from '../../../shared/feature-interactions'
-import { isBrowserPaneUiRuntimeRpcParams } from '../../../shared/runtime-rpc-feature-interaction-source'
+import {
+  isBrowserPaneUiRuntimeRpcParams,
+  isUiOwnedRuntimeRpcParams
+} from '../../../shared/runtime-rpc-feature-interaction-source'
 
 export function getRuntimeFeatureInteractionId(
   method: string,
@@ -21,8 +24,11 @@ export function getRuntimeFeatureInteractionId(
   if (method.startsWith('browser.') && !method.startsWith('browser.profile')) {
     return 'agent-browser-use'
   }
-  if (method.startsWith('emulator.')) {
+  if (method.startsWith('emulator.') && isUiOwnedRuntimeRpcParams(rawParams)) {
     return null
+  }
+  if (method.startsWith('emulator.')) {
+    return 'mobile-emulator-agent-use'
   }
   if (method === 'computer.permissions') {
     return 'computer-use-setup'

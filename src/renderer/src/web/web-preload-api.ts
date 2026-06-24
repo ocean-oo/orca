@@ -29,8 +29,10 @@ import type {
   ManagedAgentSkillEnsureRequest,
   ManagedAgentSkillEnsureResult,
   ManagedAgentSkillFallback,
+  ManagedAgentSkillUpdated,
   SkillDiscoveryResult
 } from '../../../shared/skills'
+import { shouldEmitManagedAgentSkillFallback } from '../../../shared/skills'
 import {
   getDefaultOnboardingState,
   getDefaultSettings,
@@ -127,6 +129,7 @@ let activeClientEnvironmentId: string | null = null
 let cachedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 let cachedDetectedWorktrees: { loadedAt: number; worktrees: Worktree[] } | null = null
 const runtimeCallQueuePool = new RuntimeRpcCallQueuePool()
+const activeRuntimeEnvironmentListeners = new Set<() => void>()
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -356,6 +359,12 @@ type WebKeybindingDocument = {
   keybindings: KeybindingOverrides
   platforms: Partial<Record<KeybindingPlatform, KeybindingOverrides>>
 }
+
+type ManagedSkillRuntimeStreamEvent =
+  | { type: 'fallback'; event: ManagedAgentSkillFallback }
+  | { type: 'updated'; event: ManagedAgentSkillUpdated }
+  | { type: 'ready'; subscriptionId: string }
+  | { type: 'end' }
 
 export const GITHUB_WEB_RPC_METHODS = {
   repoSlug: 'github.repoSlug',
@@ -1012,6 +1021,7 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
       closeActiveRuntimeClients()
       activeEnvironment = createStoredWebRuntimeEnvironment({ name, offer })
       saveStoredWebRuntimeEnvironment(activeEnvironment)
+      notifyActiveRuntimeEnvironmentChanged()
       return { environment: redactStoredWebRuntimeEnvironment(activeEnvironment) }
     },
     resolve: async ({ selector }) =>
@@ -2302,8 +2312,127 @@ function createComputerUsePermissionsApi(): NonNullable<
 
 function createSkillsApi(): NonNullable<Partial<PreloadApi>['skills']> {
   const fallbackCallbacks = new Set<(event: ManagedAgentSkillFallback) => void>()
+  const updatedCallbacks = new Set<(event: ManagedAgentSkillUpdated) => void>()
   const cooldownUntilByKey = new Map<string, number>()
+  let managedEventsSubscription: { unsubscribe: () => void } | null = null
+  let managedEventsSubscriptionPromise: Promise<void> | null = null
+  let managedEventsSubscriptionCancelPending = false
+  let managedEventsRetryTimer: number | null = null
   const cooldownMs = 60_000
+  const managedEventsRetryMs = 5_000
+  const hasManagedEventCallbacks = (): boolean =>
+    fallbackCallbacks.size > 0 || updatedCallbacks.size > 0
+  const clearManagedEventRetryTimer = (): void => {
+    if (managedEventsRetryTimer === null) {
+      return
+    }
+    window.clearTimeout(managedEventsRetryTimer)
+    managedEventsRetryTimer = null
+  }
+  const scheduleManagedEventRetry = (): void => {
+    if (managedEventsRetryTimer !== null || !hasManagedEventCallbacks()) {
+      return
+    }
+    if (!requireActiveEnvironmentOrNull()) {
+      return
+    }
+    managedEventsRetryTimer = window.setTimeout(() => {
+      managedEventsRetryTimer = null
+      ensureManagedEventSubscription()
+    }, managedEventsRetryMs)
+  }
+  const stopManagedEventSubscription = (): void => {
+    const subscription = managedEventsSubscription
+    if (subscription) {
+      managedEventsSubscription = null
+      managedEventsSubscriptionPromise = null
+      managedEventsSubscriptionCancelPending = false
+      subscription.unsubscribe()
+      return
+    }
+    if (managedEventsSubscriptionPromise) {
+      managedEventsSubscriptionCancelPending = true
+      return
+    }
+    managedEventsSubscriptionCancelPending = false
+  }
+  const restartManagedEventSubscription = (): void => {
+    stopManagedEventSubscription()
+    scheduleManagedEventRetry()
+  }
+  const handleManagedStreamEvent = (event: ManagedSkillRuntimeStreamEvent): void => {
+    if (event.type === 'fallback') {
+      fallbackCallbacks.forEach((callback) => callback(event.event))
+    } else if (event.type === 'updated') {
+      updatedCallbacks.forEach((callback) => callback(event.event))
+    } else if (event.type === 'end') {
+      restartManagedEventSubscription()
+    }
+  }
+  const ensureManagedEventSubscription = (): void => {
+    if (
+      managedEventsSubscription ||
+      managedEventsSubscriptionPromise ||
+      !hasManagedEventCallbacks()
+    ) {
+      return
+    }
+    const environment = requireActiveEnvironmentOrNull()
+    if (!environment) {
+      return
+    }
+    clearManagedEventRetryTimer()
+    const client = getClientForEnvironment(environment)
+    const subscribedEnvironmentId = environment.id
+    managedEventsSubscriptionCancelPending = false
+    managedEventsSubscriptionPromise = client
+      .subscribe(
+        'skills.managedEvents',
+        undefined,
+        {
+          onResponse: (response) => {
+            if (!response.ok) {
+              stopManagedEventSubscription()
+              return
+            }
+            handleManagedStreamEvent(response.result as ManagedSkillRuntimeStreamEvent)
+          },
+          onError: () => {
+            restartManagedEventSubscription()
+          },
+          onClose: () => {
+            restartManagedEventSubscription()
+          }
+        },
+        { timeoutMs: 15_000 }
+      )
+      .then((subscription) => {
+        if (managedEventsSubscriptionCancelPending) {
+          managedEventsSubscriptionCancelPending = false
+          managedEventsSubscriptionPromise = null
+          subscription.unsubscribe()
+          ensureManagedEventSubscription()
+          return
+        }
+        managedEventsSubscription = subscription
+        managedEventsSubscriptionPromise = null
+        if (!hasManagedEventCallbacks()) {
+          stopManagedEventSubscription()
+        }
+      })
+      .catch(() => {
+        managedEventsSubscription = null
+        managedEventsSubscriptionPromise = null
+        managedEventsSubscriptionCancelPending = false
+        const active = requireActiveEnvironmentOrNull()
+        if (hasManagedEventCallbacks() && active && active.id !== subscribedEnvironmentId) {
+          ensureManagedEventSubscription()
+        } else {
+          scheduleManagedEventRetry()
+        }
+      })
+  }
+  activeRuntimeEnvironmentListeners.add(ensureManagedEventSubscription)
   return {
     discover: () =>
       callRuntimeResult<SkillDiscoveryResult>('skills.discover', undefined, 15_000).catch(() => ({
@@ -2346,15 +2475,33 @@ function createSkillsApi(): NonNullable<Partial<PreloadApi>['skills']> {
         request
       } satisfies ManagedAgentSkillFallback
       cooldownUntilByKey.set(uiKey, Date.now() + cooldownMs)
+      if (shouldEmitManagedAgentSkillFallback(result)) {
+        fallbackCallbacks.forEach((callback) => callback(result))
+      }
       return Promise.resolve(result satisfies ManagedAgentSkillEnsureResult)
     },
     onManagedFallback: (callback) => {
       fallbackCallbacks.add(callback)
+      ensureManagedEventSubscription()
       return () => {
         fallbackCallbacks.delete(callback)
+        if (!hasManagedEventCallbacks()) {
+          clearManagedEventRetryTimer()
+          stopManagedEventSubscription()
+        }
       }
     },
-    onManagedUpdated: () => () => {}
+    onManagedUpdated: (callback) => {
+      updatedCallbacks.add(callback)
+      ensureManagedEventSubscription()
+      return () => {
+        updatedCallbacks.delete(callback)
+        if (!hasManagedEventCallbacks()) {
+          clearManagedEventRetryTimer()
+          stopManagedEventSubscription()
+        }
+      }
+    }
   }
 }
 
@@ -2670,6 +2817,13 @@ function disconnectActiveRuntimeEnvironment(): void {
   closeActiveRuntimeClients()
   clearStoredWebRuntimeEnvironment()
   activeEnvironment = null
+  notifyActiveRuntimeEnvironmentChanged()
+}
+
+function notifyActiveRuntimeEnvironmentChanged(): void {
+  for (const listener of activeRuntimeEnvironmentListeners) {
+    listener()
+  }
 }
 
 function resolveEnvironment(selector: string): StoredWebRuntimeEnvironment {

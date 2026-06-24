@@ -65,6 +65,12 @@ describe('ManagedAgentSkillSetupDialogHost copy', () => {
     )
   })
 
+  it('supports review copy for fallback cases without a runnable command', () => {
+    expect(getManagedSkillContextCopy('agent-orchestration', 'Review')).toBe(
+      'Orca Orchestration was used. Review the orchestration skill to enable agents to coordinate reliably.'
+    )
+  })
+
   it('splits workspace-aware context copy so the workspace can expose its full path', () => {
     expect(getManagedSkillContextWorkspaceCopy('agent-computer-use', 'Install')).toEqual({
       beforeWorkspace: 'Computer Use was used in ',
@@ -128,7 +134,7 @@ describe('ManagedAgentSkillSetupDialogHost queue state', () => {
     })
   })
 
-  it('does not replace the active modal with a non-actionable re-check fallback', () => {
+  it('does not replace the active modal with a cooldown re-check fallback', () => {
     const active = fallback({
       context: 'agent-orchestration',
       uiKey: 'host::orchestration:agent-orchestration',
@@ -141,7 +147,7 @@ describe('ManagedAgentSkillSetupDialogHost queue state', () => {
     })
     const deadEndFallback = fallback({
       context: 'agent-orchestration',
-      reason: 'lockfile-malformed',
+      reason: 'cooldown',
       uiKey: 'host::orchestration:agent-orchestration'
     })
 
@@ -149,6 +155,31 @@ describe('ManagedAgentSkillSetupDialogHost queue state', () => {
       replaceActiveAfterManagedAgentSkillRecheck({ active, queue: [] }, deadEndFallback)
     ).toEqual({
       active: null,
+      queue: []
+    })
+  })
+
+  it('keeps manual-review safety fallbacks visible after re-check', () => {
+    const active = fallback({
+      context: 'agent-orchestration',
+      uiKey: 'host::orchestration:agent-orchestration',
+      manualCommand: {
+        kind: 'update',
+        command: 'npx skills update orchestration',
+        runtime: 'host',
+        scope: 'global'
+      }
+    })
+    const reviewFallback = fallback({
+      context: 'agent-orchestration',
+      reason: 'lockfile-malformed',
+      uiKey: 'host::orchestration:agent-orchestration'
+    })
+
+    expect(
+      replaceActiveAfterManagedAgentSkillRecheck({ active, queue: [] }, reviewFallback)
+    ).toEqual({
+      active: reviewFallback,
       queue: []
     })
   })

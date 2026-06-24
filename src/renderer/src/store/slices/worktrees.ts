@@ -32,7 +32,7 @@ import {
   type RuntimeClientTarget,
   RuntimeRpcCallError
 } from '../../runtime/runtime-rpc-client'
-import { LINEAR_TICKETS_SKILL_NAME } from '@/lib/agent-feature-install-commands'
+import { ORCA_LINEAR_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import { getLocalRepoProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { toRuntimeWorktreeSelector } from '../../runtime/runtime-worktree-selector'
 import { getHostedReviewCacheKey, refreshHostedReviewCard } from './hosted-review'
@@ -174,7 +174,7 @@ function nudgeLinearManagedSkillSetup(
       : null
   void window.api.skills
     .ensureManagedReady({
-      skillName: LINEAR_TICKETS_SKILL_NAME,
+      skillName: ORCA_LINEAR_SKILL_NAME,
       context: 'linear-worktree',
       ...(localDiscoveryTarget ? { discoveryTarget: localDiscoveryTarget } : {}),
       ...(target.kind === 'environment' || remote ? { remoteRuntime: true } : {})

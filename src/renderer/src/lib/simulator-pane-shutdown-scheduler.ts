@@ -25,10 +25,15 @@ function getUnifiedTabsForWorktree(worktreeId: string): SimulatorTabReference[] 
 }
 
 function shutdownManagedSimulator(worktreeId: string): Promise<unknown> {
-  return callRuntimeRpc({ kind: 'local' }, 'emulator.shutdown', {
-    worktree: worktreeId,
-    managedOnly: true
-  })
+  return callRuntimeRpc(
+    { kind: 'local' },
+    'emulator.shutdown',
+    {
+      worktree: worktreeId,
+      managedOnly: true
+    },
+    { suppressFeatureInteraction: true }
+  )
 }
 
 export async function shutdownManagedSimulatorIfNoPane(

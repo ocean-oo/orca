@@ -85,10 +85,17 @@ describe('openMobileEmulatorTab', () => {
     await expect(openMobileEmulatorTab('wt-1', { targetGroupId: 'group-1' })).resolves.toBe('sim-1')
 
     expect(calls).toEqual(['ensure', 'attach'])
-    expect(callRuntimeRpc).toHaveBeenCalledWith({ kind: 'local' }, 'emulator.attach', {
-      worktree: 'wt-1',
-      focus: false
-    })
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'emulator.attach',
+      {
+        worktree: 'wt-1',
+        focus: false
+      },
+      {
+        suppressFeatureInteraction: true
+      }
+    )
     expect(ensureSimulatorTab).toHaveBeenCalledWith('wt-1', {
       placement: 'rightSplit',
       targetGroupId: 'group-1',
@@ -163,10 +170,15 @@ describe('openMobileEmulatorTab', () => {
 
     await expect(launched).resolves.toBe('sim-1')
 
-    expect(callRuntimeRpc).toHaveBeenCalledWith({ kind: 'local' }, 'emulator.shutdown', {
-      worktree: 'wt-1',
-      managedOnly: true
-    })
+    expect(callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'emulator.shutdown',
+      {
+        worktree: 'wt-1',
+        managedOnly: true
+      },
+      { suppressFeatureInteraction: true }
+    )
     expect(consumePrelaunchedSimulatorSession('wt-1')).toBeNull()
   })
 

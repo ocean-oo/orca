@@ -267,6 +267,29 @@ describe('discoverInstalledAgentSkills', () => {
     await expect(forcedRefresh).resolves.toBe(freshResult)
   })
 
+  it('reuses an in-flight forced refresh for the same target', async () => {
+    const forcedScan = deferred<SkillDiscoveryResult>()
+    const discover = vi.fn<() => Promise<SkillDiscoveryResult>>()
+    discover.mockReturnValueOnce(forcedScan.promise)
+    vi.stubGlobal('window', {
+      api: { skills: { discover } }
+    })
+
+    const firstForcedRefresh =
+      _installedAgentSkillDiscoveryInternalsForTests.discoverInstalledAgentSkills(true)
+    const secondForcedRefresh =
+      _installedAgentSkillDiscoveryInternalsForTests.discoverInstalledAgentSkills(true)
+
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    const freshResult = discoveryResult([skill({ name: 'orca-cli' })])
+    forcedScan.resolve(freshResult)
+
+    await expect(firstForcedRefresh).resolves.toBe(freshResult)
+    await expect(secondForcedRefresh).resolves.toBe(freshResult)
+    expect(discover).toHaveBeenCalledTimes(1)
+  })
+
   it('caches host and WSL discovery results separately', async () => {
     const hostResult = discoveryResult([skill({ name: 'host-skill' })])
     const wslResult = discoveryResult([skill({ name: 'wsl-skill' })])

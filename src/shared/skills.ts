@@ -1,7 +1,7 @@
 import type { ProjectExecutionRuntimeResolution } from './project-execution-runtime'
 import type {
   COMPUTER_USE_SKILL_NAME,
-  LINEAR_TICKETS_SKILL_NAME,
+  ORCA_LINEAR_SKILL_NAME,
   ORCA_CLI_SKILL_NAME,
   ORCHESTRATION_SKILL_NAME
 } from './agent-feature-install-commands'
@@ -59,7 +59,7 @@ export type SkillFrontmatterSummary = {
 
 export type ManagedAgentSkillName =
   | typeof COMPUTER_USE_SKILL_NAME
-  | typeof LINEAR_TICKETS_SKILL_NAME
+  | typeof ORCA_LINEAR_SKILL_NAME
   | typeof ORCA_CLI_SKILL_NAME
   | typeof ORCHESTRATION_SKILL_NAME
 
@@ -154,8 +154,8 @@ export function shouldEmitManagedAgentSkillFallback(
   return (
     result.status === 'fallback' &&
     result.reason !== 'cooldown' &&
-    // Why: the modal is an install/update surface; fallbacks without a command
-    // only create a dead-end Re-check loop.
-    Boolean(result.manualCommand)
+    // Why: these are integration/no-op states, not actionable user setup states.
+    result.reason !== 'target-required' &&
+    result.reason !== 'unsupported-skill'
   )
 }

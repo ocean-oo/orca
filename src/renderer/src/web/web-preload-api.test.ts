@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PreloadApi } from '../../../preload/api-types'
 import type { FeatureInteractionState } from '../../../shared/feature-interactions'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import type { ManagedAgentSkillFallback, ManagedAgentSkillUpdated } from '../../../shared/skills'
 import type { TaskSourceContext } from '../../../shared/task-source-context'
 
 const TEST_COMMIT_OID = '0123456789abcdef0123456789abcdef01234567'
@@ -49,6 +50,8 @@ function installBrowserGlobals(userAgent = 'Linux'): {
     },
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
     atob: (value: string) => Buffer.from(value, 'base64').toString('binary'),
     btoa: (value: string) => Buffer.from(value, 'binary').toString('base64')
   } as unknown as Window & typeof globalThis
@@ -1400,13 +1403,13 @@ describe('web UI preload API', () => {
     )
   })
 
-  it('returns remote managed skill fallback from web ensure checks without emitting setup', async () => {
+  it('returns and emits remote managed skill fallback from web ensure checks', async () => {
     const { api } = await installApi()
     const fallback = vi.fn()
     const unsubscribe = api.skills.onManagedFallback(fallback)
 
     const result = await api.skills.ensureManagedReady({
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       remoteRuntime: true
     })
@@ -1414,22 +1417,364 @@ describe('web UI preload API', () => {
     expect(result).toMatchObject({
       status: 'fallback',
       reason: 'remote-runtime',
-      skillName: 'linear-tickets'
+      skillName: 'orca-linear'
     })
-    expect(fallback).not.toHaveBeenCalled()
+    expect(fallback).toHaveBeenCalledWith(result)
+    fallback.mockClear()
 
     const cooldown = await api.skills.ensureManagedReady({
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       remoteRuntime: true
     })
     expect(cooldown).toMatchObject({
       status: 'fallback',
       reason: 'cooldown',
-      skillName: 'linear-tickets'
+      skillName: 'orca-linear'
     })
     expect(fallback).not.toHaveBeenCalled()
     unsubscribe()
+  })
+
+  it('dispatches paired runtime managed skill stream events to web callbacks', async () => {
+    const subscriptions: {
+      method: string
+      params: unknown
+      callbacks: {
+        onResponse: (response: RuntimeRpcResponse<unknown>) => void
+      }
+    }[] = []
+    const unsubscribeRemote = vi.fn()
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(
+          method: string,
+          params: unknown,
+          callbacks: { onResponse: (response: RuntimeRpcResponse<unknown>) => void }
+        ): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          subscriptions.push({ method, params, callbacks })
+          return Promise.resolve({ unsubscribe: unsubscribeRemote, sendBinary: vi.fn() })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const fallback = vi.fn()
+    const updated = vi.fn()
+    const unsubscribeFallback = globals.window.api.skills.onManagedFallback(fallback)
+    const unsubscribeUpdated = globals.window.api.skills.onManagedUpdated(updated)
+
+    expect(subscriptions).toHaveLength(1)
+    expect(subscriptions[0]).toMatchObject({
+      method: 'skills.managedEvents',
+      params: undefined
+    })
+
+    const fallbackEvent = {
+      status: 'fallback',
+      skillName: 'orca-linear',
+      context: 'linear-worktree',
+      runtime: 'host',
+      scope: 'missing',
+      reason: 'missing-install',
+      uiKey: 'host::orca-linear:linear-worktree',
+      message: 'Install orca-linear.',
+      request: { skillName: 'orca-linear', context: 'linear-worktree' }
+    } satisfies ManagedAgentSkillFallback
+    const updatedEvent = {
+      status: 'updated',
+      skillName: 'orchestration',
+      context: 'agent-orchestration',
+      runtime: 'host',
+      scope: 'global'
+    } satisfies ManagedAgentSkillUpdated
+
+    subscriptions[0].callbacks.onResponse({
+      id: 'stream-1',
+      ok: true,
+      result: { type: 'fallback', event: fallbackEvent },
+      _meta: { runtimeId: 'runtime-1' }
+    })
+    subscriptions[0].callbacks.onResponse({
+      id: 'stream-1',
+      ok: true,
+      result: { type: 'updated', event: updatedEvent },
+      _meta: { runtimeId: 'runtime-1' }
+    })
+
+    expect(fallback).toHaveBeenCalledWith(fallbackEvent)
+    expect(updated).toHaveBeenCalledWith(updatedEvent)
+
+    await Promise.resolve()
+    unsubscribeFallback()
+    unsubscribeUpdated()
+    expect(unsubscribeRemote).toHaveBeenCalledTimes(1)
+  })
+
+  it('resubscribes managed skill callbacks after a same-runtime stream close', async () => {
+    vi.useFakeTimers()
+    const subscriptions: {
+      method: string
+      params: unknown
+      callbacks: {
+        onResponse: (response: RuntimeRpcResponse<unknown>) => void
+        onClose?: () => void
+      }
+    }[] = []
+    const unsubscribeRemote = vi.fn()
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(
+          method: string,
+          params: unknown,
+          callbacks: {
+            onResponse: (response: RuntimeRpcResponse<unknown>) => void
+            onClose?: () => void
+          }
+        ): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          subscriptions.push({ method, params, callbacks })
+          return Promise.resolve({ unsubscribe: unsubscribeRemote, sendBinary: vi.fn() })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const unsubscribe = globals.window.api.skills.onManagedFallback(vi.fn())
+    await Promise.resolve()
+    expect(subscriptions).toHaveLength(1)
+
+    subscriptions[0].callbacks.onClose?.()
+    expect(unsubscribeRemote).toHaveBeenCalledTimes(1)
+    expect(subscriptions).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(subscriptions).toHaveLength(2)
+    expect(subscriptions[1]).toMatchObject({
+      method: 'skills.managedEvents',
+      params: undefined
+    })
+
+    unsubscribe()
+    vi.useRealTimers()
+  })
+
+  it('keeps direct web managed fallback behavior when runtime event subscription fails', async () => {
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(): Promise<never> {
+          return Promise.reject(new Error('method unavailable'))
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const fallback = vi.fn()
+    const unsubscribe = globals.window.api.skills.onManagedFallback(fallback)
+    await Promise.resolve()
+
+    const result = await globals.window.api.skills.ensureManagedReady({
+      skillName: 'orca-linear',
+      context: 'linear-worktree',
+      remoteRuntime: true
+    })
+
+    expect(result).toMatchObject({
+      status: 'fallback',
+      reason: 'remote-runtime',
+      skillName: 'orca-linear'
+    })
+    expect(fallback).toHaveBeenCalledWith(result)
+    unsubscribe()
+  })
+
+  it('retries managed skill callbacks after a same-runtime pending subscription failure', async () => {
+    vi.useFakeTimers()
+    const subscriptions: { method: string; params: unknown }[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(
+          method: string,
+          params: unknown
+        ): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          subscriptions.push({ method, params })
+          if (subscriptions.length === 1) {
+            return Promise.reject(new Error('runtime starting'))
+          }
+          return Promise.resolve({ unsubscribe: vi.fn(), sendBinary: vi.fn() })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const unsubscribe = globals.window.api.skills.onManagedFallback(vi.fn())
+    await Promise.resolve()
+    expect(subscriptions).toEqual([{ method: 'skills.managedEvents', params: undefined }])
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(subscriptions).toEqual([
+      { method: 'skills.managedEvents', params: undefined },
+      { method: 'skills.managedEvents', params: undefined }
+    ])
+
+    unsubscribe()
+    vi.useRealTimers()
+  })
+
+  it('subscribes managed skill callbacks after a web runtime is paired', async () => {
+    const subscriptions: { method: string; params: unknown }[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(
+          method: string,
+          params: unknown
+        ): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          subscriptions.push({ method, params })
+          return Promise.resolve({ unsubscribe: vi.fn(), sendBinary: vi.fn() })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const unsubscribe = globals.window.api.skills.onManagedFallback(vi.fn())
+    expect(subscriptions).toEqual([])
+
+    const pairingCode = Buffer.from(
+      JSON.stringify({
+        v: 2,
+        endpoint: 'ws://127.0.0.1:1234',
+        deviceToken: 'token',
+        publicKeyB64: 'public-key'
+      })
+    ).toString('base64url')
+
+    await globals.window.api.runtimeEnvironments.addFromPairingCode({
+      name: 'Test runtime',
+      pairingCode: `orca://pair?code=${pairingCode}`
+    })
+    await Promise.resolve()
+
+    expect(subscriptions).toEqual([{ method: 'skills.managedEvents', params: undefined }])
+    unsubscribe()
+  })
+
+  it('resubscribes managed skill callbacks when a pending stream fails during re-pair', async () => {
+    const rejectFirst: ((error: Error) => void)[] = []
+    const subscriptions: { method: string; params: unknown }[] = []
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(
+          method: string,
+          params: unknown
+        ): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          subscriptions.push({ method, params })
+          if (subscriptions.length === 1) {
+            return new Promise((_resolve, reject) => {
+              rejectFirst.push(reject)
+            })
+          }
+          return Promise.resolve({ unsubscribe: vi.fn(), sendBinary: vi.fn() })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const unsubscribe = globals.window.api.skills.onManagedFallback(vi.fn())
+    expect(subscriptions).toEqual([{ method: 'skills.managedEvents', params: undefined }])
+
+    const pairingCode = Buffer.from(
+      JSON.stringify({
+        v: 2,
+        endpoint: 'ws://127.0.0.1:5678',
+        deviceToken: 'token-2',
+        publicKeyB64: 'public-key-2'
+      })
+    ).toString('base64url')
+
+    await globals.window.api.runtimeEnvironments.addFromPairingCode({
+      name: 'Replacement runtime',
+      pairingCode: `orca://pair?code=${pairingCode}`
+    })
+    rejectFirst[0]?.(new Error('old runtime closed'))
+
+    await vi.waitFor(() => {
+      expect(subscriptions).toHaveLength(2)
+    })
+    expect(subscriptions[1]).toEqual({ method: 'skills.managedEvents', params: undefined })
+    unsubscribe()
+  })
+
+  it('does not leak a pending managed skill stream subscription during callback churn', async () => {
+    const resolvers: ((handle: { unsubscribe: () => void; sendBinary: () => void }) => void)[] = []
+    const unsubscribeRemote = [vi.fn(), vi.fn()]
+    vi.doMock('./web-runtime-client', () => ({
+      WebRuntimeClient: class {
+        subscribe(): Promise<{ unsubscribe: () => void; sendBinary: () => void }> {
+          return new Promise((resolve) => {
+            resolvers.push(resolve)
+          })
+        }
+
+        close(): void {}
+      }
+    }))
+
+    const globals = installBrowserGlobals('Linux')
+    writeStoredRuntimeEnvironment(globals.storage)
+    const { installWebPreloadApi } = await import('./web-preload-api')
+    installWebPreloadApi()
+
+    const unsubscribeFallback = globals.window.api.skills.onManagedFallback(vi.fn())
+    expect(resolvers).toHaveLength(1)
+
+    unsubscribeFallback()
+    const unsubscribeUpdated = globals.window.api.skills.onManagedUpdated(vi.fn())
+    expect(resolvers).toHaveLength(1)
+
+    resolvers[0]?.({ unsubscribe: unsubscribeRemote[0], sendBinary: vi.fn() })
+    await vi.waitFor(() => {
+      expect(unsubscribeRemote[0]).toHaveBeenCalledTimes(1)
+      expect(resolvers).toHaveLength(2)
+    })
+
+    resolvers[1]?.({ unsubscribe: unsubscribeRemote[1], sendBinary: vi.fn() })
+    await Promise.resolve()
+    unsubscribeUpdated()
+    expect(unsubscribeRemote[1]).toHaveBeenCalledTimes(1)
   })
 
   it('rejects paired web computer-use status failures instead of marking the helper unavailable', async () => {

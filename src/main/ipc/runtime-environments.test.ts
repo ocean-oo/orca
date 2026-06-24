@@ -65,7 +65,7 @@ vi.mock('./runtime-environment-request-connections', () => ({
   closeRemoteRuntimeRequestConnection: closeRemoteRuntimeRequestConnectionMock
 }))
 
-vi.mock('../skills/managed-skill-updates', () => ({
+vi.mock('../skills/managed-skill-update-coordinator-registry', () => ({
   getManagedSkillUpdateCoordinator: () => ({
     ensureManagedReady: ensureManagedReadyMock
   })
@@ -400,7 +400,7 @@ describe('registerRuntimeEnvironmentHandlers', () => {
     expect(sendRemoteRuntimeConnectionRequestMock).not.toHaveBeenCalled()
   })
 
-  it('nudges managed skill readiness after remote runtime feature RPCs without opening setup', async () => {
+  it('nudges managed skill readiness after remote runtime feature RPCs and emits fallback setup', async () => {
     registerRuntimeEnvironmentHandlers({} as never)
     ensureManagedReadyMock.mockResolvedValue({
       status: 'fallback',
@@ -442,7 +442,50 @@ describe('registerRuntimeEnvironmentHandlers', () => {
         remoteRuntime: true
       })
     })
-    expect(sendManagedSkillFallbackMock).not.toHaveBeenCalled()
+    expect(sendManagedSkillFallbackMock).toHaveBeenCalledWith({
+      status: 'fallback',
+      skillName: 'orchestration',
+      context: 'agent-orchestration',
+      runtime: 'host',
+      scope: 'missing',
+      reason: 'remote-runtime'
+    })
+  })
+
+  it('nudges orca-cli readiness after remote emulator runtime RPCs', async () => {
+    registerRuntimeEnvironmentHandlers({} as never)
+    sendRemoteRuntimeRequestMock.mockResolvedValue({
+      id: 'rpc-emulator',
+      ok: true,
+      result: { tapped: true },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+
+    const add = handler<
+      { name: string; pairingCode: string },
+      { environment: { id: string; name: string } }
+    >('runtimeEnvironments:addFromPairingCode')
+    await add(null, { name: 'desk', pairingCode: pairingCode() })
+
+    const call = handler<
+      { selector: string; method: string; params?: unknown; timeoutMs?: number },
+      { ok: true; result: unknown }
+    >('runtimeEnvironments:call')
+    await expect(
+      call(null, {
+        selector: 'desk',
+        method: 'emulator.tap',
+        params: { x: 10, y: 20 }
+      })
+    ).resolves.toMatchObject({ ok: true })
+
+    await vi.waitFor(() => {
+      expect(ensureManagedReadyMock).toHaveBeenCalledWith({
+        skillName: 'orca-cli',
+        context: 'agent-orca-cli',
+        remoteRuntime: true
+      })
+    })
   })
 
   it('falls back to one-shot RPC when the saved runtime lacks shared-control support', async () => {

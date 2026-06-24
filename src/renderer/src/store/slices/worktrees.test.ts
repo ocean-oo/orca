@@ -84,15 +84,15 @@ const mockApi = {
   skills: {
     ensureManagedReady: vi.fn().mockResolvedValue({
       status: 'fallback',
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       runtime: 'remote',
       scope: 'missing',
       reason: 'remote-runtime',
-      uiKey: 'remote::linear-tickets:linear-worktree',
+      uiKey: 'remote::orca-linear:linear-worktree',
       message: 'This skill is on a remote runtime, so Orca needs you to update it there.',
       request: {
-        skillName: 'linear-tickets',
+        skillName: 'orca-linear',
         context: 'linear-worktree',
         remoteRuntime: true
       }
@@ -1775,7 +1775,7 @@ describe('createWorktree base status merge', () => {
       )
 
     expect(mockApi.skills.ensureManagedReady).toHaveBeenCalledWith({
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       remoteRuntime: true
     })
@@ -1818,7 +1818,7 @@ describe('createWorktree base status merge', () => {
       )
 
     expect(mockApi.skills.ensureManagedReady).toHaveBeenCalledWith({
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       discoveryTarget: expect.objectContaining({
         projectRootPath: '/repo/wt1'
@@ -1864,7 +1864,7 @@ describe('createWorktree base status merge', () => {
       )
 
     expect(mockApi.skills.ensureManagedReady).toHaveBeenCalledWith({
-      skillName: 'linear-tickets',
+      skillName: 'orca-linear',
       context: 'linear-worktree',
       discoveryTarget: {
         projectRootPath: 'C:\\repo\\wt1',

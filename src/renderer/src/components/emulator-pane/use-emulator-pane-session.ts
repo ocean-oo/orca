@@ -63,7 +63,8 @@ export function useEmulatorPaneSession({
       const list = (await callRuntimeRpc(
         { kind: 'local' },
         'emulator.listSimulators',
-        {}
+        {},
+        { suppressFeatureInteraction: true }
       )) as SimulatorDeviceRow[]
       const next = markSimulatorDeviceBooted(list, bootedTarget)
       if (!mountedRef.current) {
@@ -180,11 +181,16 @@ export function useEmulatorPaneSession({
           setStreamKey(null)
           liveTargetRef.current = null
         }
-        const res = (await callRuntimeRpc({ kind: 'local' }, 'emulator.attach', {
-          device: target,
-          worktree: worktreeId,
-          focus: false
-        })) as { attached?: boolean; info?: EmulatorPaneSession['info'] }
+        const res = (await callRuntimeRpc(
+          { kind: 'local' },
+          'emulator.attach',
+          {
+            device: target,
+            worktree: worktreeId,
+            focus: false
+          },
+          { suppressFeatureInteraction: true }
+        )) as { attached?: boolean; info?: EmulatorPaneSession['info'] }
         if (!mountedRef.current) {
           // Why: attach can finish after the tab closes, after the earlier
           // unmount shutdown already no-op'd because the session was not registered yet.

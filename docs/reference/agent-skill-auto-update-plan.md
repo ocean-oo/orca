@@ -27,7 +27,7 @@ Automatic managed-skill updates are enabled by default. Users can turn them off 
 
 Initial support is limited to Orca-owned feature skills:
 
-- `linear-tickets`
+- `orca-linear`
 - `orchestration`
 - `computer-use`
 - `orca-cli`
@@ -52,7 +52,7 @@ The automatic-updates setting does not create a new trigger. It only controls wh
 
 | Skill | Trigger |
 | --- | --- |
-| `linear-tickets` | User starts a new worktree from a Linear task, or launches/continues an agent workflow attached to a Linear issue where agents are expected to read or update the issue. |
+| `orca-linear` | User starts a new worktree from a Linear task, or launches/continues an agent workflow attached to a Linear issue where agents are expected to read or update the issue. |
 | `orchestration` | User starts an orchestration workflow, such as `/orchestration`, handoff, child-agent coordination, or an explicit orchestration enable/use action. |
 | `computer-use` | User starts a Computer Use workflow, or an agent first attempts to invoke computer-use for the active task. |
 | `orca-cli` | A workflow that depends on the Orca CLI skill starts, such as Browser Use, mobile emulator agent workflows, or another feature that explicitly needs Orca CLI affordances. |
@@ -63,15 +63,19 @@ The Agents settings pane exposes the default-on preference as "Allow verified Or
 
 ## Modal Copy Requirements
 
-When the fallback modal is shown because an agent attempted a skill, the modal must say that.
+When the fallback modal appears from a feature trigger, the modal must name the feature context
+and workspace. Do not claim that an agent attempted the skill unless the triggering surface can
+prove that; runtime and workflow entry points can also be initiated directly by the user.
 
 Examples:
 
-- "An agent just tried to use Orca orchestration. Orca needs to update the orchestration skill before agents can coordinate reliably."
-- "An agent tried to use Orca's CLI skill for this workflow. Orca can update it now, or you can run the command manually."
-- "This Linear task workflow needs the Linear agent skill. Orca could not update it automatically."
+- "Orca Orchestration was used in octopus. Update the orchestration skill to enable agents to coordinate reliably."
+- "The Orca CLI skill is needed in octopus. Update the CLI skill to enable this workflow to continue reliably."
+- "A worktree was started from a Linear task in octopus. Install the Linear agent skill to enable agents to read and update Linear issues."
 
-The modal should show the exact command Orca would run or wanted the user to run.
+When a safe command is available, the modal should show the exact command Orca would run or
+wanted the user to run. When no safe command is available, it should explain why Orca cannot
+update automatically and offer a re-check after the user fixes the install/runtime state.
 
 ## Safety Model
 
@@ -92,7 +96,7 @@ Auto-update is eligible only when all checks pass:
 9. The active project runtime is not repair-required.
 10. The coordinator has not recorded a recent failed attempt for the same skill/runtime/scope.
 
-For the first version, auto-update should be limited to tracked global installs. Project-scoped installs should use the same trigger and return a non-emitted fallback until project-scope behavior and a safe manual command are proven.
+For the first version, auto-update should be limited to tracked global installs. Project-scoped installs should use the same trigger and show a manual-review fallback until project-scope behavior and a safe explicit update command are proven.
 
 ## Scope Resolution
 
@@ -189,13 +193,13 @@ Optional future invalidation:
 | Risk | Mitigation |
 | --- | --- |
 | Wrong scope gets updated | Never use cwd inference; require discovery scope plus matching lockfile; use explicit `--global` or `--project`. |
-| User has both global and project installs | Treat as ambiguous unless the active workflow has a single proven scope; return non-emitted fallback until there is an actionable command. |
-| User has custom/local/hand-copied skill | Require lock metadata; return fallback if missing or legacy and only emit UI when there is a safe manual command. |
+| User has both global and project installs | Treat as ambiguous unless the active workflow has a single proven scope; show a manual-review fallback instead of guessing. |
+| User has custom/local/hand-copied skill | Require lock metadata; show a manual-review fallback if metadata is missing, malformed, or not Orca-managed. |
 | Copy-mode installs are recreated as symlinks by upstream CLI | Avoid auto-update unless install metadata is trusted; call this out only when the fallback/manual path is actionable. |
-| Private repo or auth-gated source needs credentials | Do not auto-update when source/auth cannot be proven non-interactive; return non-emitted fallback unless Orca has a safe manual command. |
-| WSL distro unavailable or project runtime repair-required | Return fallback state without opening a setup modal until WSL-specific guidance or commands are actionable. |
+| Private repo or auth-gated source needs credentials | Do not auto-update when source/auth cannot be proven non-interactive; show a manual-review fallback rather than running a command. |
+| WSL distro unavailable or project runtime repair-required | Do not run host update commands; show runtime-context fallback guidance and allow re-check after repair. |
 | SSH/remote filesystem update writes somewhere unexpected | Do not auto-update remote/SSH skills in v1. |
-| Modal appears unexpectedly because an agent triggered it | Modal copy must name the triggering context: "An agent just tried to..." |
+| Modal appears unexpectedly because a workflow triggered it | Modal copy must name the feature context and workspace without guessing whether an agent or user initiated it. |
 | 50 agents cause 50 checks | Central coordinator with in-flight dedupe, success cache, and failure cooldown. |
 | User turns automatic updates off | Keep the same triggers, but return the manual update modal for stale global installs without cooling that disabled-path modal away. |
 | Update command hangs or npm/network is slow | Add timeout, cancellation on app shutdown where possible, and emit a modal only when a manual command is available. |
@@ -209,10 +213,11 @@ Optional future invalidation:
 2. Renderer calls the coordinator with skill name and workflow context.
 3. Coordinator returns one of:
    - `ready`: installed and recently checked.
-   - `updated`: reserved for a verified background update path once the CLI contract ships.
+   - `updated`: Orca verified and ran the single-skill global update command successfully.
    - `fallback`: return reason and optional command.
 4. Workflow continues for `ready` and `updated`.
-5. For `fallback`, show the contextual modal only when the fallback includes a manual command; otherwise avoid an interrupting dead-end prompt.
+5. For `fallback`, show the contextual modal for actionable setup/manual-review states and keep
+   cooldown/unsupported internal states silent.
 
 ## Implementation Steps
 
@@ -238,7 +243,7 @@ Optional future invalidation:
 
 ## Tests
 
-- Global tracked skill update eligibility without running blind `npx`.
+- Global tracked skill update eligibility and verified single-skill `npx` execution.
 - Project tracked skill falls back in v1.
 - Same skill in global and project scope falls back as ambiguous.
 - Symlinked visible global install remains global after `realpath`.
@@ -253,6 +258,10 @@ Optional future invalidation:
 
 ## Recommended First Version
 
-Ship the coordinator and intent-boundary triggers, but do not run background `npx` until the verified CLI/ref/hash contract is available. Tracked global Orca-managed installs are the only future auto-update target for this version line. Everything else uses the same trigger and returns fallback state; only fallback state with a safe manual command opens a contextual modal.
+Ship the coordinator and intent-boundary triggers with automatic updates for tracked global
+Orca-managed installs only. The coordinator runs the explicit single-skill global update command
+after discovery and lockfile validation, then verifies the post-update install before reporting
+`updated`. Everything else uses the same trigger and returns fallback state; actionable fallback
+states open a contextual modal.
 
 This covers the common setup path from Orca's own install buttons while protecting custom, project, remote, and ambiguous installs.

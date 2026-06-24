@@ -28,6 +28,7 @@ export type FeatureInteractionId =
   | 'agent-orchestration-setup'
   | 'agent-orchestration'
   | 'mobile-emulator-agent-setup'
+  | 'mobile-emulator-agent-use'
   | 'ai-commit-generation'
   | 'ai-pr-generation'
   | 'claude-account-switching'
@@ -104,6 +105,10 @@ export const FEATURE_INTERACTIONS = [
   {
     id: 'mobile-emulator-agent-setup',
     interaction: 'Mobile Emulator agent CLI or skill setup opened'
+  },
+  {
+    id: 'mobile-emulator-agent-use',
+    interaction: 'mobile emulator runtime method used'
   },
   {
     id: 'ai-commit-generation',

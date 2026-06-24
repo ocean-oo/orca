@@ -1,7 +1,7 @@
 import type { Store } from '../persistence'
 import { shouldEmitManagedAgentSkillFallback } from '../../shared/skills'
 import type { RuntimeManagedSkillNudgeHandler } from '../runtime/rpc/managed-skill-nudge'
-import { getManagedSkillUpdateCoordinator } from '../skills/managed-skill-updates'
+import { getManagedSkillUpdateCoordinator } from '../skills/managed-skill-update-coordinator-registry'
 import { sendManagedSkillFallback, sendManagedSkillUpdated } from './skills'
 
 export function createRuntimeManagedSkillNudge(store: Store): RuntimeManagedSkillNudgeHandler {

@@ -1,9 +1,10 @@
 import { isAbsolute, normalize, relative, sep } from 'node:path'
 import type {
   ManagedAgentSkillEnsureRequest,
-  ManagedAgentSkillEnsureResult
+  ManagedAgentSkillEnsureResult,
+  ManagedAgentSkillFallbackReason,
+  ManagedAgentSkillRuntime
 } from '../../shared/skills'
-import type { ExpectedManagedSkillRevision } from './managed-skill-update-contract'
 
 export function shouldCooldownFallback(result: ManagedAgentSkillEnsureResult): boolean {
   return (
@@ -16,18 +17,48 @@ export function shouldCooldownFallback(result: ManagedAgentSkillEnsureResult): b
 export function makeManagedSkillSuccessCacheKey(args: {
   appVersion: string
   request: ManagedAgentSkillEnsureRequest
-  expected: ExpectedManagedSkillRevision | undefined
+  currentLockHash: string
+}): string {
+  return [args.appVersion, 'host', '', 'global', args.request.skillName, args.currentLockHash].join(
+    ':'
+  )
+}
+
+export function makeManagedSkillTargetFallbackCacheKey(args: {
+  appVersion: string
+  distro?: string | null
+  reason: ManagedAgentSkillFallbackReason
+  request: ManagedAgentSkillEnsureRequest
+  runtime: ManagedAgentSkillRuntime
 }): string {
   return [
     args.appVersion,
-    'host',
-    '',
-    'global',
+    args.runtime,
+    args.distro ?? '',
+    'target-fallback',
     normalizeManagedSkillKeyPart(args.request.context),
     normalizeManagedSkillKeyPart(args.request.discoveryTarget?.projectRootPath),
     args.request.skillName,
-    args.expected?.expectedHash ?? 'missing-expected-hash',
-    args.expected?.expectedSourceRef ?? 'missing-source-ref'
+    args.reason
+  ].join(':')
+}
+
+export function makeManagedSkillPreDiscoveryCacheKey(args: {
+  appVersion: string
+  backgroundUpdatesEnabled: boolean
+  distro?: string | null
+  request: ManagedAgentSkillEnsureRequest
+  runtime: Extract<ManagedAgentSkillRuntime, 'host' | 'wsl'>
+}): string {
+  return [
+    args.appVersion,
+    args.runtime,
+    args.distro ?? '',
+    'pre-discovery',
+    args.backgroundUpdatesEnabled ? 'background-updates-on' : 'background-updates-off',
+    normalizeManagedSkillKeyPart(args.request.context),
+    normalizeManagedSkillKeyPart(args.request.discoveryTarget?.projectRootPath),
+    args.request.skillName
   ].join(':')
 }
 

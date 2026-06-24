@@ -121,6 +121,11 @@ const METHODS = [
     handler: () => ({ id: 'msg-1' })
   }),
   defineMethod({
+    name: 'emulator.tap',
+    params: z.object({}),
+    handler: () => ({ tapped: true })
+  }),
+  defineMethod({
     name: 'browser.fail',
     params: z.object({}),
     handler: () => {
@@ -137,10 +142,12 @@ describe('RpcDispatcher feature interactions', () => {
     await dispatcher.dispatch(makeRequest('browser.click'))
     await dispatcher.dispatch(makeRequest('computer.click'))
     await dispatcher.dispatch(makeRequest('orchestration.send'))
+    await dispatcher.dispatch(makeRequest('emulator.tap'))
 
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('agent-browser-use')
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('computer-use')
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('agent-orchestration')
+    expect(runtime.recordFeatureInteraction).toHaveBeenCalledWith('mobile-emulator-agent-use')
   })
 
   it('nudges managed skills for runtime feature use without blocking responses', async () => {
@@ -177,6 +184,20 @@ describe('RpcDispatcher feature interactions', () => {
       skillName: 'orchestration',
       context: 'agent-orchestration',
       discoveryTarget: { runtime: 'wsl', wslDistro: 'Ubuntu' }
+    })
+  })
+
+  it('nudges orca-cli when mobile emulator runtime methods are used', async () => {
+    const runtime = makeRuntime()
+    const nudgeManagedSkill = vi.fn()
+    const dispatcher = new RpcDispatcher({ runtime, methods: METHODS, nudgeManagedSkill })
+
+    await dispatcher.dispatch(makeRequest('emulator.tap'))
+    await Promise.resolve()
+
+    expect(nudgeManagedSkill).toHaveBeenCalledWith({
+      skillName: 'orca-cli',
+      context: 'agent-orca-cli'
     })
   })
 
@@ -273,6 +294,7 @@ describe('RpcDispatcher feature interactions', () => {
       makeRequest('browser.screencast', browserPaneUiParams),
       () => {}
     )
+    await dispatcher.dispatch(makeRequest('emulator.tap', browserPaneUiParams))
     await dispatcher.dispatch(makeRequest('browser.click'))
 
     expect(runtime.recordFeatureInteraction).toHaveBeenCalledTimes(1)

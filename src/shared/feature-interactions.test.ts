@@ -60,6 +60,7 @@ describe('feature interactions', () => {
       'agent-orchestration-setup',
       'agent-orchestration',
       'mobile-emulator-agent-setup',
+      'mobile-emulator-agent-use',
       'ai-commit-generation',
       'ai-pr-generation',
       'claude-account-switching',

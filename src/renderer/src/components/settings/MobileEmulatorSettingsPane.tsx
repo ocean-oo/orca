@@ -103,7 +103,8 @@ export function MobileEmulatorSettingsPane({
       const result = (await callRuntimeRpc(
         { kind: 'local' },
         'emulator.availability',
-        {}
+        {},
+        { suppressFeatureInteraction: true }
       )) as EmulatorAvailability
       setAvailability(result)
     } catch (error) {

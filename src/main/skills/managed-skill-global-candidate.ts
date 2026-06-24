@@ -1,10 +1,12 @@
 import type {
+  DiscoveredSkill,
   ManagedAgentSkillManualCommand,
   ManagedAgentSkillName,
   ManagedAgentSkillScope,
   SkillDiscoveryResult
 } from '../../shared/skills'
 import { selectManagedSkillDiscoveryCandidates } from './managed-skill-discovery-selection'
+import { normalizePathForManagedSkillKey } from './managed-skill-update-cache-key'
 import { buildManagedSkillManualCommand } from './managed-skill-update-contract'
 
 type ManagedSkillGlobalCandidate = SkillDiscoveryResult['skills'][number]
@@ -90,11 +92,27 @@ export function selectSingleGlobalManagedSkillCandidate(args: {
   }
 
   const candidate = homeCandidates[0]
-  if (candidate.directoryIsSymlink || candidate.skillFileIsSymlink) {
+  if (hasSymlinkedSkillPath(candidate)) {
     return {
       status: 'fallback',
       fallback: { reason: 'symlinked-global-install', scope: 'global' }
     }
   }
   return { status: 'candidate', candidate }
+}
+
+function hasSymlinkedSkillPath(candidate: DiscoveredSkill): boolean {
+  return (
+    candidate.directoryIsSymlink === true ||
+    candidate.skillFileIsSymlink === true ||
+    !isCanonicalPath(candidate.directoryPath, candidate.realDirectoryPath) ||
+    !isCanonicalPath(candidate.skillFilePath, candidate.realSkillFilePath)
+  )
+}
+
+function isCanonicalPath(path: string, realPath: string | null | undefined): boolean {
+  return (
+    typeof realPath === 'string' &&
+    normalizePathForManagedSkillKey(realPath) === normalizePathForManagedSkillKey(path)
+  )
 }

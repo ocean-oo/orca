@@ -92,7 +92,8 @@ export async function openMobileEmulatorTab(
       {
         worktree: worktreeId,
         focus: false
-      }
+      },
+      { suppressFeatureInteraction: true }
     )
     if (!result.attached || !result.info) {
       throw new Error('Could not start the emulator.')

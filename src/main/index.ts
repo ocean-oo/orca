@@ -36,7 +36,8 @@ import { resolveConsent } from './telemetry/consent'
 import { triggerStartupNotificationRegistration } from './ipc/notifications'
 import { OrcaRuntimeService } from './runtime/orca-runtime'
 import { OrcaRuntimeRpcServer } from './runtime/runtime-rpc'
-import { getManagedSkillUpdateCoordinator } from './skills/managed-skill-updates'
+import { abortManagedSkillUpdateProcesses } from './skills/managed-skill-updates'
+import { getManagedSkillUpdateCoordinator } from './skills/managed-skill-update-coordinator-registry'
 import { awaitRuntimeFileWatcherUnsubscribes } from './runtime/orca-runtime-files'
 import { clearRuntimeMetadataIfOwned } from './runtime/runtime-metadata'
 import { ensureMainI18n, setMainUiLanguage } from './i18n/main-i18n'
@@ -737,6 +738,9 @@ function openMainWindow(): BrowserWindow {
         codexRuntimeHome ? [codexRuntimeHome.getHostRuntimeHomePath()] : [],
       onBeforeRelaunch: async () => {
         isQuitting = true
+        // Why: app:relaunch exits directly and can skip will-quit, so cancel
+        // managed skill updater subprocesses before scheduling that exit.
+        abortManagedSkillUpdateProcesses()
         await preserveAgentAuthBeforeRestart({ codexRuntimeHome, claudeRuntimeAuth, store })
       }
     }
@@ -1741,6 +1745,7 @@ app.on('before-quit', () => {
 // async work and let Electron exit.
 let daemonDisconnectDone = false
 app.on('will-quit', (e) => {
+  abortManagedSkillUpdateProcesses()
   // Why: before-quit can still be aborted by renderer beforeunload; wait until
   // the committed quit path before removing the Windows notification icon.
   destroySystemTray()

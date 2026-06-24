@@ -150,14 +150,14 @@ describe('registerSkillsHandlers', () => {
     expect(discoverSkillsMock).not.toHaveBeenCalled()
   })
 
-  it('registers managed ensure and returns repair-required fallback without emitting setup', async () => {
+  it('registers managed ensure and emits repair-required fallback setup', async () => {
     const handler = getEnsureHandler()
     const send = vi.fn()
 
     const result = await handler(
       { sender: { send } },
       {
-        skillName: 'linear-tickets',
+        skillName: 'orca-linear',
         context: 'linear-worktree',
         discoveryTarget: {
           projectRuntime: {
@@ -177,9 +177,9 @@ describe('registerSkillsHandlers', () => {
     expect(result).toMatchObject({
       status: 'fallback',
       reason: 'repair-required-runtime',
-      skillName: 'linear-tickets'
+      skillName: 'orca-linear'
     })
-    expect(send).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith('skills:managedFallback', result)
     expect(discoverSkillsMock).not.toHaveBeenCalled()
   })
 
@@ -203,7 +203,7 @@ describe('registerSkillsHandlers', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('does not emit managed fallback events for remote runtime results', async () => {
+  it('emits managed fallback events for remote runtime results', async () => {
     const handler = getEnsureHandler()
     const send = vi.fn()
     const result = await handler(
@@ -219,16 +219,16 @@ describe('registerSkillsHandlers', () => {
       status: 'fallback',
       reason: 'remote-runtime'
     })
-    expect(send).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith('skills:managedFallback', result)
   })
 
-  it('does not emit managed fallback events for WSL runtime results', async () => {
+  it('emits managed fallback events for WSL runtime results', async () => {
     const handler = getEnsureHandler()
     const send = vi.fn()
     const result = await handler(
       { sender: { send } },
       {
-        skillName: 'linear-tickets',
+        skillName: 'orca-linear',
         context: 'linear-worktree',
         discoveryTarget: { runtime: 'wsl', wslDistro: 'Ubuntu' }
       }
@@ -238,24 +238,24 @@ describe('registerSkillsHandlers', () => {
       status: 'fallback',
       reason: 'wsl-runtime'
     })
-    expect(send).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith('skills:managedFallback', result)
   })
 
-  it('does not emit managed fallback events without a manual command', async () => {
+  it('emits managed fallback events for unsafe installs without a manual command', async () => {
     const handler = getEnsureHandler()
     const send = vi.fn()
     discoverSkillsMock.mockResolvedValue({
       skills: [
         {
-          id: 'repo-linear-tickets',
-          name: 'linear-tickets',
+          id: 'repo-orca-linear',
+          name: 'orca-linear',
           description: null,
           providers: ['agent-skills'],
           sourceKind: 'repo',
           sourceLabel: 'repo',
           rootPath: '/workspace/current/.agents/skills',
-          directoryPath: '/workspace/current/.agents/skills/linear-tickets',
-          skillFilePath: '/workspace/current/.agents/skills/linear-tickets/SKILL.md',
+          directoryPath: '/workspace/current/.agents/skills/orca-linear',
+          skillFilePath: '/workspace/current/.agents/skills/orca-linear/SKILL.md',
           installed: true,
           fileCount: 1,
           updatedAt: 1
@@ -267,7 +267,7 @@ describe('registerSkillsHandlers', () => {
     const result = await handler(
       { sender: { send } },
       {
-        skillName: 'linear-tickets',
+        skillName: 'orca-linear',
         context: 'linear-worktree',
         discoveryTarget: { runtime: 'host', projectRootPath: '/workspace/current' }
       }
@@ -277,6 +277,6 @@ describe('registerSkillsHandlers', () => {
       status: 'fallback',
       reason: 'project-install'
     })
-    expect(send).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith('skills:managedFallback', result)
   })
 })

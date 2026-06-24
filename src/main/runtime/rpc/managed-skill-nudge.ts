@@ -30,7 +30,7 @@ export function getManagedSkillNudgeForFeatureInteraction(
   if (id === 'computer-use') {
     return { skillName: COMPUTER_USE_SKILL_NAME, context: 'agent-computer-use' }
   }
-  if (id === 'agent-browser-use') {
+  if (id === 'agent-browser-use' || id === 'mobile-emulator-agent-use') {
     return { skillName: ORCA_CLI_SKILL_NAME, context: 'agent-orca-cli' }
   }
   return null

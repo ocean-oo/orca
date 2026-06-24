@@ -9,7 +9,11 @@ import type {
 } from '../../shared/skills'
 import { shouldEmitManagedAgentSkillFallback } from '../../shared/skills'
 import { getDefaultWslDistro, getWslHome } from '../wsl'
-import { getManagedSkillUpdateCoordinator } from '../skills/managed-skill-updates'
+import { getManagedSkillUpdateCoordinator } from '../skills/managed-skill-update-coordinator-registry'
+import {
+  publishManagedSkillFallback,
+  publishManagedSkillUpdated
+} from '../skills/managed-skill-events'
 
 type SkillDiscoveryRuntimeTarget =
   | { runtime: 'host' }
@@ -70,6 +74,7 @@ export function registerSkillsHandlers(store: Store): void {
     ): Promise<ManagedAgentSkillEnsureResult> => {
       const result = await getManagedSkillUpdateCoordinator(store).ensureManagedReady(request)
       if (shouldEmitManagedAgentSkillFallback(result)) {
+        publishManagedSkillFallback(result)
         event.sender.send('skills:managedFallback', result)
       }
       if (result.status === 'updated') {
@@ -84,6 +89,7 @@ export function sendManagedSkillFallback(result: ManagedAgentSkillEnsureResult):
   if (!shouldEmitManagedAgentSkillFallback(result)) {
     return
   }
+  publishManagedSkillFallback(result)
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('skills:managedFallback', result)
   }
@@ -93,6 +99,7 @@ export function sendManagedSkillUpdated(result: ManagedAgentSkillEnsureResult): 
   if (result.status !== 'updated') {
     return
   }
+  publishManagedSkillUpdated(result)
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('skills:managedUpdated', result)
   }

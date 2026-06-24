@@ -8,6 +8,7 @@ import type {
   ManagedAgentSkillScope
 } from '../../shared/skills'
 import { getManagedSkillFallbackMessage } from './managed-skill-fallback-message'
+import { buildManagedSkillManualCommand } from './managed-skill-update-contract'
 
 export function buildManagedSkillReadyResult(
   request: ManagedAgentSkillEnsureRequest
@@ -19,6 +20,31 @@ export function buildManagedSkillReadyResult(
     runtime: 'host',
     scope: 'global'
   }
+}
+
+export function buildManagedSkillUpdatedResult(
+  request: ManagedAgentSkillEnsureRequest
+): ManagedAgentSkillEnsureResult {
+  return {
+    status: 'updated',
+    skillName: request.skillName,
+    context: request.context,
+    runtime: 'host',
+    scope: 'global'
+  }
+}
+
+export function buildManagedSkillGlobalUpdateFallback(
+  request: ManagedAgentSkillEnsureRequest,
+  reason: Extract<ManagedAgentSkillFallbackReason, 'update-failed' | 'update-timeout'>
+): ManagedAgentSkillFallback {
+  return buildManagedSkillFallback({
+    request,
+    reason,
+    runtime: 'host',
+    scope: 'global',
+    manualCommand: buildManagedSkillManualCommand('update', request.skillName)
+  })
 }
 
 export function buildManagedSkillFallback(args: {

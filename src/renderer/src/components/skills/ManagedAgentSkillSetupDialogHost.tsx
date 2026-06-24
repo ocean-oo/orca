@@ -87,9 +87,11 @@ export function ManagedAgentSkillSetupDialogHost(): React.JSX.Element | null {
   }, [enqueueFallback])
 
   const contextActionLabel =
-    active?.manualCommand?.kind === 'update'
-      ? translate('auto.components.skills.ManagedAgentSkillSetupDialogHost.update', 'Update')
-      : translate('auto.components.skills.ManagedAgentSkillSetupDialogHost.install', 'Install')
+    active?.manualCommand?.kind === 'install'
+      ? translate('auto.components.skills.ManagedAgentSkillSetupDialogHost.install', 'Install')
+      : active?.manualCommand?.kind === 'update'
+        ? translate('auto.components.skills.ManagedAgentSkillSetupDialogHost.update', 'Update')
+        : translate('auto.components.skills.ManagedAgentSkillSetupDialogHost.review', 'Review')
   const contextCopy = active ? getManagedSkillContextCopy(active.context, contextActionLabel) : ''
   const installedCommand = useMemo(
     () => (active ? buildAgentFeatureSkillUpdateCommand(active.skillName) : ''),

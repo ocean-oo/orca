@@ -34,10 +34,15 @@ export function useEmulatorPaneShutdown({
         useAppStore.getState().setTabLabel(tabId, 'Shutting down…')
       }
       try {
-        const res = (await callRuntimeRpc({ kind: 'local' }, 'emulator.shutdown', {
-          ...(deviceTarget ? { device: deviceTarget } : {}),
-          worktree: worktreeId
-        })) as { deviceUdid?: string }
+        const res = (await callRuntimeRpc(
+          { kind: 'local' },
+          'emulator.shutdown',
+          {
+            ...(deviceTarget ? { device: deviceTarget } : {}),
+            worktree: worktreeId
+          },
+          { suppressFeatureInteraction: true }
+        )) as { deviceUdid?: string }
         const shutdownTarget = res?.deviceUdid || deviceTarget
         window.dispatchEvent(
           new CustomEvent(EMULATOR_LOCAL_SHUTDOWN_EVENT, {

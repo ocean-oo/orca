@@ -35,7 +35,7 @@ export function getManagedSkillContextCopy(
     case 'agent-orca-cli':
       return translate(
         'auto.components.skills.ManagedAgentSkillSetupDialogHost.agentOrcaCliContext',
-        'The Orca CLI skill was used. {{actionLabel}} the CLI skill to enable this workflow to continue reliably.',
+        'The Orca CLI skill is needed. {{actionLabel}} the CLI skill to enable this workflow to continue reliably.',
         { actionLabel }
       )
   }
@@ -86,7 +86,7 @@ export function getManagedSkillContextWorkspaceCopy(
       return {
         beforeWorkspace: translate(
           'auto.components.skills.ManagedAgentSkillSetupDialogHost.agentOrcaCliContextBeforeWorkspace',
-          'The Orca CLI skill was used in '
+          'The Orca CLI skill is needed in '
         ),
         afterWorkspace: translate(
           'auto.components.skills.ManagedAgentSkillSetupDialogHost.agentOrcaCliContextAfterWorkspace',

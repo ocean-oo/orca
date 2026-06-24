@@ -3,29 +3,32 @@ import { homedir } from 'node:os'
 import type {
   ManagedAgentSkillEnsureRequest,
   ManagedAgentSkillEnsureResult,
-  ManagedAgentSkillName,
   SkillDiscoveryResult
 } from '../../shared/skills'
-import type { Store } from '../persistence'
 import { discoverSkills } from './discovery'
 import {
   buildManagedSkillFallback,
-  buildManagedSkillReadyResult
+  buildManagedSkillGlobalUpdateFallback,
+  buildManagedSkillReadyResult,
+  buildManagedSkillUpdatedResult
 } from './managed-skill-ensure-result'
 import { selectSingleGlobalManagedSkillCandidate } from './managed-skill-global-candidate'
 import { readManagedSkillLockEntry } from './managed-skill-lockfile'
 import {
+  makeManagedSkillPreDiscoveryCacheKey,
   makeManagedSkillSuccessCacheKey,
-  normalizeManagedSkillKeyPart,
+  makeManagedSkillTargetFallbackCacheKey,
   shouldCooldownFallback
 } from './managed-skill-update-cache-key'
 import {
   buildManagedSkillManualCommand,
-  EXPECTED_MANAGED_SKILL_REVISIONS,
-  isImmutableSourceRef,
-  isManagedAgentSkillName,
-  type ExpectedManagedSkillRevision
+  isManagedAgentSkillName
 } from './managed-skill-update-contract'
+import { verifyManagedSkillPostUpdate } from './managed-skill-post-update-verification'
+import {
+  createManagedSkillUpdateRunner,
+  type ManagedSkillUpdateRunner
+} from './managed-skill-update-runner'
 import { resolveManagedSkillTarget, type ResolvedManagedSkillTarget } from './managed-skill-target'
 
 type ManagedSkillCoordinatorDeps = {
@@ -36,30 +39,14 @@ type ManagedSkillCoordinatorDeps = {
   homeDir?: () => string
   now?: () => number
   readTextFile?: (path: string) => Promise<string>
-  expectedRevisions?: Partial<Record<ManagedAgentSkillName, ExpectedManagedSkillRevision>>
+  updateRunner?: ManagedSkillUpdateRunner
 }
 
 const DEFAULT_COOLDOWN_MS = 60_000
+const defaultUpdateAbortController = new AbortController()
 
-const coordinatorByStore = new WeakMap<Store, ManagedSkillUpdateCoordinator>()
-
-export function getManagedSkillUpdateCoordinator(store: Store): ManagedSkillUpdateCoordinator {
-  const existing = coordinatorByStore.get(store)
-  if (existing) {
-    return existing
-  }
-  const coordinator = new ManagedSkillUpdateCoordinator({
-    appVersion: process.env.npm_package_version,
-    backgroundUpdatesEnabled: () =>
-      store.getSettings().managedAgentSkillBackgroundUpdatesEnabled !== false,
-    discoverHostSkills: (projectRootPath) =>
-      discoverSkills({
-        repos: store.getRepos(),
-        ...(projectRootPath ? { cwd: projectRootPath } : {})
-      })
-  })
-  coordinatorByStore.set(store, coordinator)
-  return coordinator
+export function abortManagedSkillUpdateProcesses(): void {
+  defaultUpdateAbortController.abort()
 }
 
 export class ManagedSkillUpdateCoordinator {
@@ -72,14 +59,17 @@ export class ManagedSkillUpdateCoordinator {
   private readonly homeDir: () => string
   private readonly now: () => number
   private readonly readTextFile: (path: string) => Promise<string>
-  private readonly expectedRevisions: Partial<
-    Record<ManagedAgentSkillName, ExpectedManagedSkillRevision>
-  >
+  private readonly updateRunner: ManagedSkillUpdateRunner
   private readonly inFlightByPreDiscoveryKey = new Map<
     string,
     Promise<ManagedAgentSkillEnsureResult>
   >()
+  private readonly disabledFallbackByPreDiscoveryKey = new Map<
+    string,
+    { result: ManagedAgentSkillEnsureResult; until: number }
+  >()
   private readonly cooldownUntilByKey = new Map<string, number>()
+  private readonly readyUntilByPreDiscoveryKey = new Map<string, number>()
   private readonly successCache = new Set<string>()
 
   constructor(deps: ManagedSkillCoordinatorDeps = {}) {
@@ -89,8 +79,10 @@ export class ManagedSkillUpdateCoordinator {
     this.discoverHostSkills = deps.discoverHostSkills ?? (() => discoverSkills({ repos: [] }))
     this.homeDir = deps.homeDir ?? homedir
     this.now = deps.now ?? Date.now
-    this.readTextFile = deps.readTextFile ?? readFileUtf8
-    this.expectedRevisions = deps.expectedRevisions ?? EXPECTED_MANAGED_SKILL_REVISIONS
+    this.readTextFile = deps.readTextFile ?? ((path) => readFile(path, 'utf8'))
+    this.updateRunner =
+      deps.updateRunner ??
+      createManagedSkillUpdateRunner({ signal: defaultUpdateAbortController.signal })
   }
 
   ensureManagedReady(
@@ -109,16 +101,13 @@ export class ManagedSkillUpdateCoordinator {
 
     const target = resolveManagedSkillTarget(request)
     if (!target.ok) {
-      const targetFallbackKey = [
-        this.appVersion,
-        target.runtime,
-        target.distro ?? '',
-        'target-fallback',
-        normalizeManagedSkillKeyPart(request.context),
-        normalizeManagedSkillKeyPart(request.discoveryTarget?.projectRootPath),
-        request.skillName,
-        target.reason
-      ].join(':')
+      const targetFallbackKey = makeManagedSkillTargetFallbackCacheKey({
+        appVersion: this.appVersion,
+        distro: target.distro,
+        reason: target.reason,
+        request,
+        runtime: target.runtime
+      })
       const cooldownUntil = this.cooldownUntilByKey.get(targetFallbackKey)
       if (!request.force && cooldownUntil && cooldownUntil > this.now()) {
         return Promise.resolve(
@@ -143,28 +132,13 @@ export class ManagedSkillUpdateCoordinator {
       )
     }
 
-    const expected = this.expectedRevisions[request.skillName]
-    const successLookupKey = makeManagedSkillSuccessCacheKey({
+    const preDiscoveryKey = makeManagedSkillPreDiscoveryCacheKey({
       appVersion: this.appVersion,
+      backgroundUpdatesEnabled: this.backgroundUpdatesEnabled(),
+      distro: target.distro,
       request,
-      expected
+      runtime: target.runtime
     })
-    if (target.runtime === 'host' && this.successCache.has(successLookupKey)) {
-      return Promise.resolve(buildManagedSkillReadyResult(request))
-    }
-
-    const preDiscoveryKey = [
-      this.appVersion,
-      target.runtime,
-      target.distro ?? '',
-      'pre-discovery',
-      this.backgroundUpdatesEnabled() ? 'background-updates-on' : 'background-updates-off',
-      normalizeManagedSkillKeyPart(request.context),
-      normalizeManagedSkillKeyPart(request.discoveryTarget?.projectRootPath),
-      request.skillName,
-      expected?.expectedHash ?? 'missing-expected-hash',
-      expected?.expectedSourceRef ?? 'missing-source-ref'
-    ].join(':')
     const existing = this.inFlightByPreDiscoveryKey.get(preDiscoveryKey)
     if (existing) {
       return existing
@@ -181,11 +155,28 @@ export class ManagedSkillUpdateCoordinator {
         })
       )
     }
+    const readyUntil = this.readyUntilByPreDiscoveryKey.get(preDiscoveryKey)
+    if (!request.force && readyUntil && readyUntil > this.now()) {
+      return Promise.resolve(buildManagedSkillReadyResult(request))
+    }
+    const disabledFallback = this.disabledFallbackByPreDiscoveryKey.get(preDiscoveryKey)
+    if (!request.force && disabledFallback && disabledFallback.until > this.now()) {
+      return Promise.resolve(disabledFallback.result)
+    }
 
-    const promise = this.evaluate(request, target, expected)
+    const promise = this.evaluate(request, target)
       .then((result) => {
+        if (result.status === 'ready' || result.status === 'updated') {
+          this.readyUntilByPreDiscoveryKey.set(preDiscoveryKey, this.now() + this.cooldownMs)
+        }
         if (shouldCooldownFallback(result)) {
           this.cooldownUntilByKey.set(preDiscoveryKey, this.now() + this.cooldownMs)
+        }
+        if (isBackgroundUpdateDisabledFallback(result)) {
+          this.disabledFallbackByPreDiscoveryKey.set(preDiscoveryKey, {
+            result,
+            until: this.now() + this.cooldownMs
+          })
         }
         return result
       })
@@ -200,8 +191,7 @@ export class ManagedSkillUpdateCoordinator {
 
   private async evaluate(
     request: ManagedAgentSkillEnsureRequest,
-    target: Extract<ResolvedManagedSkillTarget, { ok: true }>,
-    expected: ExpectedManagedSkillRevision | undefined
+    target: Extract<ResolvedManagedSkillTarget, { ok: true }>
   ): Promise<ManagedAgentSkillEnsureResult> {
     if (target.runtime === 'wsl') {
       return buildManagedSkillFallback({
@@ -229,45 +219,6 @@ export class ManagedSkillUpdateCoordinator {
         manualCommand: globalCandidateDecision.fallback.manualCommand
       })
     }
-    if (!expected) {
-      // Why: without a pinned/hash manifest, V1 cannot prove staleness or offer a
-      // real update path, so installed global managed skills should not prompt.
-      const cacheKey = makeManagedSkillSuccessCacheKey({
-        appVersion: this.appVersion,
-        request,
-        expected
-      })
-      this.successCache.add(cacheKey)
-      return buildManagedSkillReadyResult(request)
-    }
-    if (!isImmutableSourceRef(expected.expectedSourceRef)) {
-      return buildManagedSkillFallback({
-        request,
-        reason: 'unsupported-cli-contract',
-        runtime: 'host',
-        scope: 'global'
-      })
-    }
-
-    const cacheKey = makeManagedSkillSuccessCacheKey({
-      appVersion: this.appVersion,
-      request,
-      expected
-    })
-    if (this.successCache.has(cacheKey)) {
-      return buildManagedSkillReadyResult(request)
-    }
-
-    const backgroundUpdatesEnabled = this.backgroundUpdatesEnabled()
-    const cooldownUntil = this.cooldownUntilByKey.get(cacheKey)
-    if (backgroundUpdatesEnabled && !request.force && cooldownUntil && cooldownUntil > this.now()) {
-      return buildManagedSkillFallback({
-        request,
-        reason: 'cooldown',
-        runtime: 'host',
-        scope: 'global'
-      })
-    }
 
     const lockEntryResult = await readManagedSkillLockEntry({
       homeDir: this.homeDir(),
@@ -282,10 +233,16 @@ export class ManagedSkillUpdateCoordinator {
         scope: 'global'
       })
     }
-    if (lockEntryResult.entry.skillFolderHash === expected.expectedHash) {
-      this.successCache.add(cacheKey)
+    const currentLockHash = lockEntryResult.entry.skillFolderHash
+    const cacheKey = makeManagedSkillSuccessCacheKey({
+      appVersion: this.appVersion,
+      request,
+      currentLockHash
+    })
+    if (this.successCache.has(cacheKey)) {
       return buildManagedSkillReadyResult(request)
     }
+    const backgroundUpdatesEnabled = this.backgroundUpdatesEnabled()
     if (!backgroundUpdatesEnabled) {
       return buildManagedSkillFallback({
         request,
@@ -296,18 +253,50 @@ export class ManagedSkillUpdateCoordinator {
       })
     }
 
-    // Why: this tree does not ship the verified CLI hash/ref update contract
-    // yet, so stale installs must fall back instead of running blind `npx`.
-    this.cooldownUntilByKey.set(cacheKey, this.now() + this.cooldownMs)
-    return buildManagedSkillFallback({
-      request,
-      reason: 'unsupported-cli-contract',
-      runtime: 'host',
-      scope: 'global'
+    const cooldownUntil = this.cooldownUntilByKey.get(cacheKey)
+    if (!request.force && cooldownUntil && cooldownUntil > this.now()) {
+      return buildManagedSkillFallback({
+        request,
+        reason: 'cooldown',
+        runtime: 'host',
+        scope: 'global'
+      })
+    }
+
+    const updateResult = await this.updateRunner(request.skillName)
+    if (updateResult.status !== 'success') {
+      this.cooldownUntilByKey.set(cacheKey, this.now() + this.cooldownMs)
+      return buildManagedSkillGlobalUpdateFallback(
+        request,
+        updateResult.status === 'timeout' ? 'update-timeout' : 'update-failed'
+      )
+    }
+
+    const postUpdate = await verifyManagedSkillPostUpdate({
+      discoverHostSkills: this.discoverHostSkills,
+      homeDir: this.homeDir(),
+      readTextFile: this.readTextFile,
+      request
     })
+    if (!postUpdate.ok) {
+      this.cooldownUntilByKey.set(cacheKey, this.now() + this.cooldownMs)
+      return buildManagedSkillGlobalUpdateFallback(request, 'update-failed')
+    }
+    const postLockHash = postUpdate.lockHash
+    this.successCache.add(
+      makeManagedSkillSuccessCacheKey({
+        appVersion: this.appVersion,
+        request,
+        currentLockHash: postLockHash
+      })
+    )
+    if (postLockHash === currentLockHash) {
+      return buildManagedSkillReadyResult(request)
+    }
+    return buildManagedSkillUpdatedResult(request)
   }
 }
 
-function readFileUtf8(path: string): Promise<string> {
-  return readFile(path, 'utf8')
+function isBackgroundUpdateDisabledFallback(result: ManagedAgentSkillEnsureResult): boolean {
+  return result.status === 'fallback' && result.reason === 'background-update-disabled'
 }
