@@ -16,6 +16,7 @@ const mockRegisterEagerPtyBuffer = vi.fn()
 const mockSubscribeToPtyData = vi.fn()
 const mockSubscribeToPtyExit = vi.fn()
 const mockSubscribeToRuntimeTerminalData = vi.fn()
+const mockBuildSetupRunnerCommand = vi.fn((path: string) => `bash '${path}'`)
 
 const SETUP: { runnerScriptPath: string; envVars: Record<string, string> } = {
   runnerScriptPath: '/tmp/orca-setup.sh',
@@ -91,7 +92,7 @@ vi.mock('@/store', () => ({
 }))
 
 vi.mock('@/lib/setup-runner', () => ({
-  buildSetupRunnerCommand: (path: string) => `bash '${path}'`
+  buildSetupRunnerCommand: mockBuildSetupRunnerCommand
 }))
 
 vi.mock('@/i18n/i18n', () => ({
@@ -152,6 +153,7 @@ describe('launchSetupBackgroundSession', () => {
     mockSubscribeToPtyData.mockReturnValue(vi.fn())
     mockSubscribeToPtyExit.mockReturnValue(vi.fn())
     mockSubscribeToRuntimeTerminalData.mockResolvedValue(vi.fn())
+    mockBuildSetupRunnerCommand.mockImplementation((path: string) => `bash '${path}'`)
     vi.stubGlobal('window', {
       api: {
         pty: { spawn: mockSpawn, kill: mockKill },
@@ -206,6 +208,21 @@ describe('launchSetupBackgroundSession', () => {
     expect(mockSubscribeToPtyData).toHaveBeenCalledWith('pty-setup', expect.any(Function))
     expect(mockSubscribeToPtyExit).toHaveBeenCalledWith('pty-setup', expect.any(Function))
     expect(result).toEqual({ tabId: 'tab-setup' })
+  })
+
+  it('wraps Windows setup commands with delayed exit-code expansion', async () => {
+    mockBuildSetupRunnerCommand.mockReturnValue('cmd.exe /c "C:\\\\setup.cmd"')
+    const { launchSetupBackgroundSession } = await import('./launch-setup-background-session')
+
+    const promise = launchSetupBackgroundSession({ worktreeId: 'wt-1', setup: SETUP })
+    await Promise.resolve()
+    completeLocalSetup(0)
+    await promise
+
+    const command = mockSpawn.mock.calls[0]?.[0]?.command
+    expect(command).toContain('cmd.exe /v:on /c')
+    expect(command).toContain('!ERRORLEVEL!')
+    expect(command).not.toContain('%ERRORLEVEL%')
   })
 
   it('passes setup envVars as env to spawn', async () => {
@@ -458,6 +475,46 @@ describe('launchSetupBackgroundSession', () => {
 
       await rejected
       expect(unsubData).toHaveBeenCalled()
+      expect(
+        mockRuntimeEnvironmentTransportCall.mock.calls.some(
+          (call) =>
+            call[0]?.method === 'terminal.close' && call[0]?.params?.terminal === 'terminal-setup'
+        )
+      ).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('times out runtime setup when the data subscription never resolves', async () => {
+    vi.useFakeTimers()
+    state.settings = { agentCmdOverrides: {}, activeRuntimeEnvironmentId: 'env-1' }
+    mockSubscribeToRuntimeTerminalData.mockReturnValue(new Promise(() => {}))
+    mockRuntimeEnvironmentTransportCall.mockImplementation(async (args) => {
+      const compatResp = createCompatibleRuntimeStatusResponseIfNeeded(args)
+      if (compatResp) {
+        return compatResp
+      }
+      if (args.method === 'terminal.create') {
+        return {
+          ok: true,
+          result: { terminal: { handle: 'terminal-setup', worktreeId: 'wt-1', title: 'Setup' } }
+        }
+      }
+      if (args.method === 'terminal.close') {
+        return { ok: true, result: { close: { closed: true } } }
+      }
+      return { ok: true, result: {} }
+    })
+    try {
+      const { launchSetupBackgroundSession } = await import('./launch-setup-background-session')
+
+      const promise = launchSetupBackgroundSession({ worktreeId: 'wt-1', setup: SETUP })
+      await vi.waitFor(() => expect(mockSubscribeToRuntimeTerminalData).toHaveBeenCalled())
+      const rejected = expect(promise).rejects.toThrow('Setup timed out after 60 minutes.')
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+
+      await rejected
       expect(
         mockRuntimeEnvironmentTransportCall.mock.calls.some(
           (call) =>

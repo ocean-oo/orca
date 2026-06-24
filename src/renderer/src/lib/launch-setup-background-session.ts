@@ -34,7 +34,7 @@ export type LaunchSetupBackgroundSessionResult = {
 
 function buildSetupCompletionCommand(command: string, token: string): string {
   if (command.trimStart().toLowerCase().startsWith('cmd.exe /c')) {
-    return `cmd.exe /c "${command.replace(/"/g, '""')} & echo ${token}:%ERRORLEVEL%"`
+    return `cmd.exe /v:on /c "${command.replace(/"/g, '""')} & echo ${token}:!ERRORLEVEL!"`
   }
   return `{ ${command}; __orca_setup_code=$?; printf '\\n${token}:%s\\n' "$__orca_setup_code"; }`
 }
@@ -143,60 +143,21 @@ export async function launchSetupBackgroundSession(
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     let handled = false
     let outputTail = ''
-    let resolveRuntime: (result: LaunchSetupBackgroundSessionResult) => void = () => {}
-    let rejectRuntime: (error: Error) => void = () => {}
+    let subscriptionReady = false
+    let cleanupPending = false
     const cleanup = (): void => {
       if (timeoutId !== null) {
         clearTimeout(timeoutId)
         timeoutId = null
       }
-      unsubscribeData()
-      useAppStore.getState().clearTabPtyId(tab.id, ptyId)
-    }
-    try {
-      unsubscribeData = await subscribeToRuntimeTerminalData(
-        store.settings,
-        ptyId,
-        `desktop:setup:${tab.id}`,
-        (chunk) => {
-          onData?.(chunk)
-          if (handled) {
-            return
-          }
-          outputTail = `${outputTail}${chunk}`.slice(-4096)
-          const code = readCompletionCode(outputTail, completionToken)
-          if (code === null) {
-            return
-          }
-          handled = true
-          cleanup()
-          if (code === 0) {
-            resolveRuntime({ tabId: tab.id })
-          } else {
-            rejectRuntime(new Error(`Setup exited with code ${code}.`))
-          }
-        }
-      )
-    } catch (error) {
-      useAppStore.getState().clearTabPtyId(tab.id, ptyId)
-      store.closeTab(tab.id, { recordInteraction: false })
-      if (runtimeTerminalHandle) {
-        try {
-          await callRuntimeRpc(
-            runtimeTarget,
-            'terminal.close',
-            { terminal: runtimeTerminalHandle },
-            { timeoutMs: 15_000 }
-          )
-        } catch {
-          // Best-effort: the setup terminal cannot be observed from this renderer.
-        }
+      if (subscriptionReady) {
+        unsubscribeData()
+      } else {
+        cleanupPending = true
       }
-      throw error
+      useAppStore.getState().clearTabPtyId(tab.id, ptyId)
     }
     return new Promise((resolve, reject) => {
-      resolveRuntime = resolve
-      rejectRuntime = reject
       timeoutId = setTimeout(() => {
         if (handled) {
           return
@@ -213,6 +174,53 @@ export async function launchSetupBackgroundSession(
         }
         reject(new Error('Setup timed out after 60 minutes.'))
       }, SETUP_WAIT_TIMEOUT_MS)
+      void subscribeToRuntimeTerminalData(
+        store.settings,
+        ptyId,
+        `desktop:setup:${tab.id}`,
+        (chunk) => {
+          onData?.(chunk)
+          if (handled) {
+            return
+          }
+          outputTail = `${outputTail}${chunk}`.slice(-4096)
+          const code = readCompletionCode(outputTail, completionToken)
+          if (code === null) {
+            return
+          }
+          handled = true
+          cleanup()
+          if (code === 0) {
+            resolve({ tabId: tab.id })
+          } else {
+            reject(new Error(`Setup exited with code ${code}.`))
+          }
+        }
+      )
+        .then((unsubscribe) => {
+          unsubscribeData = unsubscribe
+          subscriptionReady = true
+          if (cleanupPending) {
+            unsubscribeData()
+          }
+        })
+        .catch((error) => {
+          if (handled) {
+            return
+          }
+          handled = true
+          cleanup()
+          store.closeTab(tab.id, { recordInteraction: false })
+          if (runtimeTerminalHandle) {
+            void callRuntimeRpc(
+              runtimeTarget,
+              'terminal.close',
+              { terminal: runtimeTerminalHandle },
+              { timeoutMs: 15_000 }
+            ).catch(() => {})
+          }
+          reject(error)
+        })
     })
   }
 
