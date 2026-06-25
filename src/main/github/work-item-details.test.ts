@@ -283,12 +283,13 @@ describe('getWorkItemDetails', () => {
         call[0].includes('repos/acme/widgets/issues/923/timeline?per_page=100&page=7')
       )
     ).toBe(false)
-    if (!details?.timelineItems) {
-      throw new Error('Expected timeline items to be loaded')
+    const timelineItems = details?.timelineItems
+    expect(timelineItems).toHaveLength(300)
+    if (!timelineItems) {
+      throw new Error('Expected timeline items to be present')
     }
-    expect(details.timelineItems).toHaveLength(300)
-    expect(details.timelineItems.at(0)).toMatchObject({ assignee: 'assignee-3-0' })
-    expect(details.timelineItems.at(-1)).toMatchObject({ assignee: 'assignee-6-89' })
+    expect(timelineItems.at(0)).toMatchObject({ assignee: 'assignee-3-0' })
+    expect(timelineItems.at(-1)).toMatchObject({ assignee: 'assignee-6-89' })
   })
 
   it('falls back to REST + GraphQL when the collapsed issue query fails', async () => {
