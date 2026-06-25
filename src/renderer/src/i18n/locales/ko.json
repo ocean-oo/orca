@@ -822,7 +822,23 @@
         "ba8e329d92": "본 것으로 표시 해제",
         "3f79ffc8b7": "현재 리뷰어를 보려면 PR 세부정보를 엽니다.",
         "5c1c973855": "리뷰어 삭제",
-        "commentTooLarge": "Comment is too large to submit safely."
+        "commentTooLarge": "Comment is too large to submit safely.",
+        "timeline": {
+          "completed": "as completed",
+          "notPlanned": "as not planned",
+          "someone": "someone",
+          "assigned": "assigned",
+          "unassigned": "unassigned",
+          "mentioned": "mentioned this",
+          "in": "in",
+          "closed": "closed this",
+          "reopened": "reopened this",
+          "moved": "moved this",
+          "from": "from",
+          "to": "to",
+          "activity": "Activity",
+          "noActivity": "No activity yet."
+        }
       },
       "GitLabItemDialog": {
         "65e784c1f1": "다시 열기",

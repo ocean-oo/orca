@@ -1310,6 +1310,36 @@ export type PRComment = {
   isBot?: boolean
 }
 
+export type GitHubIssueTimelineTarget = {
+  type: 'issue' | 'pr'
+  number: number
+  title: string
+  url: string
+  repository?: string
+}
+
+export type GitHubIssueTimelineItem = {
+  id: string
+  event:
+    | 'assigned'
+    | 'unassigned'
+    | 'mentioned'
+    | 'cross-referenced'
+    | 'closed'
+    | 'reopened'
+    | 'moved_columns_in_project'
+  actor: string
+  actorAvatarUrl: string
+  createdAt: string
+  assignee?: string
+  source?: GitHubIssueTimelineTarget
+  closer?: GitHubIssueTimelineTarget
+  stateReason?: string | null
+  previousColumnName?: string | null
+  columnName?: string | null
+  projectName?: string | null
+}
+
 export type GitHubCommentResult = { ok: true; comment: PRComment } | { ok: false; error: string }
 
 export type IssueInfo = {
@@ -1428,6 +1458,8 @@ export type GitHubWorkItemDetails = {
   item: Omit<GitHubWorkItem, 'repoId'>
   body: string
   comments: PRComment[]
+  /** Issue-only provider activity such as assignment, references, project moves, and state changes. */
+  timelineItems?: GitHubIssueTimelineItem[]
   /** Only set for PRs. Head/base SHAs used by the Files tab to fetch per-file content. */
   headSha?: string
   baseSha?: string

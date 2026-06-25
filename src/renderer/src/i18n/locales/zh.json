@@ -822,7 +822,23 @@
         "ba8e329d92": "取消标记已查看",
         "3f79ffc8b7": "打开 PR 详情以查看当前评审人。",
         "5c1c973855": "移除评审人",
-        "commentTooLarge": "评论过长，无法安全提交。"
+        "commentTooLarge": "评论过长，无法安全提交。",
+        "timeline": {
+          "completed": "as completed",
+          "notPlanned": "as not planned",
+          "someone": "someone",
+          "assigned": "assigned",
+          "unassigned": "unassigned",
+          "mentioned": "mentioned this",
+          "in": "in",
+          "closed": "closed this",
+          "reopened": "reopened this",
+          "moved": "moved this",
+          "from": "from",
+          "to": "to",
+          "activity": "Activity",
+          "noActivity": "No activity yet."
+        }
       },
       "GitLabItemDialog": {
         "65e784c1f1": "重新打开",
