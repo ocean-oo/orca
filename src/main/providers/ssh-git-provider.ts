@@ -507,10 +507,13 @@ export class SshGitProvider implements IGitProvider {
     worktreePath: string,
     expectedUpstream: GitForkSyncExpectedUpstream
   ): Promise<GitForkSyncResult> {
-    return (await this.mux.request('git.forkSync', {
-      worktreePath,
-      ...(expectedUpstream ? { expectedUpstream } : {})
-    })) as GitForkSyncResult
+    return this.runWithDiffDedupeClear(
+      async () =>
+        (await this.mux.request('git.forkSync', {
+          worktreePath,
+          ...(expectedUpstream ? { expectedUpstream } : {})
+        })) as GitForkSyncResult
+    )
   }
 
   async fetchRemoteTrackingRef(
@@ -607,11 +610,13 @@ export class SshGitProvider implements IGitProvider {
     targetDir: string,
     options?: { base?: string; checkoutExistingBranch?: boolean; noCheckout?: boolean }
   ): Promise<void> {
-    await this.mux.request('git.addWorktree', {
-      repoPath,
-      branchName,
-      targetDir,
-      ...options
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.addWorktree', {
+        repoPath,
+        branchName,
+        targetDir,
+        ...options
+      })
     })
   }
 
@@ -620,11 +625,14 @@ export class SshGitProvider implements IGitProvider {
     force?: boolean,
     options?: { deleteBranch?: boolean; forceBranchDelete?: boolean }
   ): Promise<RemoveWorktreeResult> {
-    return ((await this.mux.request('git.removeWorktree', {
-      worktreePath,
-      force,
-      ...options
-    })) ?? {}) as RemoveWorktreeResult
+    return this.runWithDiffDedupeClear(
+      async () =>
+        ((await this.mux.request('git.removeWorktree', {
+          worktreePath,
+          force,
+          ...options
+        })) ?? {}) as RemoveWorktreeResult
+    )
   }
 
   async worktreeIsClean(
@@ -676,11 +684,15 @@ export class SshGitProvider implements IGitProvider {
     ownerWorktreePath?: string
     checkOnly?: boolean
   }): Promise<void> {
-    await this.mux.request('git.refreshLocalBaseRefForWorktreeCreate', args)
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.refreshLocalBaseRefForWorktreeCreate', args)
+    })
   }
 
   async renameCurrentBranch(worktreePath: string, newBranch: string): Promise<void> {
-    await this.mux.request('git.renameCurrentBranch', { worktreePath, newBranch })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.renameCurrentBranch', { worktreePath, newBranch })
+    })
   }
 
   async exec(

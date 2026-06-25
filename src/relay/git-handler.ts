@@ -143,6 +143,15 @@ export class GitHandler {
     this.dispatcher.onRequest('git.isGitRepo', (p) => this.isGitRepo(p))
   }
 
+  private async runWithDiffDedupeClear<T>(run: () => Promise<T>): Promise<T> {
+    this.gitDiffReadDedupe.clear()
+    try {
+      return await run()
+    } finally {
+      this.gitDiffReadDedupe.clear()
+    }
+  }
+
   private async git(
     args: string[],
     cwd: string,
@@ -609,33 +618,35 @@ export class GitHandler {
   }
 
   private async forkSync(params: Record<string, unknown>, context?: RequestContext) {
-    const worktreePath = params.worktreePath as string
-    const expectedUpstream = validateGitForkSyncExpectedUpstream(params.expectedUpstream, {
-      required: true
+    return this.runWithDiffDedupeClear(async () => {
+      const worktreePath = params.worktreePath as string
+      const expectedUpstream = validateGitForkSyncExpectedUpstream(params.expectedUpstream, {
+        required: true
+      })
+      const controller = new AbortController()
+      const abortFromContext = () => controller.abort()
+      if (context?.signal?.aborted) {
+        controller.abort()
+      } else {
+        context?.signal?.addEventListener('abort', abortFromContext, { once: true })
+      }
+      const timeout = setTimeout(() => controller.abort(), 60_000)
+      try {
+        return await syncForkDefaultBranch(
+          (args) =>
+            this.git(args, worktreePath, {
+              nonInteractive: true,
+              signal: controller.signal
+            }),
+          { expectedUpstream }
+        )
+      } catch (error) {
+        throw new Error(normalizeGitErrorMessage(error, 'push'))
+      } finally {
+        clearTimeout(timeout)
+        context?.signal?.removeEventListener('abort', abortFromContext)
+      }
     })
-    const controller = new AbortController()
-    const abortFromContext = () => controller.abort()
-    if (context?.signal?.aborted) {
-      controller.abort()
-    } else {
-      context?.signal?.addEventListener('abort', abortFromContext, { once: true })
-    }
-    const timeout = setTimeout(() => controller.abort(), 60_000)
-    try {
-      return await syncForkDefaultBranch(
-        (args) =>
-          this.git(args, worktreePath, {
-            nonInteractive: true,
-            signal: controller.signal
-          }),
-        { expectedUpstream }
-      )
-    } catch (error) {
-      throw new Error(normalizeGitErrorMessage(error, 'push'))
-    } finally {
-      clearTimeout(timeout)
-      context?.signal?.removeEventListener('abort', abortFromContext)
-    }
   }
 
   private async fetchRemoteTrackingRef(params: Record<string, unknown>) {
@@ -955,22 +966,24 @@ export class GitHandler {
   }
 
   private async renameCurrentBranch(params: Record<string, unknown>) {
-    const worktreePath = params.worktreePath
-    const newBranch = params.newBranch
-    if (typeof worktreePath !== 'string' || typeof newBranch !== 'string') {
-      throw new Error('Invalid branch rename request.')
-    }
-    if (newBranch.startsWith('-')) {
-      throw new Error('Branch name must not start with "-".')
-    }
-    try {
-      // Why: generic git.exec intentionally blocks destructive branch flags.
-      // This narrow RPC permits only the already-checked current-branch rename.
-      await this.git(['check-ref-format', '--branch', newBranch], worktreePath)
-      await this.git(['branch', '-m', newBranch], worktreePath)
-    } catch (error) {
-      throw new Error(normalizeGitErrorMessage(error))
-    }
+    return this.runWithDiffDedupeClear(async () => {
+      const worktreePath = params.worktreePath
+      const newBranch = params.newBranch
+      if (typeof worktreePath !== 'string' || typeof newBranch !== 'string') {
+        throw new Error('Invalid branch rename request.')
+      }
+      if (newBranch.startsWith('-')) {
+        throw new Error('Branch name must not start with "-".')
+      }
+      try {
+        // Why: generic git.exec intentionally blocks destructive branch flags.
+        // This narrow RPC permits only the already-checked current-branch rename.
+        await this.git(['check-ref-format', '--branch', newBranch], worktreePath)
+        await this.git(['branch', '-m', newBranch], worktreePath)
+      } catch (error) {
+        throw new Error(normalizeGitErrorMessage(error))
+      }
+    })
   }
 
   private async isGitRepo(params: Record<string, unknown>) {
@@ -1005,11 +1018,11 @@ export class GitHandler {
   }
 
   private async addWorktree(params: Record<string, unknown>) {
-    return addWorktreeOp(this.git.bind(this), params)
+    return this.runWithDiffDedupeClear(() => addWorktreeOp(this.git.bind(this), params))
   }
 
   private async removeWorktree(params: Record<string, unknown>) {
-    return removeWorktreeOp(this.git.bind(this), params)
+    return this.runWithDiffDedupeClear(() => removeWorktreeOp(this.git.bind(this), params))
   }
 
   private async worktreeIsClean(params: Record<string, unknown>) {
@@ -1017,6 +1030,8 @@ export class GitHandler {
   }
 
   private async refreshLocalBaseRefForWorktreeCreate(params: Record<string, unknown>) {
-    return refreshLocalBaseRefForWorktreeCreateOp(this.git.bind(this), params)
+    return this.runWithDiffDedupeClear(() =>
+      refreshLocalBaseRefForWorktreeCreateOp(this.git.bind(this), params)
+    )
   }
 }
