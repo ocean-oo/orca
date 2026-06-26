@@ -614,8 +614,8 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {translate(
-                      'auto.components.workspace.cleanup.WorkspaceCleanupDialog.8b74d4ea6e',
-                      'Scanning worktrees and git state, then combining open tab, terminal, live agent, and remote availability signals before suggesting deletions.'
+                      'auto.components.workspace.cleanup.WorkspaceCleanupDialog.47123d0108',
+                      'Scanning inactive workspaces. You can close this and come back.'
                     )}
                   </div>
                   <div className="mt-1 text-xs font-medium text-muted-foreground">
@@ -664,12 +664,12 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
 
             {loading && scan && hasAnyCandidates ? (
               <div className="border-b border-border bg-muted/25 px-5 py-2">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 shrink-0 animate-spin" />
                   <span>
                     {translate(
-                      'auto.components.workspace.cleanup.WorkspaceCleanupDialog.c4dc32d56c',
-                      'Scanning inactive workspaces. New rows appear here as they finish.'
+                      'auto.components.workspace.cleanup.WorkspaceCleanupDialog.9a3be9f2df',
+                      'Scanning inactive workspaces. New rows appear here as they finish. You can close this and come back.'
                     )}
                   </span>
                   <span className="font-medium text-foreground">
