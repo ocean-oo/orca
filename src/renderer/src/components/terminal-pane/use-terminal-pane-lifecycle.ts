@@ -700,12 +700,17 @@ export function useTerminalPaneLifecycle({
         // xterm's kitty CSI-u encoding for ordinary punctuation. Gate it to CJK
         // input sources so direct Japanese/Chinese punctuation works without
         // changing plain US/European terminal key handling.
-        const imePunctuationForwarder = installTerminalImePunctuationForwarder({
-          terminalElement: pane.terminal.element,
-          isComposing: () => imeCompositionTracker.isActive(),
-          sendInput: (data) => pane.terminal.input(data),
-          isEnabled: () => macCjkInputSourceTracker?.isActive() === true
-        })
+        const imePunctuationForwarder = isMac
+          ? installTerminalImePunctuationForwarder({
+              terminalElement: pane.terminal.element,
+              isComposing: () => imeCompositionTracker.isActive(),
+              sendInput: (data) => pane.terminal.input(data),
+              isEnabled: () => macCjkInputSourceTracker?.isActive() === true
+            })
+          : {
+              claimKeyEvent: () => false,
+              dispose: () => undefined
+            }
         imePunctuationForwarderDisposablesRef.current.set(pane.id, imePunctuationForwarder)
         pane.terminal.attachCustomKeyEventHandler((e) => {
           if (
