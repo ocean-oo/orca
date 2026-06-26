@@ -486,14 +486,7 @@ export class RuntimeFileCommands {
       if (fileStat.type === 'directory') {
         throw new Error('Cannot download a directory')
       }
-      const result = await provider.readFile(target.path)
-      const content = Buffer.from(result.content, result.isBinary ? 'base64' : 'utf8')
-      const chunk = content.subarray(offset, offset + length)
-      return {
-        contentBase64: chunk.toString('base64'),
-        bytesRead: chunk.byteLength,
-        eof: offset + chunk.byteLength >= content.byteLength
-      }
+      throw new Error('SSH runtime chunked download is unavailable; use the SSH download path')
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
