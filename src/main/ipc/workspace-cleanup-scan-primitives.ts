@@ -33,16 +33,20 @@ export async function mapWorkspaceCleanupWithConcurrency<T, R>(
 }
 
 export async function withWorkspaceCleanupTimeout<T>(
-  promise: Promise<T>,
+  run: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   message: string
 ): Promise<T> {
+  const controller = new AbortController()
   let timeoutId: NodeJS.Timeout | undefined
   const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs)
+    timeoutId = setTimeout(() => {
+      controller.abort()
+      reject(new Error(message))
+    }, timeoutMs)
   })
   try {
-    return await Promise.race([promise, timeoutPromise])
+    return await Promise.race([run(controller.signal), timeoutPromise])
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId)

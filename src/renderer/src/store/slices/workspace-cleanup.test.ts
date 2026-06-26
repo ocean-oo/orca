@@ -185,6 +185,83 @@ describe('workspace cleanup viewed rows', () => {
     })
   })
 
+  it('does not re-probe previously enriched rows during cumulative progress updates', async () => {
+    const pending = deferred<WorkspaceCleanupScanResult>()
+    let onProgress: ((progress: WorkspaceCleanupScanProgress) => void) | undefined
+    const terminalCandidate = makeCandidate({ worktreeId: 'repo1::/tmp/terminal' })
+    const laterCandidate = makeCandidate({ worktreeId: 'repo1::/tmp/later' })
+    const scan = vi.fn((_args, progressCallback) => {
+      onProgress = progressCallback
+      return pending.promise
+    })
+    installWorkspaceCleanupApi(scan)
+    const hasChildProcesses = vi.fn().mockResolvedValue(false)
+    const getForegroundProcess = vi.fn().mockResolvedValue('zsh')
+    ;(
+      globalThis.window as unknown as {
+        api: {
+          pty?: {
+            hasChildProcesses: typeof hasChildProcesses
+            getForegroundProcess: typeof getForegroundProcess
+          }
+        }
+      }
+    ).api.pty = { hasChildProcesses, getForegroundProcess }
+    const store = createCleanupTestStore()
+    store.setState({
+      tabsByWorktree: {
+        'repo1::/tmp/terminal': [
+          { id: 'tab-1', title: 'zsh' }
+        ] as AppState['tabsByWorktree'][string]
+      },
+      ptyIdsByTabId: { 'tab-1': ['pty-1'] }
+    } as Partial<AppState>)
+
+    const scanPromise = store.getState().scanWorkspaceCleanup()
+    onProgress?.({
+      scanId: 'scan-1',
+      scannedAt: NOW,
+      scannedWorktreeCount: 1,
+      totalWorktreeCount: 2,
+      candidates: [terminalCandidate],
+      errors: [],
+      candidateMode: 'append'
+    })
+
+    await vi.waitFor(() => {
+      expect(store.getState().workspaceCleanupProgress?.scannedWorktreeCount).toBe(1)
+    })
+    expect(hasChildProcesses).toHaveBeenCalledTimes(1)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+
+    onProgress?.({
+      scanId: 'scan-1',
+      scannedAt: NOW,
+      scannedWorktreeCount: 2,
+      totalWorktreeCount: 2,
+      candidates: [laterCandidate],
+      errors: [],
+      candidateMode: 'append'
+    })
+
+    await vi.waitFor(() => {
+      expect(store.getState().workspaceCleanupProgress?.scannedWorktreeCount).toBe(2)
+    })
+    expect(store.getState().workspaceCleanupScan?.candidates).toHaveLength(2)
+    expect(hasChildProcesses).toHaveBeenCalledTimes(1)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+
+    pending.resolve({
+      scannedAt: NOW,
+      candidates: [terminalCandidate, laterCandidate],
+      errors: []
+    })
+    await scanPromise
+
+    expect(hasChildProcesses).toHaveBeenCalledTimes(1)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+  })
+
   it('does not join broad cleanup scans with different explicit args', async () => {
     const firstPending = deferred<WorkspaceCleanupScanResult>()
     const secondPending = deferred<WorkspaceCleanupScanResult>()

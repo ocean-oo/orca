@@ -99,6 +99,7 @@ export type WorkspaceCleanupScanProgress = WorkspaceCleanupScanResult & {
   scanId: string
   scannedWorktreeCount: number
   totalWorktreeCount: number
+  candidateMode?: 'append' | 'snapshot'
 }
 
 export type WorkspaceCleanupLocalProcessResult = {

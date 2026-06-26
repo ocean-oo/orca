@@ -182,7 +182,7 @@ async function listCleanupGitWorktrees(
     return {
       provider,
       gitWorktrees: await withWorkspaceCleanupTimeout(
-        provider.listWorktrees(repo.path),
+        (signal) => provider.listWorktrees(repo.path, { signal }),
         WORKSPACE_CLEANUP_GIT_READ_TIMEOUT_MS,
         'Timed out listing SSH worktrees.'
       )
@@ -191,7 +191,7 @@ async function listCleanupGitWorktrees(
   return {
     provider: null,
     gitWorktrees: await withWorkspaceCleanupTimeout(
-      listRepoWorktrees(repo),
+      (signal) => listRepoWorktrees(repo, { signal }),
       WORKSPACE_CLEANUP_GIT_READ_TIMEOUT_MS,
       'Timed out listing worktrees.'
     )
@@ -222,11 +222,13 @@ function createProgressEmitter(
   scannedAt: number,
   options: WorkspaceCleanupScanOptions
 ): WorkspaceCleanupProgressEmitter {
-  const candidates: WorkspaceCleanupCandidate[] = []
   const errors: WorkspaceCleanupScanError[] = []
   let totalWorktreeCount = 0
   let scannedWorktreeCount = 0
-  const emit = (): void => {
+  const emit = (
+    candidates: WorkspaceCleanupCandidate[],
+    candidateMode: WorkspaceCleanupScanProgress['candidateMode'] = 'snapshot'
+  ): void => {
     if (!scanId) {
       return
     }
@@ -235,23 +237,23 @@ function createProgressEmitter(
       scannedAt,
       totalWorktreeCount,
       scannedWorktreeCount,
-      candidates: [...candidates],
-      errors: [...errors]
+      candidates,
+      errors: [...errors],
+      candidateMode
     })
   }
   return {
     addDiscovered: (count) => {
       totalWorktreeCount += count
-      emit()
+      emit([], 'append')
     },
     addCandidate: (candidate) => {
-      candidates.push(candidate)
       scannedWorktreeCount += 1
-      emit()
+      emit([candidate], 'append')
     },
     addErrors: (newErrors) => {
       appendWorkspaceCleanupItems(errors, newErrors)
-      emit()
+      emit([], 'append')
     }
   }
 }

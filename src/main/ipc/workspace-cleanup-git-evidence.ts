@@ -37,7 +37,10 @@ export async function readWorkspaceCleanupGitEvidence(
 
   try {
     status = await withWorkspaceCleanupTimeout(
-      repo.connectionId ? provider!.getStatus(worktree.path) : getStatus(worktree.path),
+      (signal) =>
+        repo.connectionId
+          ? provider!.getStatus(worktree.path, { signal })
+          : getStatus(worktree.path, { signal }),
       WORKSPACE_CLEANUP_GIT_READ_TIMEOUT_MS,
       'Timed out reading git status.'
     )
@@ -90,11 +93,15 @@ async function readUnpushedCommitCount(
 ): Promise<number | null> {
   try {
     const result = await withWorkspaceCleanupTimeout(
-      repo.connectionId
-        ? provider!.exec(['rev-list', '--count', 'HEAD', '--not', '--remotes'], worktree.path)
-        : gitExecFileAsync(['rev-list', '--count', 'HEAD', '--not', '--remotes'], {
-            cwd: worktree.path
-          }),
+      (signal) =>
+        repo.connectionId
+          ? provider!.exec(['rev-list', '--count', 'HEAD', '--not', '--remotes'], worktree.path, {
+              signal
+            })
+          : gitExecFileAsync(['rev-list', '--count', 'HEAD', '--not', '--remotes'], {
+              cwd: worktree.path,
+              signal
+            }),
       WORKSPACE_CLEANUP_GIT_READ_TIMEOUT_MS,
       'Timed out checking unpushed commits.'
     )

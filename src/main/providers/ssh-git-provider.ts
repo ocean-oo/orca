@@ -103,11 +103,15 @@ export class SshGitProvider implements IGitProvider {
     const upstreamCacheBypassArgs = options?.bypassEffectiveUpstreamNegativeCache
       ? { bypassEffectiveUpstreamNegativeCache: true }
       : {}
-    return (await this.mux.request('git.status', {
-      worktreePath,
-      ...includeIgnoredArgs,
-      ...upstreamCacheBypassArgs
-    })) as GitStatusResult
+    return (await this.mux.request(
+      'git.status',
+      {
+        worktreePath,
+        ...includeIgnoredArgs,
+        ...upstreamCacheBypassArgs
+      },
+      { signal: options?.signal }
+    )) as GitStatusResult
   }
 
   async checkIgnoredPaths(worktreePath: string, relativePaths: string[]): Promise<string[]> {
