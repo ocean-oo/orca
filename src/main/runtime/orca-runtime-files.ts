@@ -482,6 +482,10 @@ export class RuntimeFileCommands {
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
+      const fileStat = await provider.stat(target.path)
+      if (fileStat.type === 'directory') {
+        throw new Error('Cannot download a directory')
+      }
       const result = await provider.readFile(target.path)
       const content = Buffer.from(result.content, result.isBinary ? 'base64' : 'utf8')
       const chunk = content.subarray(offset, offset + length)

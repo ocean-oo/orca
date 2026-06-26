@@ -323,6 +323,8 @@ export function getAgentLabel(title: string): string | null {
   if (isGeminiTerminalTitle(title)) {
     return 'Gemini CLI'
   }
+  // Why: Pi-compatible synthetic titles can carry braille spinners, which the
+  // generic agent-title heuristics would otherwise claim first.
   const piCompatibleSyntheticAgentLabel = getPiCompatibleSyntheticAgentLabel(title)
   if (piCompatibleSyntheticAgentLabel) {
     return piCompatibleSyntheticAgentLabel
@@ -425,6 +427,8 @@ export function detectAgentStatusFromTitle(title: string): AgentStatus | null {
     return 'idle'
   }
 
+  // Why: resolve synthetic Pi/OMP permission/idle labels before the broader
+  // Pi and braille-spinner checks below.
   const piCompatibleSyntheticAgentStatus = getPiCompatibleSyntheticAgentStatus(title)
   if (piCompatibleSyntheticAgentStatus) {
     return piCompatibleSyntheticAgentStatus

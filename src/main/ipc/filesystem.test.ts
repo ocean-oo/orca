@@ -300,6 +300,7 @@ describe('registerFilesystemHandlers', () => {
         return { bytesRead: buffer.length, buffer }
       }),
       write: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined),
       close: vi.fn()
     })
     lstatMock.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
@@ -487,9 +488,9 @@ describe('registerFilesystemHandlers', () => {
   })
 
   it('streams runtime download chunks to a temp sibling then promotes on finish', async () => {
-    const write = vi.fn().mockResolvedValue(undefined)
+    const writeFile = vi.fn().mockResolvedValue(undefined)
     const close = vi.fn().mockResolvedValue(undefined)
-    openMock.mockResolvedValue({ write, close })
+    openMock.mockResolvedValue({ writeFile, close })
     showSaveDialogMock.mockResolvedValue({ canceled: false, filePath: '/downloads/report.pdf' })
     statMock.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     registerFilesystemHandlers(store as never)
@@ -521,14 +522,14 @@ describe('registerFilesystemHandlers', () => {
     const tempPath = openMock.mock.calls[0][0]
     expect(path.dirname(tempPath)).toBe(path.normalize('/downloads'))
     expect(openMock).toHaveBeenCalledWith(tempPath, 'wx')
-    expect(write).toHaveBeenCalledWith(Buffer.from('hello'))
+    expect(writeFile).toHaveBeenCalledWith(Buffer.from('hello'))
     expect(close).toHaveBeenCalled()
     expect(renameMock).toHaveBeenCalledWith(tempPath, '/downloads/report.pdf')
   })
 
   it('cleans up a runtime download temp file on cancel', async () => {
     const close = vi.fn().mockResolvedValue(undefined)
-    openMock.mockResolvedValue({ write: vi.fn(), close })
+    openMock.mockResolvedValue({ writeFile: vi.fn(), close })
     showSaveDialogMock.mockResolvedValue({ canceled: false, filePath: '/downloads/report.pdf' })
     statMock.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     registerFilesystemHandlers(store as never)

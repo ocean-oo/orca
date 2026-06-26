@@ -176,7 +176,11 @@ type DownloadSession = {
   tempPath: string
   destinationExisted: boolean
   handle: FileHandle
+  cleanupTimer: ReturnType<typeof setTimeout>
+  senderId: number
 }
+
+const DOWNLOAD_SESSION_TTL_MS = 30 * 60 * 1000
 
 function createSiblingTransferPath(destinationPath: string, suffix: string): string {
   return join(dirname(destinationPath), `.${randomUUID()}.${suffix}`)
@@ -456,11 +460,20 @@ export function registerFilesystemHandlers(
       return null
     }
     downloadSessions.delete(transferId)
+    clearTimeout(session.cleanupTimer)
     await session.handle.close().catch(() => {})
     if (cleanupTemp) {
       await cleanupLocalTransferPath(session.tempPath)
     }
     return session
+  }
+
+  function cleanupDownloadSessionsForSender(senderId: number): void {
+    for (const [transferId, session] of Array.from(downloadSessions)) {
+      if (session.senderId === senderId) {
+        void closeDownloadSession(transferId, true)
+      }
+    }
   }
 
   // ─── Filesystem ─────────────────────────────────────────
@@ -653,12 +666,22 @@ export function registerFilesystemHandlers(
       const transferId = randomUUID()
       try {
         const handle = await open(tempPath, 'wx')
+        const senderId = typeof event.sender.id === 'number' ? event.sender.id : Number.NaN
+        const cleanupTimer = setTimeout(() => {
+          void closeDownloadSession(transferId, true)
+        }, DOWNLOAD_SESSION_TTL_MS)
+        if (typeof cleanupTimer.unref === 'function') {
+          cleanupTimer.unref()
+        }
         downloadSessions.set(transferId, {
           destinationPath,
           tempPath,
           destinationExisted: existed,
-          handle
+          handle,
+          cleanupTimer,
+          senderId
         })
+        event.sender.once?.('destroyed', () => cleanupDownloadSessionsForSender(senderId))
         return { canceled: false, transferId, destinationPath }
       } catch (error) {
         await cleanupLocalTransferPath(tempPath)
@@ -679,7 +702,7 @@ export function registerFilesystemHandlers(
       if (!session) {
         throw new Error('Download session not found')
       }
-      await session.handle.write(Buffer.from(contentBase64, 'base64'))
+      await session.handle.writeFile(Buffer.from(contentBase64, 'base64'))
       return { ok: true }
     }
   )
