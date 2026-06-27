@@ -897,6 +897,7 @@ export default function SessionScreen() {
   const {
     branch: prBranch,
     headSha: prHeadSha,
+    status: prStatus,
     isGithubRepo: prIsGithubRepo,
     repoLoaded: prRepoContextLoaded,
     loaded: prContextLoaded
@@ -5126,6 +5127,7 @@ export default function SessionScreen() {
               connState={connState}
               branch={prBranch}
               headSha={prHeadSha}
+              gitStatus={prStatus}
               isGithubRepo={prIsGithubRepo}
               branchContextLoaded={prContextLoaded && prRepoContextLoaded}
               availableWidth={sessionContentRowWidth}

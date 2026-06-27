@@ -3,7 +3,15 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import { GitPullRequestArrow, Link2, RefreshCw } from 'lucide-react-native'
 import { colors } from '../../theme/mobile-theme'
 import type { RpcClient } from '../../transport/rpc-client'
-import { resolveMobilePrPrefill, type MobilePrPrefill } from '../../source-control/mobile-pr-create'
+import {
+  getMobilePrCreateBlockMessage,
+  type MobilePrPrefill
+} from '../../source-control/mobile-pr-create'
+import type { MobileGitStatusResult } from '../../source-control/mobile-git-status'
+import {
+  mobileHostedReviewCreateIntentProgressMessage,
+  prepareMobileHostedReviewCreateIntent
+} from '../../source-control/mobile-hosted-review-create-intent'
 import { fetchWorktreeLinkedPR } from '../../source-control/mobile-pr-link'
 import { openMobilePrUrl } from '../MobilePrComposeSheet'
 import { MobilePrComposeForm } from './MobilePrComposeForm'
@@ -14,6 +22,7 @@ type Props = {
   client: RpcClient | null
   worktreeId: string
   gitBranch: string | null
+  gitStatus: MobileGitStatusResult | null
   // Refetches the sidebar after create or an explicit empty-state refresh.
   onCreated: () => void
 }
@@ -23,7 +32,13 @@ type Mode = 'choose' | 'create' | 'link'
 // Empty state for a branch with no PR: create a new PR, or link an existing one
 // (the no-PR surface is the natural home for linking — desktop's link entry lives
 // on its PR card, but on mobile this is where a user lands with nothing linked).
-export function PrSidebarCreateEmptyState({ client, worktreeId, gitBranch, onCreated }: Props) {
+export function PrSidebarCreateEmptyState({
+  client,
+  worktreeId,
+  gitBranch,
+  gitStatus,
+  onCreated
+}: Props) {
   const [prefill, setPrefill] = useState<MobilePrPrefill | null>(null)
   const [mode, setMode] = useState<Mode>('choose')
   const [loading, setLoading] = useState(false)
@@ -61,17 +76,27 @@ export function PrSidebarCreateEmptyState({ client, worktreeId, gitBranch, onCre
     setCreateWarning(null)
     setLoading(true)
     try {
-      // Git-status fields are best-effort here (the sidebar has no working-tree
-      // state); base/title/body come from host eligibility regardless, and create
-      // does the authoritative branch-state validation.
-      const resolved = await resolveMobilePrPrefill(client, worktreeId, {
-        branch: gitBranch ?? undefined,
-        title: gitBranch ?? '',
-        hasUncommittedChanges: false,
-        hasUpstream: true,
-        ahead: 1,
-        behind: 0
+      if (!gitBranch) {
+        setCreateWarning('Check out a branch before creating a pull request.')
+        return
+      }
+      const prepared = await prepareMobileHostedReviewCreateIntent(client, worktreeId, {
+        branch: gitBranch,
+        title: gitBranch,
+        status: gitStatus,
+        onProgress: (progress) =>
+          setCreateWarning(mobileHostedReviewCreateIntentProgressMessage(progress))
       })
+      if (!prepared.ok) {
+        setCreateWarning(prepared.error)
+        return
+      }
+      const resolved = prepared.prefill
+      const blockedMessage = getMobilePrCreateBlockMessage(resolved)
+      if (blockedMessage) {
+        setCreateWarning(blockedMessage)
+        return
+      }
       setPrefill(resolved)
       setMode('create')
     } catch {

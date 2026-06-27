@@ -3,10 +3,10 @@ import { useRouter } from 'expo-router'
 import type { RpcClient } from '../transport/rpc-client'
 import { triggerError, triggerSuccess } from '../platform/haptics'
 import type { MobilePrPrefill } from './mobile-pr-create'
-import { buildOpenPrPrefill, readFreshGitStatus } from './mobile-open-pr-prefill'
 import { useMobileCommitMessageGeneration } from './use-mobile-commit-message-generation'
 import { useMobileSourceControlCommitRunners } from './use-mobile-source-control-commit-runners'
 import { useMobileSourceControlActionSheetRunners } from './use-mobile-source-control-action-sheet-runners'
+import { useMobileOpenPrSheetRunner } from './use-mobile-open-pr-sheet-runner'
 import type { RuntimeGitLocalBranches } from '../../../src/shared/runtime-types'
 import type { MobileGitStatusResult } from './mobile-git-status'
 import type { LoadStatusOptions } from './mobile-source-control-screen-state'
@@ -184,46 +184,20 @@ export function useMobileSourceControlRunners(params: Params) {
     setActionError
   })
 
-  const openPrSheet = useCallback(
-    async (pushFirst: boolean) => {
-      setShowActionSheet(false)
-      let effectiveStatus = status
-      if (pushFirst) {
-        const pushed = await runGitWorkflow('push-create-pr', async () => {
-          await sendGitRequest<unknown>('git.push')
-        })
-        if (!pushed || !mountedRef.current) {
-          return
-        }
-        // Why: the captured `status` predates the push, so its upstream/ahead data is
-        // stale; read fresh git.status so the prefill reflects the just-pushed branch.
-        if (client) {
-          effectiveStatus = await readFreshGitStatus(worktreeId, status, sendGitRequest)
-          if (!mountedRef.current) {
-            return
-          }
-        }
-      }
-      const prefill = await buildOpenPrPrefill(client, worktreeId, effectiveStatus, branchLabel)
-      if (!mountedRef.current) {
-        return
-      }
-      setPrPrefill(prefill)
-      setShowPrSheet(true)
-    },
-    [
-      branchLabel,
-      client,
-      mountedRef,
-      runGitWorkflow,
-      sendGitRequest,
-      setPrPrefill,
-      setShowActionSheet,
-      setShowPrSheet,
-      status,
-      worktreeId
-    ]
-  )
+  const openPrSheet = useMobileOpenPrSheetRunner({
+    client,
+    worktreeId,
+    status,
+    branchLabel,
+    commitMessage,
+    mountedRef,
+    runGitWorkflow,
+    setActionError,
+    setCommitMessage,
+    setShowActionSheet,
+    setPrPrefill,
+    setShowPrSheet
+  })
 
   const openBranchPicker = useCallback(() => {
     setShowActionSheet(false)

@@ -8,12 +8,15 @@ import {
   TriangleAlert,
   X
 } from 'lucide-react-native'
-import type { HostedReviewProvider } from '../../../../src/shared/hosted-review'
 import { colors } from '../../theme/mobile-theme'
 import type { RpcClient } from '../../transport/rpc-client'
 import type { RpcSuccess } from '../../transport/types'
 import { triggerError, triggerSuccess } from '../../platform/haptics'
-import { createMobilePr } from '../../source-control/mobile-pr-create'
+import {
+  createMobilePr,
+  shouldPushBeforeMobilePrCreate,
+  type MobilePrPrefill
+} from '../../source-control/mobile-pr-create'
 import { hostedReviewCopy } from '../../source-control/hosted-review-copy'
 import {
   getPrComposeDisabledReason,
@@ -22,12 +25,7 @@ import {
 import { MobilePrBasePicker } from '../MobilePrBasePicker'
 import { mobilePrComposeFormStyles as styles } from './mobile-pr-compose-form-styles'
 
-export type PrComposePrefill = {
-  base: string
-  title: string
-  body: string
-  provider: HostedReviewProvider
-}
+export type PrComposePrefill = MobilePrPrefill
 
 type Props = {
   client: RpcClient | null
@@ -61,6 +59,7 @@ export function MobilePrComposeForm({
   const [generating, setGenerating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const pushBeforeCreate = shouldPushBeforeMobilePrCreate(prefill)
 
   const generate = useCallback(async () => {
     if (!client || generating) {
@@ -128,13 +127,18 @@ export function MobilePrComposeForm({
         ...(head ? { head } : {}),
         title,
         body,
-        draft
+        draft,
+        pushBeforeCreate
       })
       if (outcome.ok) {
         triggerSuccess()
-        const warning = outcome.linkError
-          ? `${copy.titleLabel} created, but Orca could not refresh it yet.`
-          : undefined
+        const warning = outcome.existing
+          ? outcome.number
+            ? `${copy.titleLabel} #${outcome.number} is already open.`
+            : `${copy.titleLabel} is already open.`
+          : outcome.linkError
+            ? `${copy.titleLabel} created, but Orca could not refresh it yet.`
+            : undefined
         if (warning) {
           setError(warning)
         }
@@ -156,6 +160,7 @@ export function MobilePrComposeForm({
     head,
     onCreated,
     prefill.provider,
+    pushBeforeCreate,
     submitting,
     title,
     worktreeId
@@ -279,7 +284,13 @@ export function MobilePrComposeForm({
           <ReviewIcon size={14} color={colors.bgBase} strokeWidth={2.2} />
         )}
         <Text style={styles.submitText}>
-          {draft ? `Create draft ${copy.shortLabel}` : `Create ${copy.shortLabel}`}
+          {pushBeforeCreate
+            ? draft
+              ? `Push & create draft ${copy.shortLabel}`
+              : `Push & create ${copy.shortLabel}`
+            : draft
+              ? `Create draft ${copy.shortLabel}`
+              : `Create ${copy.shortLabel}`}
         </Text>
       </Pressable>
     </View>
