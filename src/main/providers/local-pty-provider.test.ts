@@ -61,6 +61,7 @@ vi.mock('../wsl', () => ({
 }))
 
 import { LocalPtyProvider } from './local-pty-provider'
+import { POWERLEVEL10K_WIZARD_DISABLE_ENV } from '../pty/powerlevel10k-wizard-env'
 
 describe('LocalPtyProvider', () => {
   let provider: LocalPtyProvider
@@ -75,13 +76,16 @@ describe('LocalPtyProvider', () => {
   }
   let exitCb: ((info: { exitCode: number }) => void) | undefined
   let origShell: string | undefined
+  let origPowerlevelWizardDisable: string | undefined
   let origPlatform: PropertyDescriptor | undefined
 
   beforeEach(() => {
     origPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     origShell = process.env.SHELL
+    origPowerlevelWizardDisable = process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
     process.env.SHELL = '/bin/zsh'
+    delete process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
 
     existsSyncMock.mockReturnValue(true)
     statSyncMock.mockReturnValue({ isDirectory: () => true, mode: 0o755 })
@@ -127,6 +131,11 @@ describe('LocalPtyProvider', () => {
       delete process.env.SHELL
     } else {
       process.env.SHELL = origShell
+    }
+    if (origPowerlevelWizardDisable === undefined) {
+      delete process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD
+    } else {
+      process.env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD = origPowerlevelWizardDisable
     }
   })
 
@@ -196,6 +205,35 @@ describe('LocalPtyProvider', () => {
 
       const spawnCall = spawnMock.mock.calls.at(-1)!
       expect(spawnCall[2].env.CUSTOM_VAR).toBe('custom-value')
+    })
+
+    it('suppresses the first-run Powerlevel10k wizard for spawned terminals', async () => {
+      await provider.spawn({ cols: 80, rows: 24 })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD).toBe('true')
+    })
+
+    it('preserves an explicit Powerlevel10k wizard env value', async () => {
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        env: { POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD: 'already-set' }
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD).toBe('already-set')
+    })
+
+    it('honors requests to delete the Powerlevel10k wizard env value', async () => {
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        envToDelete: ['POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD']
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[2].env.POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD).toBeUndefined()
     })
 
     it('uses fallback shell readiness when startup-command shell spawn falls back', async () => {
@@ -305,6 +343,23 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.PATH.split(':')[0]).toBe('/tmp/orca-agent-teams-bin')
       expect(spawnCall[2].env.TERM_PROGRAM).toBeUndefined()
       expect(spawnCall[2].env.ORCA_ATTRIBUTION_SHIM_DIR).toBeUndefined()
+    })
+
+    it('uses shell wrapper when MiMo home must survive shell startup', async () => {
+      provider.configure({
+        buildSpawnEnv: (_id, env) => {
+          env.MIMOCODE_HOME = '/tmp/orca-mimocode-overlay'
+          env.ORCA_MIMOCODE_HOME = '/tmp/orca-mimocode-overlay'
+          return env
+        }
+      })
+
+      await provider.spawn({ cols: 80, rows: 24 })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[1]).toEqual(['-l'])
+      expect(spawnCall[2].env.ZDOTDIR).toMatch(/shell-ready[\\/]zsh/)
+      expect(spawnCall[2].env.ORCA_SHELL_READY_MARKER).toBe('0')
     })
 
     it('does not pass a Windows Codex home into WSL terminals', async () => {
@@ -489,7 +544,25 @@ describe('LocalPtyProvider', () => {
       const spawnCall = spawnMock.mock.calls.at(-1)!
       expect(spawnCall[0]).toBe('wsl.exe')
       expect(spawnCall[2].env.ORCA_TERMINAL_HANDLE).toBe('term_wsl')
-      expect(spawnCall[2].env.WSLENV).toBe('ORCA_TERMINAL_HANDLE/u')
+      expect(spawnCall[2].env.WSLENV).toBe(
+        'ORCA_TERMINAL_HANDLE/u:POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
+      )
+    })
+
+    it('does not mark deleted Powerlevel10k wizard env for WSL import', async () => {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\repo',
+        envToDelete: [POWERLEVEL10K_WIZARD_DISABLE_ENV]
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[0]).toBe('wsl.exe')
+      expect(spawnCall[2].env[POWERLEVEL10K_WIZARD_DISABLE_ENV]).toBeUndefined()
+      expect(spawnCall[2].env.WSLENV ?? '').not.toContain(POWERLEVEL10K_WIZARD_DISABLE_ENV)
     })
 
     it('does not inherit parent Orca pane identity when caller omits pane env', async () => {

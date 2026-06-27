@@ -36,6 +36,10 @@ import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { addWslEnvKeys } from '../wsl-env'
 import {
+  POWERLEVEL10K_WIZARD_DISABLE_ENV,
+  seedPowerlevel10kWizardEnv
+} from '../pty/powerlevel10k-wizard-env'
+import {
   isWindowsGitBashShellPath,
   resolveGitBashPath,
   resolveWindowsGitBashShellPath
@@ -533,12 +537,21 @@ export class LocalPtyProvider implements IPtyProvider {
         delete finalEnv.ORCA_CODEX_HOME
       }
     }
+    seedPowerlevel10kWizardEnv(finalEnv, { envToDelete: args.envToDelete })
+    if (
+      finalEnv[POWERLEVEL10K_WIZARD_DISABLE_ENV] !== undefined &&
+      process.platform === 'win32' &&
+      pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
+    ) {
+      addWslEnvKeys(finalEnv, [POWERLEVEL10K_WIZARD_DISABLE_ENV])
+    }
     if (!wslInfo && process.platform !== 'win32') {
       // Why: OpenCode/Codex path restoration and OMP's typed-command status
       // wrapper need shell-ready code after user startup files run.
       const needsNoMarkerWrapper =
         finalEnv.ORCA_ATTRIBUTION_SHIM_DIR ||
         finalEnv.ORCA_OPENCODE_CONFIG_DIR ||
+        finalEnv.ORCA_MIMOCODE_HOME ||
         finalEnv.ORCA_OMP_STATUS_EXTENSION ||
         finalEnv.ORCA_CODEX_HOME ||
         finalEnv.ORCA_AGENT_TEAMS_SHIM_DIR
