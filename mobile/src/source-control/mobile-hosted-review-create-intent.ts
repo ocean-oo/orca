@@ -22,7 +22,7 @@ export type MobileHostedReviewCreateIntentOutcome =
       status: MobileGitStatusResult | null
       committed: boolean
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string; committed?: boolean; status?: MobileGitStatusResult | null }
 
 type PrepareInput = {
   branch: string
@@ -133,7 +133,7 @@ async function ensureLocalChangesCommitted(
   currentStatus: MobileGitStatusResult | null
 ): Promise<
   | { ok: true; status: MobileGitStatusResult | null; committed: boolean }
-  | { ok: false; error: string }
+  | { ok: false; error: string; committed?: boolean; status?: MobileGitStatusResult | null }
 > {
   if ((currentStatus?.entries.length ?? 0) === 0) {
     return { ok: true, status: currentStatus, committed: false }
@@ -182,7 +182,12 @@ async function ensureLocalChangesCommitted(
   }
   currentStatus = await readStatus(client, worktreeId)
   if (!branchStillMatches(input.branch, currentStatus)) {
-    return { ok: false, error: 'Branch changed while preparing the pull request.' }
+    return {
+      ok: false,
+      error: 'Branch changed while preparing the pull request.',
+      committed: true,
+      status: currentStatus
+    }
   }
   return { ok: true, status: currentStatus, committed: true }
 }
@@ -260,14 +265,19 @@ export async function prepareMobileHostedReviewCreateIntent(
       status: currentStatus
     })
     if (!remote.ok) {
-      return remote
+      return { ...remote, committed: committed.committed, status: currentStatus }
     }
     if (!remote.ran) {
       break
     }
     currentStatus = await readStatus(client, worktreeId)
     if (!branchStillMatches(input.branch, currentStatus)) {
-      return { ok: false, error: 'Branch changed while preparing the pull request.' }
+      return {
+        ok: false,
+        error: 'Branch changed while preparing the pull request.',
+        committed: committed.committed,
+        status: currentStatus
+      }
     }
     prefill = await resolvePrefillFromStatus(
       client,
