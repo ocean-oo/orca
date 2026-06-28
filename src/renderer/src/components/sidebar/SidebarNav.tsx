@@ -174,7 +174,7 @@ const SidebarNav = React.memo(function SidebarNav() {
         <span className="min-w-0 flex-1 truncate">
           {translate('auto.components.sidebar.SidebarNav.80611a8b10', 'Search')}
         </span>
-        <span className="pointer-events-none ml-1.5 hidden shrink-0 items-center group-hover:inline-flex group-focus-within:inline-flex">
+        <span className="pointer-events-none ml-1.5 hidden shrink-0 items-center gap-1.5 group-hover:inline-flex group-focus-within:inline-flex">
           {worktreePaletteShortcutCombos.map((combo) => (
             <ShortcutKeyCombo
               key={combo.keys.join('-')}
