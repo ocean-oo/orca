@@ -1109,6 +1109,47 @@ describe('agent completion coordinator', () => {
     )
   })
 
+  it('suppresses the attention dispatch when shouldSuppressHookCompletion matches', () => {
+    // Why: guards the merge seam where the suppressor must short-circuit before
+    // the attention path, so auto-approved Codex pauses never notify.
+    const dispatchCompletion = vi.fn()
+    const dispatchAttention = vi.fn()
+    const coordinator = createAgentCompletionCoordinator({
+      paneKey: 'tab-1:leaf-1',
+      getPtyId: () => 'pty-1',
+      getSettings: () => null,
+      inspectProcess: vi.fn(),
+      dispatchCompletion,
+      dispatchAttention,
+      isLive: () => true,
+      shouldSuppressHookCompletion: (payload) =>
+        payload.state === 'waiting' || payload.state === 'blocked'
+    })
+
+    const turn = {
+      prompt: 'implement notifications',
+      agentType: 'codex' as const
+    }
+
+    coordinator.observeHookStatus({ state: 'working', ...turn })
+    coordinator.observeHookStatus({
+      state: 'waiting',
+      ...turn,
+      toolName: 'exec_command',
+      toolInput: 'git status'
+    })
+    coordinator.observeHookStatus({
+      state: 'blocked',
+      ...turn,
+      toolName: 'exec_command',
+      toolInput: 'rm file'
+    })
+    vi.advanceTimersByTime(HOOK_DONE_QUIET_MS)
+
+    expect(dispatchAttention).not.toHaveBeenCalled()
+    expect(dispatchCompletion).not.toHaveBeenCalled()
+  })
+
   it('does not dispatch completion when a blocked state arrives mid-turn', () => {
     const dispatchCompletion = vi.fn()
     const dispatchAttention = vi.fn()
