@@ -267,6 +267,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     electronHttp1CompatibilityMode: false,
     openLinksInApp: false,
     openLinksInAppPreferencePrompted: false,
+    openAgentTabsInChatByDefault: false,
+    experimentalNativeChat: false,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     rightSidebarOpenByDefault: true,
     showGitIgnoredFiles: true,

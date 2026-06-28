@@ -1366,6 +1366,51 @@ describe('Store', () => {
     expect(reloaded.listAutomations()[0].reuseSession).toBe(false)
   })
 
+  it('persists setup decisions only for new-per-run automations', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+
+    const newPerRun = store.createAutomation({
+      name: 'Fresh',
+      prompt: 'Run checks',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'new_per_run',
+      setupDecision: 'run',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-13T00:00:00Z').getTime()
+    })
+    const existing = store.createAutomation({
+      name: 'Reuse',
+      prompt: 'Summarize changes',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      setupDecision: 'run',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-13T00:00:00Z').getTime()
+    })
+
+    expect(newPerRun.setupDecision).toBe('run')
+    expect(existing.setupDecision).toBeUndefined()
+
+    const skipped = store.updateAutomation(newPerRun.id, { setupDecision: 'skip' })
+    const switchedToExisting = store.updateAutomation(newPerRun.id, {
+      workspaceMode: 'existing',
+      workspaceId: 'wt1'
+    })
+
+    expect(skipped.setupDecision).toBe('skip')
+    expect(switchedToExisting.setupDecision).toBeUndefined()
+    expect(
+      store.updateAutomation(existing.id, { workspaceMode: 'new_per_run', setupDecision: 'run' })
+        .setupDecision
+    ).toBe('run')
+  })
+
   it('derives automation source and run contexts from the project host setup', async () => {
     const store = await createStore()
     store.addRepo(
@@ -8670,5 +8715,87 @@ describe('Store host-partitioned workspace sessions', () => {
     expect(store.getWorkspaceSession('runtime:good').activeRepoId).toBe('good-repo')
     // Bad partition collapses to defaults rather than poisoning the map.
     expect(store.getWorkspaceSession('runtime:bad').activeRepoId).toBeNull()
+  })
+})
+
+describe('Store native-chat tab viewMode persistence', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  // Why: a tab persisted in 'chat' must restore to 'chat' (R1), and a tab
+  // persisted before the field existed must default to 'terminal' — i.e. the
+  // field is absent on restore — so older sessions stay backward-compatible.
+  it('round-trips viewMode for unified tabs and defaults legacy tabs to terminal', async () => {
+    const WORKTREE = 'repo1::/worktree'
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [makeRepo()],
+      worktreeMeta: {},
+      settings: {},
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {
+        activeRepoId: 'r1',
+        activeWorktreeId: WORKTREE,
+        activeTabId: 'chat-tab',
+        tabsByWorktree: {},
+        terminalLayoutsByTabId: {},
+        sleepingAgentSessionsByPaneKey: {},
+        unifiedTabs: {
+          [WORKTREE]: [
+            {
+              id: 'chat-tab',
+              entityId: 'chat-tab',
+              groupId: 'g1',
+              worktreeId: WORKTREE,
+              contentType: 'terminal',
+              label: 'Agent',
+              customLabel: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: 1,
+              viewMode: 'chat'
+            },
+            {
+              // Legacy tab persisted before viewMode existed — no field at all.
+              id: 'legacy-tab',
+              entityId: 'legacy-tab',
+              groupId: 'g1',
+              worktreeId: WORKTREE,
+              contentType: 'terminal',
+              label: 'Legacy',
+              customLabel: null,
+              color: null,
+              sortOrder: 1,
+              createdAt: 2
+            }
+          ]
+        },
+        tabGroups: {
+          [WORKTREE]: [
+            {
+              id: 'g1',
+              worktreeId: WORKTREE,
+              activeTabId: 'chat-tab',
+              tabOrder: ['chat-tab', 'legacy-tab']
+            }
+          ]
+        }
+      }
+    })
+
+    const store = await createStore()
+    const restored = store.getWorkspaceSession().unifiedTabs?.[WORKTREE] ?? []
+    const chatTab = restored.find((tab) => tab.id === 'chat-tab')
+    const legacyTab = restored.find((tab) => tab.id === 'legacy-tab')
+
+    expect(chatTab?.viewMode).toBe('chat')
+    // Missing on a legacy tab; renderer hydration treats absent as 'terminal'.
+    expect(legacyTab?.viewMode).toBeUndefined()
   })
 })

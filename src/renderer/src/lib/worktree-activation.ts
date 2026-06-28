@@ -1,7 +1,9 @@
 /* eslint-disable max-lines -- Why: worktree activation is a single ordered flow spanning startup, setup, issue commands, and default tabs; splitting it would obscure sequencing guarantees. */
 import type {
   FolderWorkspace,
+  GlobalSettings,
   SetupSplitDirection,
+  Tab,
   TuiAgent,
   Worktree,
   WorktreeDefaultTabsLaunch,
@@ -55,6 +57,7 @@ import {
   getFolderWorkspacePathStatusTitle
 } from './folder-workspace-path-status'
 import { toast } from 'sonner'
+import { initialAgentTabViewModeProps } from './native-chat-initial-view-mode'
 
 /** Telemetry payload threaded from the launch site to `pty:spawn`. Main
  *  fires `agent_started` only after the spawn succeeds — see
@@ -93,6 +96,8 @@ type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
       pendingActivationSpawn?: boolean
       launchAgent?: TuiAgent
       recordInteraction?: boolean
+      viewMode?: Tab['viewMode']
+      activate?: boolean
     }
   ) => { id: string }
   setActiveTab: (tabId: string) => void
@@ -111,6 +116,7 @@ type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
       env?: Record<string, string>
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
+      launchAgent?: TuiAgent
       initialAgentStatus?: { agent: TuiAgent; prompt: string }
       showSessionRestoredBanner?: boolean
       telemetry?: AgentStartedTelemetry
@@ -124,6 +130,7 @@ type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
     tabId: string,
     startup: { command: string; env?: Record<string, string> }
   ) => void
+  settings?: Pick<GlobalSettings, 'experimentalNativeChat' | 'openAgentTabsInChatByDefault'> | null
 }
 
 /**
@@ -436,7 +443,8 @@ export function ensureWorktreeHasInitialTerminal(
   startup?: WorktreeStartupPayload,
   setup?: WorktreeSetupLaunch,
   issueCommand?: IssueCommandLaunch,
-  defaultTabs?: WorktreeDefaultTabsLaunch
+  defaultTabs?: WorktreeDefaultTabsLaunch,
+  opts?: { activateCreatedTabs?: boolean }
 ): string | null {
   const { renderableTabCount } = store.reconcileWorktreeTabModel(worktreeId)
   // Why: activation can now restore editor- or browser-only worktrees from the
@@ -479,7 +487,8 @@ export function ensureWorktreeHasInitialTerminal(
         existingTerminalTabId,
         setup,
         issueCommand,
-        wrappedSetupCommandStr
+        wrappedSetupCommandStr,
+        opts
       )
       return existingTerminalTabId
     }
@@ -497,7 +506,8 @@ export function ensureWorktreeHasInitialTerminal(
         existingTerminalTabId,
         setup,
         issueCommand,
-        wrappedSetupCommandStr
+        wrappedSetupCommandStr,
+        opts
       )
       return existingTerminalTabId
     }
@@ -511,7 +521,8 @@ export function ensureWorktreeHasInitialTerminal(
     setup,
     issueCommand,
     defaultTabs,
-    wrappedSetupCommandStr
+    wrappedSetupCommandStr,
+    opts
   )
   if (templatedTabId) {
     return templatedTabId
@@ -523,9 +534,9 @@ export function ensureWorktreeHasInitialTerminal(
   // "New Tab" actions (handleNewTab in Terminal.tsx) do not set the flag.
   //
   // Why: the initial terminal can be seeded with a coding agent (new-workspace
-  // flow, or reopening an empty worktree created with an agent). The startup
-  // payload may carry explicit launchAgent; older flows only carry telemetry's
-  // agent_kind, so reverse that back to a TuiAgent when needed for the icon.
+  // flow, or reopening an empty worktree created with an agent). Stamp that on
+  // the tab before hooks arrive so native chat and provider chrome can resolve
+  // the agent immediately; sequenced setup keeps the same launch metadata.
   const launchAgent =
     sequencedStartup?.launchAgent ??
     (sequencedStartup?.telemetry
@@ -533,9 +544,14 @@ export function ensureWorktreeHasInitialTerminal(
       : undefined)
   const terminalTab = store.createTab(worktreeId, undefined, undefined, {
     pendingActivationSpawn: true,
-    ...(launchAgent ? { launchAgent } : {})
+    ...(launchAgent
+      ? { launchAgent, ...initialAgentTabViewModeProps(store.settings ?? null) }
+      : {}),
+    ...(opts?.activateCreatedTabs === false ? { activate: false } : {})
   })
-  store.setActiveTab(terminalTab.id)
+  if (opts?.activateCreatedTabs !== false) {
+    store.setActiveTab(terminalTab.id)
+  }
 
   // Why: the new-workspace flow can seed the first terminal with a selected
   // coding agent and user prompt. Queue that startup command on the initial
@@ -550,7 +566,8 @@ export function ensureWorktreeHasInitialTerminal(
     terminalTab.id,
     setup,
     issueCommand,
-    wrappedSetupCommandStr
+    wrappedSetupCommandStr,
+    opts
   )
 
   return terminalTab.id
@@ -563,7 +580,8 @@ function applyDefaultTerminalTabs(
   setup: WorktreeSetupLaunch | undefined,
   issueCommand: IssueCommandLaunch | undefined,
   defaultTabs: WorktreeDefaultTabsLaunch | undefined,
-  wrappedSetupCommandStr?: string
+  wrappedSetupCommandStr: string | undefined,
+  opts: { activateCreatedTabs?: boolean } | undefined
 ): string | null {
   if (!defaultTabs || store.defaultTerminalTabsAppliedByWorktreeId[worktreeId]) {
     return null
@@ -575,9 +593,20 @@ function applyDefaultTerminalTabs(
 
   let firstTabId: string | null = null
   for (const [index, template] of defaultTabs.tabs.entries()) {
+    const isStartupTab = index === 0 && startup !== undefined
+    const launchAgent =
+      isStartupTab && startup?.launchAgent
+        ? startup.launchAgent
+        : isStartupTab && startup?.telemetry
+          ? (agentKindToTuiAgent(startup.telemetry.agent_kind) ?? undefined)
+          : undefined
     const tab = store.createTab(worktreeId, undefined, undefined, {
       pendingActivationSpawn: true,
-      recordInteraction: false
+      recordInteraction: false,
+      ...(launchAgent
+        ? { launchAgent, ...initialAgentTabViewModeProps(store.settings ?? null) }
+        : {}),
+      ...(opts?.activateCreatedTabs === false ? { activate: false } : {})
     })
     if (index === 0) {
       firstTabId = tab.id
@@ -597,7 +626,9 @@ function applyDefaultTerminalTabs(
   if (!firstTabId) {
     return null
   }
-  store.setActiveTab(firstTabId)
+  if (opts?.activateCreatedTabs !== false) {
+    store.setActiveTab(firstTabId)
+  }
   if (startup) {
     store.queueTabStartupCommand(firstTabId, startup)
   }
@@ -607,7 +638,8 @@ function applyDefaultTerminalTabs(
     firstTabId,
     setup,
     issueCommand,
-    wrappedSetupCommandStr
+    wrappedSetupCommandStr,
+    opts
   )
   return firstTabId
 }
@@ -618,7 +650,8 @@ function queueSetupAndIssueCommands(
   terminalTabId: string,
   setup: WorktreeSetupLaunch | undefined,
   issueCommand: IssueCommandLaunch | undefined,
-  wrappedSetupCommandStr?: string
+  wrappedSetupCommandStr: string | undefined,
+  opts: { activateCreatedTabs?: boolean } | undefined
 ): void {
   // Why: the setup script launch location is user-configurable. The default
   // 'new-tab' creates a separate background tab titled "Setup" without
@@ -634,12 +667,15 @@ function queueSetupAndIssueCommands(
     }
     if (mode === 'new-tab') {
       const setupTab = store.createTab(worktreeId, undefined, undefined, {
-        recordInteraction: false
+        recordInteraction: false,
+        ...(opts?.activateCreatedTabs === false ? { activate: false } : {})
       })
       // Why: createTab auto-activates the new tab. Revert activation so the
       // user's focus stays on the primary terminal — per the design, the
       // Setup tab runs unattended in the background.
-      store.setActiveTab(terminalTabId)
+      if (opts?.activateCreatedTabs !== false) {
+        store.setActiveTab(terminalTabId)
+      }
       // Why: customTitle wins over the auto-generated "Terminal N" label
       // everywhere the tab is rendered (tab bar, switcher, session snapshots),
       // so labeling via customTitle is the single authoritative source.

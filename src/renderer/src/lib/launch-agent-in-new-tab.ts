@@ -10,6 +10,7 @@ import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
 import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
+import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import {
@@ -275,17 +276,10 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   // lands after mount the agent binary never starts; the user sees a bare shell.
   // Since both calls happen synchronously in the same React batch, the queue
   // is in place by the time the pane commits.
-  //
-  // The telemetry payload is threaded through the queue → pty-connection →
-  // pty-transport → pty:spawn IPC → main, where main fires `agent_started`
-  // only after the spawn succeeds. `request_kind: 'new'` because
-  // quick-launch always opens a fresh session.
-  //
-  // Why: stamp the launched agent on the tab so the tab bar shows the provider
-  // icon immediately, before the agent's first hook event arrives.
   const tab = store.createTab(worktreeId, groupId, undefined, {
     launchAgent: agent,
-    quickCommandLabel
+    quickCommandLabel,
+    ...initialAgentTabViewModeProps(store.settings)
   })
   store.queueTabStartupCommand(tab.id, {
     command: startupPlan.launchCommand,
