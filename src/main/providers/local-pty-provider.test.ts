@@ -57,7 +57,10 @@ vi.mock('../wsl', () => ({
   toLinuxPath: (path: string) => path.replace(/^C:\\/i, '/mnt/c/').replace(/\\/g, '/'),
   toWindowsWslPath: (path: string, distro: string) =>
     `\\\\wsl.localhost\\${distro}${path.replace(/\//g, '\\')}`,
-  isWslAvailable: () => true
+  isWslAvailable: () => true,
+  // Why: WSL worktree validation now asks the distro; these tests use WSL UNC
+  // cwds that are meant to exist, so report them present without spawning wsl.exe.
+  wslUncDirectoryExists: () => true
 }))
 
 import { LocalPtyProvider } from './local-pty-provider'

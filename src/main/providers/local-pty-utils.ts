@@ -1,6 +1,8 @@
 import { basename, join } from 'path'
 import { existsSync, accessSync, statSync, chmodSync, constants as fsConstants } from 'fs'
 import type * as pty from 'node-pty'
+import { isWslUncPath } from '../../shared/wsl-paths'
+import { wslUncDirectoryExists } from '../wsl'
 
 let didEnsureSpawnHelperExecutable = false
 
@@ -75,16 +77,33 @@ export function ensureNodePtySpawnHelperExecutable(): void {
   }
 }
 
+function throwMissingWorkingDirectory(cwd: string): never {
+  throw new Error(
+    `Working directory "${cwd}" does not exist. ` +
+      `It may have been deleted or is on an unmounted volume.`
+  )
+}
+
 /**
  * Validate that a working directory exists and is a directory.
  * Throws a descriptive Error if not.
  */
 export function validateWorkingDirectory(cwd: string): void {
+  // Why: Win32 fs.statSync against the WSL 9P share (\\wsl.localhost\...) can
+  // falsely report ENOENT for directories that exist on the Linux side. Ask the
+  // distro itself; only fall back to the fs check when wsl.exe is inconclusive.
+  if (isWslUncPath(cwd)) {
+    const existsInDistro = wslUncDirectoryExists(cwd)
+    if (existsInDistro === false) {
+      throwMissingWorkingDirectory(cwd)
+    }
+    if (existsInDistro === true) {
+      return
+    }
+  }
+
   if (!existsSync(cwd)) {
-    throw new Error(
-      `Working directory "${cwd}" does not exist. ` +
-        `It may have been deleted or is on an unmounted volume.`
-    )
+    throwMissingWorkingDirectory(cwd)
   }
   if (!statSync(cwd).isDirectory()) {
     throw new Error(`Working directory "${cwd}" is not a directory.`)
