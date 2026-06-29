@@ -55,6 +55,18 @@ export type PtySizeReconcileOptions = {
   measure: () => PtySizeReconcileDimensions | null
   /** Forward the settled size to the PTY (authoritative — bypasses visibility). */
   resize: (cols: number, rows: number) => void
+  /**
+   * Read the size the PTY has ACTUALLY applied (vs what this loop last sent).
+   * Optional. resize() is fire-and-forget for remote (daemon/SSH) PTYs, so the
+   * loop can settle on a size it sent that the PTY silently dropped — the
+   * mount-time twin of the resume drift the visibility-resume re-assert heals.
+   * Before handing off, the loop reads this once; if it diverges from the
+   * last-sent grid it re-forwards and keeps converging. Returns null when the
+   * applied size cannot be confirmed (treated as "synced enough to hand off" so
+   * a provider without a readback, or a transient failure, cannot wedge the
+   * loop until MAX_FRAMES).
+   */
+  getAppliedSize?: () => Promise<PtySizeReconcileDimensions | null>
   /** Schedule the next frame; mirrors requestAnimationFrame's id contract. */
   requestFrame: (callback: () => void) => number
   cancelFrame: (handle: number) => void
@@ -92,6 +104,12 @@ export function reconcilePtySizeAcrossFrames(
   let lastSentRows = options.spawnRows
   let pendingFrame: number | null = null
   let cancelled = false
+  // One-shot applied-size verification before handoff. `verifyInFlight` prevents
+  // re-issuing the async read every frame while it resolves; `appliedVerified`
+  // is the terminal "the PTY confirmed our size (or can't be read)" flag that
+  // lets the loop stop. A re-forward on divergence clears it so we re-verify.
+  let verifyInFlight = false
+  let appliedVerified = options.getAppliedSize === undefined
 
   const tick = (): void => {
     pendingFrame = null
@@ -110,6 +128,7 @@ export function reconcilePtySizeAcrossFrames(
           lastSentCols = measured.cols
           lastSentRows = measured.rows
           authoritativeStableFrames = 0
+          appliedVerified = options.getAppliedSize === undefined
         } else if (options.isAuthoritative()) {
           // Only stability seen *under authority* counts toward handoff — a grid
           // that merely held steady while hidden is not a safe stopping point.
@@ -124,7 +143,47 @@ export function reconcilePtySizeAcrossFrames(
     // layout settle. Once the pane has been visible AND its grid has held steady
     // for the settle window, the live onResize/ResizeObserver path owns any
     // further change, so we hand off. The hard cap guarantees termination.
-    const settled = authoritativeStableFrames >= POST_SPAWN_RECONCILE_SETTLE_FRAMES
+    const gridStable = authoritativeStableFrames >= POST_SPAWN_RECONCILE_SETTLE_FRAMES
+    // Why verify before handoff: the grid being stable only proves what we SENT
+    // held steady, not what the PTY APPLIED. For a fire-and-forget remote resize
+    // the PTY can be pinned at a stale (wide) size while xterm reflowed narrow —
+    // the mount-time form of the bug that garbles alt-screen TUIs. Read the
+    // applied size once; re-forward and keep converging on divergence. Skip while
+    // parked: a mobile-driven PTY legitimately sits at phone dims (≠ our desktop
+    // grid), and verifying there would spin the loop re-forwarding a size the
+    // mobile gate correctly drops — the same reason measure/forward skip parked.
+    if (
+      gridStable &&
+      !appliedVerified &&
+      !verifyInFlight &&
+      !options.isParked() &&
+      options.getAppliedSize
+    ) {
+      verifyInFlight = true
+      void options
+        .getAppliedSize()
+        .then((applied) => {
+          if (cancelled || !options.isAlive()) {
+            return
+          }
+          if (applied && (applied.cols !== lastSentCols || applied.rows !== lastSentRows)) {
+            // The PTY never took our size — re-forward and keep the loop running.
+            options.resize(lastSentCols, lastSentRows)
+            authoritativeStableFrames = 0
+          } else {
+            // Applied matches, or cannot be confirmed (null) — safe to hand off.
+            appliedVerified = true
+          }
+        })
+        .catch(() => {
+          // A failed read must not wedge the loop until MAX_FRAMES.
+          appliedVerified = true
+        })
+        .finally(() => {
+          verifyInFlight = false
+        })
+    }
+    const settled = gridStable && appliedVerified
     if (!settled && frame < POST_SPAWN_RECONCILE_MAX_FRAMES) {
       pendingFrame = options.requestFrame(tick)
     }

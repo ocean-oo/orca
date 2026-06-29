@@ -312,4 +312,127 @@ describe('reconcilePtySizeAcrossFrames', () => {
     expect(resize.mock.calls.length).toBe(callsBefore)
     expect(scheduler.pending()).toBe(0)
   })
+
+  // Why: the grid being stable only proves what the loop SENT held steady, not
+  // what the PTY APPLIED. transport.resize is fire-and-forget for daemon/SSH
+  // PTYs, so the loop can settle on a size the PTY dropped — the mount-time twin
+  // of the resume drift. getAppliedSize lets the loop confirm before handing off.
+  describe('applied-size verification before handoff', () => {
+    /** Drain frames, flushing microtasks between each so async getAppliedSize
+     *  promises resolve and influence the next frame (mirrors real rAF timing). */
+    async function runAsync(
+      scheduler: ReturnType<typeof createFrameScheduler>,
+      maxFrames = 1000
+    ): Promise<void> {
+      let ran = 0
+      while (scheduler.pending() > 0 && ran < maxFrames) {
+        scheduler.run(1)
+        ran += 1
+        // Let any getAppliedSize().then(...) settle before the next frame.
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+    }
+
+    it('keeps converging when the PTY drops the resize (applied stays wide)', async () => {
+      const scheduler = createFrameScheduler()
+      const resize = vi.fn()
+      // xterm settles narrow immediately, but the PTY never applies it: every
+      // applied-size read reports the stale wide spawn width.
+      const pane = createTimelinePane(() => ({ cols: 79, rows: 50 }))
+      reconcilePtySizeAcrossFrames({
+        spawnCols: 203,
+        spawnRows: 50,
+        isAlive: () => true,
+        isParked: () => false,
+        isAuthoritative: () => true,
+        measure: pane.measure,
+        resize,
+        getAppliedSize: async () => ({ cols: 203, rows: 50 }),
+        requestFrame: scheduler.requestFrame,
+        cancelFrame: scheduler.cancelFrame
+      })
+      await runAsync(scheduler, 400)
+
+      // The loop must have re-forwarded the narrow size more than once (the
+      // initial settle plus at least one verify-driven re-forward) and only
+      // terminated at the hard cap, never falsely handing off on a dropped size.
+      const narrowForwards = resize.mock.calls.filter((c) => c[0] === 79 && c[1] === 50)
+      expect(narrowForwards.length).toBeGreaterThan(1)
+    })
+
+    it('hands off once the applied size matches the forwarded grid', async () => {
+      const scheduler = createFrameScheduler()
+      const resize = vi.fn()
+      const pane = createTimelinePane(() => ({ cols: 79, rows: 50 }))
+      let applied = { cols: 203, rows: 50 }
+      // The PTY applies the narrow size after the first corrective forward.
+      reconcilePtySizeAcrossFrames({
+        spawnCols: 203,
+        spawnRows: 50,
+        isAlive: () => true,
+        isParked: () => false,
+        isAuthoritative: () => true,
+        measure: pane.measure,
+        resize: vi.fn((cols, rows) => {
+          resize(cols, rows)
+          applied = { cols, rows }
+        }),
+        getAppliedSize: async () => applied,
+        requestFrame: scheduler.requestFrame,
+        cancelFrame: scheduler.cancelFrame
+      })
+      await runAsync(scheduler, 400)
+
+      // It converges and then STOPS (no pending frames) well before the hard cap.
+      expect(resize).toHaveBeenLastCalledWith(79, 50)
+      expect(scheduler.pending()).toBe(0)
+    })
+
+    it('hands off when applied size cannot be confirmed (null read)', async () => {
+      const scheduler = createFrameScheduler()
+      const resize = vi.fn()
+      const pane = createTimelinePane(() => ({ cols: 79, rows: 50 }))
+      reconcilePtySizeAcrossFrames({
+        spawnCols: 203,
+        spawnRows: 50,
+        isAlive: () => true,
+        isParked: () => false,
+        isAuthoritative: () => true,
+        measure: pane.measure,
+        resize,
+        // A provider that cannot confirm applied size must not wedge the loop.
+        getAppliedSize: async () => null,
+        requestFrame: scheduler.requestFrame,
+        cancelFrame: scheduler.cancelFrame
+      })
+      await runAsync(scheduler, 400)
+      expect(scheduler.pending()).toBe(0)
+    })
+
+    it('does not verify or re-forward while parked — mobile drives at phone dims', async () => {
+      const scheduler = createFrameScheduler()
+      const resize = vi.fn()
+      // A mobile-driven PTY legitimately sits at phone dims (≠ our desktop grid).
+      // The parked gate must suppress the verify entirely so we never spin
+      // re-forwarding a desktop size the mobile gate would drop.
+      const getAppliedSize = vi.fn(async () => ({ cols: 40, rows: 30 }))
+      const pane = createTimelinePane(() => ({ cols: 120, rows: 40 }))
+      reconcilePtySizeAcrossFrames({
+        spawnCols: 120,
+        spawnRows: 40,
+        isAlive: () => true,
+        isParked: () => true,
+        isAuthoritative: () => true,
+        measure: pane.measure,
+        resize,
+        getAppliedSize,
+        requestFrame: scheduler.requestFrame,
+        cancelFrame: scheduler.cancelFrame
+      })
+      await runAsync(scheduler, 400)
+      expect(getAppliedSize).not.toHaveBeenCalled()
+      expect(resize).not.toHaveBeenCalled()
+    })
+  })
 })

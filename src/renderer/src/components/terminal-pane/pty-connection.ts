@@ -2283,6 +2283,13 @@ export function connectPanePty(
         return cols > 0 && rows > 0 ? { cols, rows } : null
       },
       resize: (cols, rows) => transport.resize(cols, rows),
+      // Why: confirm the PTY actually applied the size we forwarded before the
+      // reconcile hands off. transport.resize is fire-and-forget for daemon/SSH
+      // PTYs, so the loop can otherwise settle on a size the PTY dropped, leaving
+      // it pinned wide while xterm shows narrow — the mount-time desync. Skip
+      // remote-runtime PTYs (separate viewport channel; pty:getSize never tracks
+      // them) so they fall back to the grid-stable handoff.
+      getAppliedSize: isRemoteRuntimePtyId(ptyId) ? undefined : () => window.api.pty.getSize(ptyId),
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (handle) => {
         if (typeof cancelAnimationFrame === 'function') {
