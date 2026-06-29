@@ -313,27 +313,20 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
         }
 
         await store.getState().fetchRepos()
-        return store.getState().repos.some((candidate) => candidate.path === repoPath)
+        const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
+        if (!repo) {
+          return false
+        }
+
+        // Why: the fixture deliberately creates external Git worktrees. New
+        // repos hide those by default after the visibility rollout, so opt this
+        // disposable repo into showing them before specs assert on worktree state.
+        await store.getState().updateRepo(repo.id, { externalWorktreeVisibility: 'show' })
+        return true
       },
       repoPath,
       { timeout: 30_000 }
     )
-
-    await page.evaluate(async (repoPath) => {
-      const store = window.__store
-      if (!store) {
-        return
-      }
-
-      const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
-      if (!repo) {
-        throw new Error(`Expected e2e repo to be loaded: ${repoPath}`)
-      }
-      // Why: the fixture deliberately creates external Git worktrees. New
-      // repos hide those by default after the visibility rollout, so opt this
-      // disposable repo into showing them before specs assert on worktree state.
-      await store.getState().updateRepo(repo.id, { externalWorktreeVisibility: 'show' })
-    }, repoPath)
 
     // Wait for the repo to appear and fetch its worktrees
     await page.evaluate(async () => {
