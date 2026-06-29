@@ -393,19 +393,21 @@ const WorktreeContextMenu = React.memo(function WorktreeContextMenu({
   // Why: GitLab calls reviews "Merge Requests"; every other forge uses "Pull Request".
   const isMergeRequest = pullRequestProvider === 'gitlab'
 
+  // Why: void the clipboard write so a rejected IPC promise (e.g. the size-cap
+  // guard) can't surface as an unhandled rejection.
   const handleCopyPath = useCallback(() => {
-    window.api.ui.writeClipboardText(worktree.path)
+    void window.api.ui.writeClipboardText(worktree.path)
   }, [worktree.path])
 
   const handleCopyBranchName = useCallback(() => {
     if (branchName) {
-      window.api.ui.writeClipboardText(branchName)
+      void window.api.ui.writeClipboardText(branchName)
     }
   }, [branchName])
 
   const handleCopyPullRequestUrl = useCallback(() => {
     if (pullRequestUrl) {
-      window.api.ui.writeClipboardText(pullRequestUrl)
+      void window.api.ui.writeClipboardText(pullRequestUrl)
     }
   }, [pullRequestUrl])
 
