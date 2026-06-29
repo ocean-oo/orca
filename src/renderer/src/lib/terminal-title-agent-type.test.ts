@@ -18,6 +18,15 @@ describe('resolveExplicitTerminalTitleAgentType', () => {
     expect(resolveExplicitTerminalTitleAgentType('* Review Codex behavior')).toBeNull()
   })
 
+  it('treats a braille-spinner Claude title that buries another agent name as activity-only', () => {
+    // Why: regression for #6543 — a braille spinner is a generic Claude status
+    // prefix, so getAgentLabel resolves the buried agent before its Claude
+    // braille fallback. These are Claude task titles, not Codex/Gemini tabs.
+    expect(resolveExplicitTerminalTitleAgentType('⠋ Review Codex behavior')).toBeNull()
+    expect(resolveExplicitTerminalTitleAgentType('⠸ investigate gemini integration')).toBeNull()
+    expect(resolveExplicitTerminalTitleAgentType('⠋ migrate from Aider')).toBeNull()
+  })
+
   it('still resolves Claude when the title explicitly names Claude', () => {
     expect(resolveExplicitTerminalTitleAgentType('. Claude Code compare Opencode')).toBe('claude')
   })

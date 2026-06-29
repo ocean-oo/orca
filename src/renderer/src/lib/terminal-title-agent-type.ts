@@ -52,9 +52,21 @@ function isGenericClaudeStatusClaim(title: string, titleAgent: TuiAgent | null):
   )
 }
 
-function resolveTerminalTitleAgentType(title: string): TuiAgent | null {
-  const label = getAgentLabel(title)
-  return label ? (TITLE_LABEL_TO_AGENT[label] ?? null) : null
+function isBrailleClaudeTitleNamingBuriedAgent(title: string, label: string): boolean {
+  // Why: a braille spinner is a generic Claude status prefix shared with Codex,
+  // Cursor, Droid, etc., so getAgentLabel()'s per-agent token match (which runs
+  // before its Claude braille fallback) resolves a competing agent whose name
+  // is merely buried in Claude task text ("⠋ Review Codex behavior"). Unlike
+  // the "✳"/". "/"* " prefixes, the braille prefix does not short-circuit to
+  // Claude, so isGenericClaudeStatusClaim cannot see it. A genuine synthetic
+  // agent title leads with the product name right after the spinner; when the
+  // body does not, the title is Claude activity, not that agent's identity.
+  if (label === 'Claude Code' || !containsBrailleSpinner(title)) {
+    return false
+  }
+  // eslint-disable-next-line no-control-regex -- intentional braille range
+  const body = title.replace(/^[⠀-⣿]+\s*/, '').trimStart()
+  return !body.toLowerCase().startsWith(label.toLowerCase())
 }
 
 /**
@@ -64,8 +76,12 @@ function resolveTerminalTitleAgentType(title: string): TuiAgent | null {
  * worktree title cannot become Claude without an explicit "Claude Code" name.
  */
 export function resolveExplicitTerminalTitleAgentType(title: string): TuiAgent | null {
-  const titleAgent = resolveTerminalTitleAgentType(title)
+  const label = getAgentLabel(title)
+  const titleAgent = label ? (TITLE_LABEL_TO_AGENT[label] ?? null) : null
   if (isGenericClaudeStatusClaim(title, titleAgent)) {
+    return null
+  }
+  if (label !== null && isBrailleClaudeTitleNamingBuriedAgent(title, label)) {
     return null
   }
   return titleAgent
