@@ -446,6 +446,23 @@ export function isTerminalPaneVisibilityResume(args: {
   return args.previousIsVisible === false && args.isVisible
 }
 
+type TerminalPaneVisibilitySnapshot = {
+  tabId: string
+  cwd: string | null | undefined
+  isVisible: boolean
+}
+
+export function getPreviousVisibleForTerminalPane(args: {
+  previous: TerminalPaneVisibilitySnapshot | null
+  tabId: string
+  cwd: string | null | undefined
+}): boolean | null {
+  if (args.previous?.tabId !== args.tabId || args.previous.cwd !== args.cwd) {
+    return null
+  }
+  return args.previous.isVisible
+}
+
 export function scheduleVisibilityReconcilePass(args: {
   previousIsVisible: boolean | null
   isVisible: boolean
@@ -524,7 +541,7 @@ export function useTerminalPaneLifecycle({
   )
   const systemPrefersDarkRef = useRef(systemPrefersDark)
   systemPrefersDarkRef.current = systemPrefersDark
-  const previousVisibleForReconcileRef = useRef<boolean | null>(null)
+  const previousVisibleForReconcileRef = useRef<TerminalPaneVisibilitySnapshot | null>(null)
   const linkProviderDisposablesRef = useRef(new Map<number, IDisposable>())
   const terminalHandleLinkDisposablesRef = useRef(new Map<number, IDisposable>())
   const fileLinkClickFallbackDisposablesRef = useRef(new Map<number, IDisposable>())
@@ -1649,8 +1666,12 @@ export function useTerminalPaneLifecycle({
   }, [tabId, cwd])
 
   useEffect(() => {
-    const previousIsVisible = previousVisibleForReconcileRef.current
-    previousVisibleForReconcileRef.current = isVisible
+    const previousIsVisible = getPreviousVisibleForTerminalPane({
+      previous: previousVisibleForReconcileRef.current,
+      tabId,
+      cwd
+    })
+    previousVisibleForReconcileRef.current = { tabId, cwd, isVisible }
     isVisibleRef.current = isVisible
     const resumedFromHidden = isTerminalPaneVisibilityResume({ previousIsVisible, isVisible })
     for (const panePtyBinding of panePtyBindingsRef.current.values()) {
@@ -1676,8 +1697,8 @@ export function useTerminalPaneLifecycle({
       bindings: panePtyBindingsRef.current.values() as Iterable<ReconcilableBinding>,
       listSessions: () => window.api.pty.listSessions()
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Why: visibility flips must refresh existing PTY process tracking even though the ref object identity is stable.
-  }, [isVisible, isVisibleRef, panePtyBindingsRef])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Why: visibility and terminal identity changes must refresh existing PTY process tracking even though the ref object identity is stable.
+  }, [cwd, isVisible, isVisibleRef, panePtyBindingsRef, tabId])
 
   useEffect(() => {
     const manager = managerRef.current
