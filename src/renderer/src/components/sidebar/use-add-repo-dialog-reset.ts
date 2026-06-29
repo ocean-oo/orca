@@ -3,10 +3,10 @@ import type { AddRepoDialogStep } from './add-repo-dialog-types'
 
 /**
  * Orchestrates resetting the Add Project dialog's per-flow state. `resetState`
- * runs on close/back; `resetHostScopedState` runs when the selected host changes
- * (it keeps the step and nested-review state so a host switch doesn't drop them).
+ * runs on close/back; `resetHostScopedState` runs when the selected host changes.
  */
 export function useAddRepoDialogReset({
+  step,
   setStep,
   setIsAdding,
   setAddProjectBusyLabel,
@@ -19,6 +19,7 @@ export function useAddRepoDialogReset({
   resetCreateState,
   resetRemoteState
 }: {
+  step: AddRepoDialogStep
   setStep: (step: AddRepoDialogStep) => void
   setIsAdding: (isAdding: boolean) => void
   setAddProjectBusyLabel: (label: string | null) => void
@@ -65,6 +66,14 @@ export function useAddRepoDialogReset({
     setAddProjectBusyLabel(null)
     resetServerPathFlow()
     resetCloneFlow()
+    // Why: a nested scan/review is tied to the host that produced it. On a host
+    // switch, clear it so import / open-as-folder can't target the new host with
+    // the old host's paths, and leave the stranded nested step for the start step.
+    resetNestedImportFlow()
+    resetNestedRepoReviewState()
+    if (step === 'nested') {
+      setStep('add')
+    }
     resetCreateDefaultState()
     resetCreateState()
     resetRemoteState()
@@ -72,10 +81,14 @@ export function useAddRepoDialogReset({
     resetCloneFlow,
     resetCreateDefaultState,
     resetCreateState,
+    resetNestedImportFlow,
+    resetNestedRepoReviewState,
     resetRemoteState,
     resetServerPathFlow,
     setAddProjectBusyLabel,
-    setIsAdding
+    setIsAdding,
+    setStep,
+    step
   ])
 
   return { resetState, resetHostScopedState }

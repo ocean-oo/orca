@@ -214,6 +214,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     })
 
   const { resetState, resetHostScopedState } = useAddRepoDialogReset({
+    step,
     setStep,
     setIsAdding,
     setAddProjectBusyLabel,
