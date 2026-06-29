@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       bump_patch_version:
-        description: 'Force a marketing version patch bump. Usually unnecessary: a version whose App Store train is closed (submitted/approved/released) auto-bumps. Use this to start a new version while the current one is still open (beta iteration).'
+        description: 'Bump the iOS marketing version patch number before release. Tick this after a version has shipped to the App Store (the release fails fast if the current version''s train is already closed).'
         required: false
         default: false
         type: boolean

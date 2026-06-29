@@ -86,10 +86,10 @@ def resolve_requested_version(options, config)
 end
 
 # Returns true when `version`'s App Store train is closed to new build uploads.
-# `app` is a Spaceship::ConnectAPI::App fetched once by the caller so a bump that
-# advances across several versions doesn't re-fetch the app on every probe.
-# On any API error, degrade to "open": the upload then either succeeds or fails
-# with the same 90186 we have always seen — never worse than today's behavior.
+# `app` is a Spaceship::ConnectAPI::App the caller looks up (nil if lookup
+# failed). On a nil app or any API error, degrade to "open": we then proceed as
+# before this check existed — the upload either succeeds or fails with the same
+# 90186 we have always seen, never worse than today's behavior.
 def version_train_closed?(app, version)
   return false unless app
 
@@ -114,10 +114,12 @@ platform :ios do
     api_key = app_store_connect_api_key_from_env
     config = load_mobile_app_config
     version = resolve_requested_version(options, config)
-    explicit_version = !options[:version].to_s.strip.empty?
 
-    # Fetched once and reused across the closed-train probes below. On lookup
-    # failure, leave it nil — version_train_closed? then degrades to "open".
+    # Fail fast (seconds) if the resolved version's App Store train is already
+    # closed: Apple would otherwise reject the upload ~20 min later with 90186.
+    # Bumping the version is left to the human (the bump_patch input or a
+    # "Prepare mobile X" commit) so the marketing version stays a deliberate,
+    # release-notes-bearing decision rather than something CI invents.
     app =
       begin
         Spaceship::ConnectAPI::App.find(BUNDLE_ID)
@@ -125,31 +127,12 @@ platform :ios do
         UI.error("Could not look up App Store app #{BUNDLE_ID} (#{error.message}); skipping closed-train check.")
         nil
       end
-
-    # A closed train (version already submitted/approved/released) cannot accept
-    # more builds, so Apple would reject the upload (~20 min later) with 90186.
-    # Auto-bump the patch in the default path; if the caller pinned an exact
-    # version, fail loudly rather than silently overriding their choice.
     if version_train_closed?(app, version)
-      if explicit_version
-        UI.user_error!(
-          "Requested iOS version #{version} is already submitted/released on the App Store " \
-          "and cannot accept new builds. Choose a higher release_version.",
-        )
-      end
-      # Advance until we find an open train (handles the rare case where the
-      # next patch was also already shipped). Bounded to avoid an infinite loop.
-      original = version
-      landed_open = false
-      10.times do
-        version = bump_patch_version(version)
-        unless version_train_closed?(app, version)
-          landed_open = true
-          break
-        end
-      end
-      UI.user_error!("Could not find an open iOS version train after #{original}.") unless landed_open
-      UI.message("iOS version #{original} is closed for new builds; bumping to #{version}.")
+      UI.user_error!(
+        "iOS version #{version} is already submitted/released on the App Store and cannot accept " \
+        "new builds. Re-dispatch with bump_patch_version: true (or a higher release_version), " \
+        "or land a \"Prepare mobile <version>\" commit.",
+      )
     end
 
     latest_build_number = latest_testflight_build_number(
