@@ -305,8 +305,17 @@ describe('registerPtyHandlers', () => {
     mainWindow.webContents.on.mockReset()
     mainWindow.webContents.send.mockReset()
 
+    // Why: mirror real Electron — ipcMain.handle throws on a duplicate channel
+    // unless removeHandler cleared it first. This catches a re-registration
+    // (macOS re-activate / new window) that forgets to remove a handle channel.
     handleMock.mockImplementation((channel: string, handler: (...a: unknown[]) => unknown) => {
+      if (handlers.has(channel)) {
+        throw new Error(`Attempted to register a second handler for '${channel}'`)
+      }
       handlers.set(channel, handler)
+    })
+    removeHandlerMock.mockImplementation((channel: string) => {
+      handlers.delete(channel)
     })
     getPathMock.mockReturnValue('/tmp/orca-user-data')
     existsSyncMock.mockReturnValue(true)
@@ -3380,6 +3389,107 @@ describe('registerPtyHandlers', () => {
     ).resolves.toBeNull()
     expect(provider.hasChildProcesses).not.toHaveBeenCalled()
     expect(provider.getForegroundProcess).not.toHaveBeenCalled()
+  })
+
+  // Why: regression for the Claude-Code split-pane garbled-render desync. resize
+  // is fire-and-forget for daemon-backed PTYs, so a corrective narrow resize can
+  // be dropped while the renderer believes it landed. pty:getSize must report the
+  // size the PTY ACTUALLY applied (so the renderer's resume drift-check re-asserts
+  // the dropped resize) rather than the size last requested. This models a daemon
+  // provider whose resize is dropped but whose getAppliedSize stays at the wide
+  // spawn size; pty:getSize must surface the wide (applied) size, not the narrow
+  // (requested) one.
+  describe('pty:getSize reports applied size, not requested size', () => {
+    function setupProviderWithAppliedSize(args: {
+      applied: { cols: number; rows: number } | null
+      resize?: (cols: number, rows: number) => void
+      getAppliedSize?: (id: string) => Promise<{ cols: number; rows: number } | null>
+    }): void {
+      setLocalPtyProvider({
+        spawn: vi.fn(async (opts: { sessionId?: string }) => ({
+          id: opts.sessionId ?? 'daemon-pty'
+        })),
+        write: vi.fn(),
+        resize: vi.fn(args.resize ?? (() => {})),
+        getAppliedSize: vi.fn(args.getAppliedSize ?? (async () => args.applied)),
+        kill: vi.fn(),
+        shutdown: vi.fn(),
+        onData: vi.fn(() => vi.fn()),
+        onExit: vi.fn(() => vi.fn()),
+        listProcesses: vi.fn(async () => []),
+        getForegroundProcess: vi.fn(async () => null)
+      } as never)
+    }
+
+    const resizeListener = (): ((event: unknown, args: unknown) => void) => {
+      const call = onMock.mock.calls.find((entry: unknown[]) => entry[0] === 'pty:resize')
+      if (!call) {
+        throw new Error('missing pty:resize listener')
+      }
+      return call[1] as (event: unknown, args: unknown) => void
+    }
+
+    it('returns the applied (wide) size after a dropped narrow resize', async () => {
+      // The daemon keeps the PTY at its wide spawn size; the narrow resize is
+      // silently dropped (provider.resize is a no-op fire-and-forget).
+      setupProviderWithAppliedSize({ applied: { cols: 200, rows: 50 } })
+      handlers.clear()
+      registerPtyHandlers(mainWindow as never)
+      const spawn = await handlers.get('pty:spawn')!(null, { cols: 200, rows: 50, env: {} })
+      const id = (spawn as { id: string }).id
+
+      // Renderer forwards a corrective narrow resize; it is dropped daemon-side.
+      resizeListener()(mainWindowIpcEvent, { id, cols: 80, rows: 24 })
+
+      // pty:getSize must surface the applied wide size so the renderer detects
+      // drift (xterm=80 vs PTY=200) and re-asserts — NOT the requested 80.
+      const reported = await handlers.get('pty:getSize')!(null, { id })
+      expect(reported).toEqual({ cols: 200, rows: 50 })
+    })
+
+    it('falls back to the requested size when the provider cannot report applied size', async () => {
+      // No getAppliedSize (e.g. SSH relay): the requested-size cache is the only
+      // signal, so getSize returns it — preserving prior behavior, not a regression.
+      setupProviderWithAppliedSize({ applied: null, getAppliedSize: undefined })
+      setLocalPtyProvider({
+        spawn: vi.fn(async (opts: { sessionId?: string }) => ({
+          id: opts.sessionId ?? 'daemon-pty'
+        })),
+        write: vi.fn(),
+        resize: vi.fn(),
+        kill: vi.fn(),
+        shutdown: vi.fn(),
+        onData: vi.fn(() => vi.fn()),
+        onExit: vi.fn(() => vi.fn()),
+        listProcesses: vi.fn(async () => []),
+        getForegroundProcess: vi.fn(async () => null)
+      } as never)
+      handlers.clear()
+      registerPtyHandlers(mainWindow as never)
+      const spawn = await handlers.get('pty:spawn')!(null, { cols: 200, rows: 50, env: {} })
+      const id = (spawn as { id: string }).id
+      resizeListener()(mainWindowIpcEvent, { id, cols: 80, rows: 24 })
+
+      const reported = await handlers.get('pty:getSize')!(null, { id })
+      expect(reported).toEqual({ cols: 80, rows: 24 })
+    })
+
+    it('falls back to the requested size when getAppliedSize throws', async () => {
+      // A dead daemon/relay must never throw across the IPC boundary or block.
+      setupProviderWithAppliedSize({
+        applied: null,
+        getAppliedSize: async () => {
+          throw new Error('daemon unreachable')
+        }
+      })
+      handlers.clear()
+      registerPtyHandlers(mainWindow as never)
+      const spawn = await handlers.get('pty:spawn')!(null, { cols: 100, rows: 30, env: {} })
+      const id = (spawn as { id: string }).id
+
+      const reported = await handlers.get('pty:getSize')!(null, { id })
+      expect(reported).toEqual({ cols: 100, rows: 30 })
+    })
   })
 
   it('injects ORCA_TERMINAL_HANDLE for non-local PTY providers', async () => {

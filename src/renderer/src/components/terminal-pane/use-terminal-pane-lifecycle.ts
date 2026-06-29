@@ -12,6 +12,7 @@ import {
 import { normalizeDesktopTerminalScrollbackRows } from '../../../../shared/terminal-scrollback-policy'
 import { normalizeTerminalTuiMouseWheelMultiplier } from '@/lib/pane-manager/pane-terminal-mouse-wheel'
 import { buildWindowsPtyCompatibilityOptions } from '@/lib/pane-manager/windows-pty-compatibility'
+import { buildTerminalKeyboardProtocolOptions } from '@/lib/pane-manager/terminal-keyboard-protocol'
 import { useAppStore } from '@/store'
 import {
   createFilePathLinkProvider,
@@ -26,6 +27,7 @@ import {
   installHttpLinkClickFallback,
   type TerminalLinkRoutingPreferenceRequester
 } from './terminal-url-link-hit-testing'
+import { resolveLocalhostHttpLinkDisplayUrl } from '@/lib/http-link-routing'
 import type {
   GlobalSettings,
   SetupSplitDirection,
@@ -56,7 +58,11 @@ import { showOsc52ClipboardBlockedToast } from './osc52-clipboard-blocked-toast'
 import { parseOsc7 } from './parse-osc7'
 import { resolveTerminalJisYenInput } from './terminal-jis-yen-input'
 import { installTerminalImeCompositionTracker } from './terminal-ime-composition-tracker'
-import { installTerminalImePunctuationForwarder } from './terminal-ime-punctuation-forwarder'
+import {
+  DISABLED_MAC_NATIVE_TEXT_INPUT_SOURCE_FEATURES,
+  getMacNativeTextInputSourceTracker
+} from './terminal-ime-input-source'
+import { installTerminalImeNativeTextForwarder } from './terminal-ime-native-text-forwarder'
 import {
   shouldBypassXtermKeyboardEvent,
   shouldHandleTerminalInterruptKeyboardEvent,
@@ -140,6 +146,19 @@ function reportActiveRendererPtyForPane(
       continue
     }
     window.api.pty.setActiveRendererPty?.(ptyId, activePaneId === paneId)
+  }
+}
+
+async function formatTerminalUrlTooltip(url: string, openLinkHint: string): Promise<string | null> {
+  const labeledUrl = await resolveLocalhostHttpLinkDisplayUrl(url)
+  if (!labeledUrl) {
+    return null
+  }
+  try {
+    const originalHost = new URL(url).host
+    return `${labeledUrl} (${originalHost}; ${openLinkHint})`
+  } catch {
+    return `${labeledUrl} (${openLinkHint})`
   }
 }
 
@@ -509,7 +528,7 @@ export function useTerminalPaneLifecycle({
   const osc7DisposablesRef = useRef(new Map<number, IDisposable>())
   const mouseHideDisposablesRef = useRef(new Map<number, IDisposable>())
   const imeCompositionDisposablesRef = useRef(new Map<number, IDisposable>())
-  const imePunctuationForwarderDisposablesRef = useRef(new Map<number, IDisposable>())
+  const imeNativeTextForwarderDisposablesRef = useRef(new Map<number, IDisposable>())
   const queuedInitialCwdRef = useRef<string | null | undefined>(undefined)
 
   const applyAppearance = (manager: PaneManager): void => {
@@ -577,7 +596,7 @@ export function useTerminalPaneLifecycle({
     const selectionCaptureTimers = selectionCaptureTimersRef.current
     const mouseHideDisposables = mouseHideDisposablesRef.current
     const imeCompositionDisposables = imeCompositionDisposablesRef.current
-    const imePunctuationForwarderDisposables = imePunctuationForwarderDisposablesRef.current
+    const imeNativeTextForwarderDisposables = imeNativeTextForwarderDisposablesRef.current
     const worktreePath =
       useAppStore
         .getState()
@@ -785,28 +804,26 @@ export function useTerminalPaneLifecycle({
         // See xterm-bypass-policy.ts for the rule derivation.
         let pendingTerminalInterruptKeyup = false
         const isMac = navigator.userAgent.includes('Mac')
+        const macNativeTextInputSourceTracker = isMac ? getMacNativeTextInputSourceTracker() : null
         const imeCompositionTracker = installTerminalImeCompositionTracker(pane.terminal.element)
         imeCompositionDisposablesRef.current.set(pane.id, imeCompositionTracker)
-        // Why: macOS-only. With xterm's kitty CSI-u encoding active, the
-        // keydown preventDefault cancels Chromium's native insertText, dropping
-        // any synthesized printable text — CJK IME punctuation commits AND
-        // OS-level injection (dictation, text expanders, accessibility). The
-        // forwarder recovers that text from the helper-textarea input event.
-        // Not gated to CJK input sources: the drop affects every locale (see
-        // #6513). Safe for ordinary typing because claimKeyEvent only bypasses
-        // unmodified ASCII punctuation keydowns, and the injected-text path
-        // skips the immediate insertText already attributable to keyboard text.
-        const imePunctuationForwarder = isMac
-          ? installTerminalImePunctuationForwarder({
+        // Why: only known macOS native text paths need xterm keydown bypass.
+        // Source gates cover physical CJK/Vietnamese IME rewrites; synthetic
+        // Unicode key events are detected by missing physical key identity.
+        const imeNativeTextForwarder = isMac
+          ? installTerminalImeNativeTextForwarder({
               terminalElement: pane.terminal.element,
               isComposing: () => imeCompositionTracker.isActive(),
-              sendInput: (data) => pane.terminal.input(data)
+              sendInput: (data) => pane.terminal.input(data),
+              getInputSourceFeatures: () =>
+                macNativeTextInputSourceTracker?.getFeatures() ??
+                DISABLED_MAC_NATIVE_TEXT_INPUT_SOURCE_FEATURES
             })
           : {
               claimKeyEvent: () => false,
               dispose: () => undefined
             }
-        imePunctuationForwarderDisposablesRef.current.set(pane.id, imePunctuationForwarder)
+        imeNativeTextForwarderDisposablesRef.current.set(pane.id, imeNativeTextForwarder)
         pane.terminal.attachCustomKeyEventHandler((e) => {
           if (
             shouldSuppressTerminalImeKeyboardEvent(e, {
@@ -866,9 +883,9 @@ export function useTerminalPaneLifecycle({
             }
           }
 
-          if (imePunctuationForwarder.claimKeyEvent(e)) {
-            // Why: bypass xterm's kitty encoder for IME punctuation keydowns so
-            // the committed full-width glyph survives via the input event.
+          if (imeNativeTextForwarder.claimKeyEvent(e)) {
+            // Why: bypass xterm's kitty encoder for native text keydowns so the
+            // committed glyph survives via the input event.
             return false
           }
 
@@ -965,6 +982,9 @@ export function useTerminalPaneLifecycle({
           const mouseHideDisposable = installMouseHideWhileTyping(pane.terminal, pane.container)
           mouseHideDisposablesRef.current.set(pane.id, mouseHideDisposable)
         }
+        // Why: async tooltip formatting can resolve after hover changes, so a
+        // stale result must not overwrite the tooltip for a newer hover/leave.
+        let oscTooltipHoverToken = 0
         pane.terminal.options.linkHandler = {
           allowNonHttpProtocols: true,
           activate: (event, text) => {
@@ -988,10 +1008,18 @@ export function useTerminalPaneLifecycle({
           // GitHub owner/repo#issue references emitted by CLI tools) — same
           // behaviour as the WebLinksAddon provides for plain-text URLs.
           hover: (_event, text) => {
+            oscTooltipHoverToken += 1
+            const hoverToken = oscTooltipHoverToken
             pane.linkTooltip.textContent = `${text} (${urlOpenLinkHint})`
             pane.linkTooltip.style.display = ''
+            void formatTerminalUrlTooltip(text, urlOpenLinkHint).then((nextText) => {
+              if (hoverToken === oscTooltipHoverToken && nextText) {
+                pane.linkTooltip.textContent = nextText
+              }
+            })
           },
           leave: () => {
+            oscTooltipHoverToken += 1
             pane.linkTooltip.style.display = 'none'
           }
         }
@@ -1066,11 +1094,11 @@ export function useTerminalPaneLifecycle({
           imeCompositionDisposable.dispose()
           imeCompositionDisposablesRef.current.delete(paneId)
         }
-        const imePunctuationForwarderDisposable =
-          imePunctuationForwarderDisposablesRef.current.get(paneId)
-        if (imePunctuationForwarderDisposable) {
-          imePunctuationForwarderDisposable.dispose()
-          imePunctuationForwarderDisposablesRef.current.delete(paneId)
+        const imeNativeTextForwarderDisposable =
+          imeNativeTextForwarderDisposablesRef.current.get(paneId)
+        if (imeNativeTextForwarderDisposable) {
+          imeNativeTextForwarderDisposable.dispose()
+          imeNativeTextForwarderDisposablesRef.current.delete(paneId)
         }
         const selectionCaptureTimer = selectionCaptureTimersRef.current.get(paneId)
         if (selectionCaptureTimer !== undefined) {
@@ -1242,16 +1270,23 @@ export function useTerminalPaneLifecycle({
           (candidate) => candidate.id === tabId
         )
         const platformInfo = window.api.platform?.get?.()
-        const windowsPtyCompatibilityOptions = buildWindowsPtyCompatibilityOptions({
+        const ptyBackendContext = {
           userAgent: navigator.userAgent,
           osRelease: platformInfo?.osRelease,
           connectionId: getConnectionId(worktreeId),
           cwd: startupCwd,
           shellOverride: currentTab?.shellOverride,
           executionHostId: getExecutionHostIdForWorktree(storeState, worktreeId)
-        })
+        }
+        const windowsPtyCompatibilityOptions =
+          buildWindowsPtyCompatibilityOptions(ptyBackendContext)
+        // Why: local Windows ConPTY CLIs read the Kitty keyboard advertisement but
+        // do not decode CSI-u, so withhold it there to restore Enter/Up/Down nav
+        // (issue #2434); SSH and macOS/Linux panes keep enhanced reporting.
+        const keyboardProtocolOptions = buildTerminalKeyboardProtocolOptions(ptyBackendContext)
         return {
           ...windowsPtyCompatibilityOptions,
+          ...keyboardProtocolOptions,
           fontSize: currentSettings?.terminalFontSize ?? 14,
           fontFamily: buildFontFamily(currentSettings?.terminalFontFamily ?? ''),
           fontWeight: terminalFontWeights.fontWeight,
@@ -1297,6 +1332,7 @@ export function useTerminalPaneLifecycle({
         // SelectionService._removeMouseDownListeners).
         managerRef.current?.getActivePane()?.terminal.clearSelection()
       },
+      formatLinkTooltip: (url, openLinkHint) => formatTerminalUrlTooltip(url, openLinkHint),
       // Why: TerminalPane instances stay mounted for hidden visited worktrees
       // so PTYs survive navigation. Creating WebGL for those offscreen panes
       // still consumes Chromium's context budget and can blank visible panes.
@@ -1556,10 +1592,10 @@ export function useTerminalPaneLifecycle({
         disposable.dispose()
       }
       imeCompositionDisposables.clear()
-      for (const disposable of imePunctuationForwarderDisposables.values()) {
+      for (const disposable of imeNativeTextForwarderDisposables.values()) {
         disposable.dispose()
       }
-      imePunctuationForwarderDisposables.clear()
+      imeNativeTextForwarderDisposables.clear()
       for (const transport of paneTransports.values()) {
         const ptyId = transport.getPtyId()
         if (

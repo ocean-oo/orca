@@ -26,6 +26,7 @@ import type {
   GitHubCommentResult,
   GitHubWorkItem,
   GitPushTarget,
+  GitStagingArea,
   GitForkSyncExpectedUpstream,
   GitForkSyncResult,
   GitUpstreamStatus,
@@ -64,7 +65,8 @@ import type {
   RuntimeStatus,
   RuntimeSyncWindowGraphResult,
   RuntimeSyncWindowGraph,
-  RuntimeTerminalDriverState
+  RuntimeTerminalDriverState,
+  RuntimeTerminalPresentation
 } from '../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../shared/runtime-rpc-envelope'
 import type { PublicKnownRuntimeEnvironment } from '../shared/runtime-environments'
@@ -185,6 +187,10 @@ import type { RuntimeEnvironmentSubscriptionHandle } from './runtime-environment
 import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type {
+  LocalhostWorktreeLabelResult,
+  LocalhostWorktreeLabelRoute
+} from '../shared/localhost-worktree-labels'
+import type {
   CrashReportBreadcrumbData,
   CrashReportSubmitArgs,
   CrashReportSubmitResult,
@@ -197,6 +203,20 @@ type NativeFileDropCallback = (data: NativeFileDropPayload) => void
 
 const nativeFileDropCallbacks: NativeFileDropCallback[] = []
 let nativeFileDropListenerRegistered = false
+
+function getLinuxDisplayServer(): 'wayland' | 'x11' | null {
+  if (process.platform !== 'linux') {
+    return null
+  }
+  if (
+    process.env.WAYLAND_DISPLAY ||
+    process.env.XDG_SESSION_TYPE?.toLowerCase() === 'wayland' ||
+    process.env.ELECTRON_OZONE_PLATFORM_HINT?.toLowerCase() === 'wayland'
+  ) {
+    return 'wayland'
+  }
+  return process.env.DISPLAY ? 'x11' : null
+}
 
 type AppRestartPrepOptions = {
   startedEventName: string
@@ -436,10 +456,9 @@ const api = {
     reload: (): Promise<void> => ipcRenderer.invoke('app:reload'),
     awaitFirstWindowStartupServices: (): Promise<void> =>
       ipcRenderer.invoke('app:awaitFirstWindowStartupServices'),
-    // Why: on macOS this returns AppleCurrentKeyboardLayoutInputSourceID so
-    // the renderer's keyboard-layout probe can distinguish Polish Pro / US
-    // Extended / ABC Extended / IME Roman modes from plain US QWERTY (see
-    // src/renderer/src/lib/keyboard-layout/input-source-id.ts, issue #1205).
+    // Why: on macOS this returns the active input mode, or the layout ID when
+    // no IME mode is selected, so renderer keyboard workarounds can distinguish
+    // CJK IMEs and compose layouts from plain US QWERTY (see issue #1205).
     // Returns null on non-Darwin or when the defaults read fails.
     getKeyboardInputSourceId: (): Promise<string | null> =>
       ipcRenderer.invoke('app:getKeyboardInputSourceId'),
@@ -459,7 +478,9 @@ const api = {
     get: () => ({
       platform: process.platform,
       osRelease:
-        (process as NodeJS.Process & { getSystemVersion?: () => string }).getSystemVersion?.() ?? ''
+        (process as NodeJS.Process & { getSystemVersion?: () => string }).getSystemVersion?.() ??
+        '',
+      displayServer: getLinuxDisplayServer()
     })
   } satisfies PreloadApi['platform'],
 
@@ -844,6 +865,12 @@ const api = {
      *  Returns `''` when the id is unknown or the platform cannot resolve one. */
     getCwd: (id: string): Promise<string> => ipcRenderer.invoke('pty:getCwd', { id }),
 
+    /** The PTY's last APPLIED size (its real winsize), or null if unknown.
+     *  Lets the renderer detect drift after a resize was dropped main-side and
+     *  re-assert, instead of trusting the size it last fired blind. */
+    getSize: (id: string): Promise<{ cols: number; rows: number } | null> =>
+      ipcRenderer.invoke('pty:getSize', { id }),
+
     onData: (
       callback: (data: { id: string; data: string; seq?: number; rawLength?: number }) => void
     ): (() => void) => {
@@ -1029,6 +1056,13 @@ const api = {
       number: number
       type?: 'issue' | 'pr'
     }): Promise<unknown> => ipcRenderer.invoke('gh:workItemDetails', args),
+
+    notifyWorkItemMutated: (args: {
+      repoPath: string
+      repoId?: string
+      type: 'issue' | 'pr'
+      number: number
+    }): Promise<boolean> => ipcRenderer.invoke('gh:notifyWorkItemMutated', args),
 
     prFileContents: (args: {
       repoPath: string
@@ -1650,6 +1684,11 @@ const api = {
     }
   },
 
+  localhostWorktreeLabels: {
+    register: (args: LocalhostWorktreeLabelRoute): Promise<LocalhostWorktreeLabelResult> =>
+      ipcRenderer.invoke('localhostWorktreeLabels:register', args)
+  } satisfies PreloadApi['localhostWorktreeLabels'],
+
   keybindings: {
     get: (): Promise<KeybindingFileSnapshot> => ipcRenderer.invoke('keybindings:get'),
     ensureFile: (): Promise<KeybindingFileSnapshot> => ipcRenderer.invoke('keybindings:ensureFile'),
@@ -1689,6 +1728,8 @@ const api = {
     list: (): Promise<unknown> => ipcRenderer.invoke('claudeAccounts:list'),
     add: (args?: { runtime?: 'host' | 'wsl'; wslDistro?: string | null }): Promise<unknown> =>
       ipcRenderer.invoke('claudeAccounts:add', args),
+    cancelPendingLogin: (): Promise<boolean> =>
+      ipcRenderer.invoke('claudeAccounts:cancelPendingLogin'),
     reauthenticate: (args: { accountId: string }): Promise<unknown> =>
       ipcRenderer.invoke('claudeAccounts:reauthenticate', args),
     remove: (args: { accountId: string }): Promise<unknown> =>
@@ -2287,6 +2328,52 @@ const api = {
       ipcRenderer.on('emulator:frameStreamError', listener)
       return () => ipcRenderer.removeListener('emulator:frameStreamError', listener)
     },
+    startVideoStream: (args: {
+      deviceId: string
+      streamId: string
+    }): Promise<{ streamId: string }> => ipcRenderer.invoke('emulator:videoStreamStart', args),
+    stopVideoStream: (args: { streamId: string }): Promise<void> =>
+      ipcRenderer.invoke('emulator:videoStreamStop', args),
+    onVideoStreamMeta: (
+      callback: (data: {
+        streamId: string
+        deviceId: string
+        meta: { codecId: string; width: number; height: number }
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          streamId: string
+          deviceId: string
+          meta: { codecId: string; width: number; height: number }
+        }
+      ) => callback(data)
+      ipcRenderer.on('emulator:videoStreamMeta', listener)
+      return () => ipcRenderer.removeListener('emulator:videoStreamMeta', listener)
+    },
+    onVideoStreamFrame: (
+      callback: (data: {
+        streamId: string
+        deviceId: string
+        config: boolean
+        keyFrame: boolean
+        bytes: ArrayBuffer
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          streamId: string
+          deviceId: string
+          config: boolean
+          keyFrame: boolean
+          bytes: ArrayBuffer
+        }
+      ) => callback(data)
+      ipcRenderer.on('emulator:videoStreamFrame', listener)
+      return () => ipcRenderer.removeListener('emulator:videoStreamFrame', listener)
+    },
     onPaneFocus: (callback: (data: { worktreeId: string }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { worktreeId: string }) =>
         callback(data)
@@ -2593,6 +2680,12 @@ const api = {
       includeIgnored?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('git:status', args),
+    submoduleStatus: (args: {
+      worktreePath: string
+      submodulePath: string
+      connectionId?: string
+      area?: GitStagingArea
+    }): Promise<unknown> => ipcRenderer.invoke('git:submoduleStatus', args),
     checkIgnored: (args: {
       worktreePath: string
       paths: string[]
@@ -3073,6 +3166,7 @@ const api = {
         title?: string
         ptyId?: string
         activate?: boolean
+        presentation?: RuntimeTerminalPresentation
         tabId?: string
         leafId?: string
         splitFromLeafId?: string
@@ -3093,6 +3187,7 @@ const api = {
           title?: string
           ptyId?: string
           activate?: boolean
+          presentation?: RuntimeTerminalPresentation
           tabId?: string
           leafId?: string
           splitFromLeafId?: string
@@ -3117,6 +3212,7 @@ const api = {
         startupCommandDelivery?: StartupCommandDelivery
         title?: string
         activate?: boolean
+        presentation?: RuntimeTerminalPresentation
       }) => void
     ): (() => void) => {
       const listener = (
@@ -3134,6 +3230,7 @@ const api = {
           startupCommandDelivery?: StartupCommandDelivery
           title?: string
           activate?: boolean
+          presentation?: RuntimeTerminalPresentation
         }
       ) => callback(data)
       ipcRenderer.on('terminal:requestTabCreate', listener)

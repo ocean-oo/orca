@@ -1185,6 +1185,7 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:hasChildProcesses')
   ipcMain.removeHandler('pty:getForegroundProcess')
   ipcMain.removeHandler('pty:getCwd')
+  ipcMain.removeHandler('pty:getSize')
   ipcMain.removeHandler('pty:declarePendingPaneSerializer')
   ipcMain.removeHandler('pty:settlePaneSerializer')
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
@@ -3237,6 +3238,35 @@ export function registerPtyHandlers(
       return ''
     }
   })
+
+  // Why: the renderer forwards resizes fire-and-forget and otherwise has no way
+  // to learn the PTY's actual size. A resize dropped main-side (suppression
+  // window, mobile-driver gate, or a provider no-op) OR daemon/SSH-side (the
+  // remote resize notify is unacked and can be silently dropped — session not
+  // yet alive, exited, invalid dims, cold-restore snapshot-col coercion) leaves
+  // the renderer believing it synced when it did not, so a later same-cols
+  // layout never re-forwards and the TUI stays garbled. ptySizes records only
+  // the REQUESTED size, so it cannot reveal such a drop. Prefer the provider's
+  // APPLIED size (node-pty's cached winsize / the daemon emulator's dims, which
+  // track the subprocess resize) so the renderer's resume drift-check sees the
+  // truth; fall back to ptySizes only when the provider can't report (no
+  // getAppliedSize, e.g. SSH relay, or an unknown id) — a null then reads as
+  // "cannot confirm", which the renderer treats as a cue to re-forward once.
+  ipcMain.handle(
+    'pty:getSize',
+    async (_event, args: { id: string }): Promise<{ cols: number; rows: number } | null> => {
+      try {
+        const applied = await tryGetProviderForPty(args.id)?.getAppliedSize?.(args.id)
+        if (applied) {
+          return applied
+        }
+      } catch {
+        // Fall through to the requested-size cache on any provider/RPC failure
+        // so a dead daemon/relay never blocks or throws across the IPC boundary.
+      }
+      return ptySizes.get(args.id) ?? null
+    }
+  )
 
   // Why: pre-signal handshake handlers. See
   // docs/mobile-prefer-renderer-scrollback.md and the rationale on

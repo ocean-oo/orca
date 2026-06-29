@@ -817,6 +817,19 @@ export class LocalPtyProvider implements IPtyProvider {
     ptyProcesses.get(id)?.resize(cols, rows)
   }
 
+  // Why: node-pty caches the last winsize it applied on the IPty handle, so its
+  // cols/rows are the authoritative applied size (node-pty clamps invalid dims
+  // and a resize on a dead handle is a no-op, neither of which the requested
+  // size in ptySizes would reflect). The renderer's resume drift-check compares
+  // against this to re-assert a resize the PTY never actually took.
+  async getAppliedSize(id: string): Promise<{ cols: number; rows: number } | null> {
+    const proc = ptyProcesses.get(id)
+    if (!proc || proc.cols <= 0 || proc.rows <= 0) {
+      return null
+    }
+    return { cols: proc.cols, rows: proc.rows }
+  }
+
   async shutdown(id: string, _opts: { immediate?: boolean; keepHistory?: boolean }): Promise<void> {
     const proc = ptyProcesses.get(id)
     if (!proc) {

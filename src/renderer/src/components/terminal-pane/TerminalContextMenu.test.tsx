@@ -70,6 +70,8 @@ function renderMenu(overrides: Record<string, unknown> = {}): void {
     onAddQuickCommand: vi.fn(),
     onToggleExpand: vi.fn(),
     onSetTitle: vi.fn(),
+    onClearPaneTitle: vi.fn(),
+    canClearPaneTitle: false,
     onCopyTerminalId: vi.fn(),
     onCopyPaneId: vi.fn(),
     ...overrides

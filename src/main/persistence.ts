@@ -78,6 +78,8 @@ import {
   buildWorkspaceRunContext
 } from '../shared/task-source-context'
 import type { MigrationUnsupportedPtyEntry } from '../shared/agent-status-types'
+import { MOBILE_PAIRING_USERDATA_FILES } from './runtime/mobile-pairing-files'
+import { hardenExistingSecureFile } from '../shared/secure-file'
 import type { SshRemotePtyLease, SshTarget } from '../shared/ssh-types'
 import { isFolderRepo } from '../shared/repo-kind'
 import { getGitUsername } from './git/repo'
@@ -300,17 +302,74 @@ function retireLegacyInstructionsForClearedTextActionRecipes(
 // Solution: index.ts calls initDataPath() right after configureDevUserDataPath()
 // but before app.setName(), capturing the correct path at the right moment.
 let _dataFile: string | null = null
+let _userDataDir: string | null = null
 
 export function initDataPath(): void {
-  _dataFile = join(app.getPath('userData'), 'orca-data.json')
+  const userDataDir = app.getPath('userData')
+  _userDataDir = userDataDir
+  _dataFile = join(userDataDir, 'orca-data.json')
 }
 
 function getDataFile(): string {
   if (!_dataFile) {
     // Safety fallback — should not be hit in normal startup.
-    _dataFile = join(app.getPath('userData'), 'orca-data.json')
+    const userDataDir = app.getPath('userData')
+    _userDataDir = userDataDir
+    _dataFile = join(userDataDir, 'orca-data.json')
   }
   return _dataFile
+}
+
+/**
+ * Return the userData directory captured at initDataPath() time, before
+ * app.setName() can change how app.getPath('userData') resolves.
+ *
+ * Subsystems that must share storage with orca-data.json (mobile pairing's
+ * DeviceRegistry, E2EE keypair, runtime metadata) read this instead of
+ * resolving the path late, which on case-sensitive filesystems can land in a
+ * different directory and lose paired devices across restarts/updates.
+ */
+export function getCanonicalUserDataPath(): string {
+  if (!_userDataDir) {
+    // Safety fallback — should not be hit in normal startup.
+    _userDataDir = app.getPath('userData')
+  }
+  return _userDataDir
+}
+
+/**
+ * Copy legacy mobile pairing credentials into the canonical userData directory.
+ *
+ * Existing installs may already have credentials in the late app.getPath('userData')
+ * directory. Before switching the runtime server to the canonical path, copy the
+ * registry and E2EE keypair forward as a pair so an update does not force one
+ * last re-pair or mix devices with the wrong key.
+ */
+export function migrateMobilePairingDataToCanonicalUserDataPath(sourceUserDataDir: string): void {
+  const targetUserDataDir = getCanonicalUserDataPath()
+  if (resolve(sourceUserDataDir) === resolve(targetUserDataDir)) {
+    return
+  }
+
+  const migrations = MOBILE_PAIRING_USERDATA_FILES.map((fileName) => ({
+    sourcePath: join(sourceUserDataDir, fileName),
+    targetPath: join(targetUserDataDir, fileName)
+  }))
+  if (migrations.some(({ sourcePath }) => !existsSync(sourcePath))) {
+    return
+  }
+  if (migrations.some(({ targetPath }) => existsSync(targetPath))) {
+    return
+  }
+
+  mkdirSync(targetUserDataDir, { recursive: true })
+  for (const { sourcePath, targetPath } of migrations) {
+    copyFileSync(sourcePath, targetPath)
+    // Why: these are credential files (device tokens, E2EE secret key). copyFileSync
+    // does not carry Windows ACLs, so re-assert the current-user-only restriction on
+    // the copy instead of relying on the runtime's later lazy re-harden on read.
+    hardenExistingSecureFile(targetPath)
+  }
 }
 
 // Why (issue #1158): keep 5 rolling backups of orca-data.json so a corrupt or
