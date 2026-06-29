@@ -303,14 +303,28 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
       await window.api.repos.add({ path: repoPath })
     }, repoPath)
 
-    // Fetch repos in the renderer store so it picks up the new repo
+    // Why: macOS CI can paint the added repo before the first renderer fetch
+    // has updated the test-side store read. Poll the public fetch path.
+    await page.waitForFunction(
+      async (repoPath) => {
+        const store = window.__store
+        if (!store) {
+          return false
+        }
+
+        await store.getState().fetchRepos()
+        return store.getState().repos.some((candidate) => candidate.path === repoPath)
+      },
+      repoPath,
+      { timeout: 30_000 }
+    )
+
     await page.evaluate(async (repoPath) => {
       const store = window.__store
       if (!store) {
         return
       }
 
-      await store.getState().fetchRepos()
       const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
       if (!repo) {
         throw new Error(`Expected e2e repo to be loaded: ${repoPath}`)
