@@ -43,6 +43,15 @@ type OpenCodeGoRateLimitConfig = {
 }
 
 type GeminiCliOAuthEnabledResolver = () => boolean
+type ActiveRateLimitProvider = ProviderRateLimits['provider']
+type ActiveProviderState = {
+  provider: ActiveRateLimitProvider
+  limits: ProviderRateLimits | null
+}
+type ActiveWindowRefreshPlan =
+  | { kind: 'none' }
+  | { kind: 'full' }
+  | { kind: 'providers'; providers: ActiveRateLimitProvider[] }
 
 // Why: Claude's subscription usage endpoint has a tight request budget. Quota
 // state is informational, so prefer keeping a recent snapshot over polling it
@@ -51,6 +60,7 @@ const DEFAULT_POLL_MS = 15 * 60 * 1000 // 15 minutes
 const MIN_POLL_MS = 30 * 1000 // 30 seconds — renderer input should never create a tight loop.
 const MAX_POLL_MS = 2_147_483_647 // Max safe setInterval delay before Node clamps back to 1ms.
 const MIN_REFETCH_MS = 5 * 60 * 1000 // 5 minutes — debounce resume/manual refresh bursts
+const ACTIVE_FAILURE_REFETCH_MS = MIN_POLL_MS
 const STALE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes — after this, stale data is dropped
 const INACTIVE_FETCH_DEBOUNCE_MS = 60 * 1000 // 60 seconds — debounce fetch-on-open
 const DEFERRED_STARTUP_ACTIVE_REFRESH_MS = 1000
@@ -95,9 +105,15 @@ export class RateLimitService {
   private pollInterval: number = DEFAULT_POLL_MS
   private timer: ReturnType<typeof setInterval> | null = null
   private deferredStartupRefreshTimer: ReturnType<typeof setTimeout> | null = null
-  // Why: auto-refresh debounce keys off the last SUCCESSFUL read, not the last
-  // attempt, so a failed post-update/relaunch fetch doesn't suppress recovery.
-  private lastSuccessfulFetchAt = 0
+  // Why: after the first recovery attempt, repeated focus/show/restore events
+  // during the same outage should not create a tight provider retry loop.
+  private lastActiveFailureRetryAtByProvider: Record<ActiveRateLimitProvider, number> = {
+    claude: 0,
+    codex: 0,
+    gemini: 0,
+    'opencode-go': 0,
+    kimi: 0
+  }
   private mainWindow: BrowserWindow | null = null
   private detachWindowListeners: (() => void) | null = null
   private isFetching = false
@@ -611,20 +627,80 @@ export class RateLimitService {
     return this.mainWindow.isFocused()
   }
 
+  private getActiveProviderState(): ActiveProviderState[] {
+    return [
+      { provider: 'claude', limits: this.state.claude },
+      { provider: 'codex', limits: this.state.codex },
+      { provider: 'gemini', limits: this.state.gemini },
+      { provider: 'opencode-go', limits: this.state.opencodeGo },
+      { provider: 'kimi', limits: this.state.kimi }
+    ]
+  }
+
+  private getActiveWindowRefreshPlan(now: number): ActiveWindowRefreshPlan {
+    const retryableFailures: ActiveRateLimitProvider[] = []
+    for (const { provider, limits } of this.getActiveProviderState()) {
+      if (!limits || limits.status === 'idle' || limits.status === 'fetching') {
+        return { kind: 'full' }
+      }
+      if (limits.status === 'ok' || limits.status === 'unavailable') {
+        if (now - limits.updatedAt >= MIN_REFETCH_MS) {
+          return { kind: 'full' }
+        }
+        continue
+      }
+      if (limits.status === 'error') {
+        const lastRetryAt = this.lastActiveFailureRetryAtByProvider[provider]
+        if (now - lastRetryAt >= ACTIVE_FAILURE_REFETCH_MS) {
+          retryableFailures.push(provider)
+        }
+      }
+    }
+
+    if (retryableFailures.length === 0) {
+      return { kind: 'none' }
+    }
+    return { kind: 'providers', providers: retryableFailures }
+  }
+
+  private async runActiveWindowRefreshPlan(plan: ActiveWindowRefreshPlan): Promise<void> {
+    if (plan.kind === 'none') {
+      return
+    }
+    if (plan.kind === 'full') {
+      await this.fetchAll()
+      return
+    }
+
+    const now = Date.now()
+    for (const provider of plan.providers) {
+      this.lastActiveFailureRetryAtByProvider[provider] = now
+    }
+
+    const canRefreshIndividually = plan.providers.every(
+      (provider) => provider === 'claude' || provider === 'codex'
+    )
+    if (!canRefreshIndividually) {
+      await this.fetchAll()
+      return
+    }
+
+    // Why: partial Claude/Codex failures should recover without re-reading
+    // healthy providers that are still inside the normal debounce window.
+    if (plan.providers.includes('claude')) {
+      await this.fetchClaudeOnly()
+    }
+    if (plan.providers.includes('codex')) {
+      await this.fetchCodexOnly()
+    }
+  }
+
   private async refreshIfWindowActive(): Promise<void> {
     if (!this.shouldBackgroundPoll()) {
       return
     }
-    // Why: startup intentionally skips the pre-paint fetch. The first visible
-    // activation must still populate usage after update relaunches where the
-    // timer can be focus-gated for a long time.
-    // Why: debounce off the last successful read so a failed post-update/relaunch
-    // fetch doesn't suppress auto-recovery for MIN_REFETCH_MS — focus/show/restore
-    // and the deferred-startup retry can re-attempt immediately after a failure.
-    if (Date.now() - this.lastSuccessfulFetchAt < MIN_REFETCH_MS) {
-      return
-    }
-    await this.fetchAll()
+    const plan = this.getActiveWindowRefreshPlan(Date.now())
+    await this.runActiveWindowRefreshPlan(plan)
   }
 
   private async fetchAll(options?: { force?: boolean }): Promise<void> {
@@ -997,17 +1073,6 @@ export class RateLimitService {
         : this.state.opencodeGo,
       kimi: this.applyStalePolicy(kimi, previousState.kimi)
     })
-
-    // Why: re-arm the debounce only when a provider actually returned fresh
-    // quota data. An unconfigured provider reports 'unavailable' (not an error),
-    // so a relaunch where the only configured provider errored out must not
-    // count as success, otherwise focus/show/restore recovery stays suppressed.
-    const cycleHadFreshData = [claude, codex, gemini, opencodeGo, kimi].some(
-      (result) => result.status === 'ok'
-    )
-    if (cycleHadFreshData) {
-      this.lastSuccessfulFetchAt = Date.now()
-    }
   }
 
   private async runFetchCodexOnlyCycle(): Promise<void> {
@@ -1052,11 +1117,6 @@ export class RateLimitService {
       ...this.state,
       codex: shouldApplyCodex ? this.applyStalePolicy(codex, previousState.codex) : this.state.codex
     })
-
-    // Why: a failed Codex read must not poison the success-debounce window.
-    if (codex.status === 'ok') {
-      this.lastSuccessfulFetchAt = Date.now()
-    }
   }
 
   private async runFetchClaudeOnlyCycle(): Promise<void> {
@@ -1098,11 +1158,6 @@ export class RateLimitService {
         ? this.applyStalePolicy(claude, previousState.claude)
         : this.state.claude
     })
-
-    // Why: a failed Claude read must not poison the success-debounce window.
-    if (claude.status === 'ok') {
-      this.lastSuccessfulFetchAt = Date.now()
-    }
   }
 
   private applyStalePolicy(
