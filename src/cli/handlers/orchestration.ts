@@ -147,6 +147,17 @@ async function resolveOrchestrationTerminalHandle(
   return await getTerminalHandle(flags, cwd, client)
 }
 
+async function getOptionalOrchestrationWorktreeSelector(
+  flags: Map<string, string | boolean>,
+  cwd: string,
+  client: Parameters<CommandHandler>[0]['client']
+): Promise<string | undefined> {
+  if (getOptionalStringFlag(flags, 'worktree') === 'all') {
+    return 'all'
+  }
+  return await getOptionalWorktreeSelector(flags, 'worktree', cwd, client)
+}
+
 function isDevCliInvocation(): boolean {
   return process.env.ORCA_USER_DATA_PATH?.includes('orca-dev') ?? false
 }
@@ -467,8 +478,15 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
   },
 
   'orchestration run': async ({ flags, client, cwd, json }) => {
-    const worktree = await getOptionalWorktreeSelector(flags, 'worktree', cwd, client)
-    const from = await resolveOrchestrationTerminalHandle(flags, cwd, client, 'from', worktree)
+    const worktree = await getOptionalOrchestrationWorktreeSelector(flags, cwd, client)
+    const terminalWorktree = worktree === 'all' ? undefined : worktree
+    const from = await resolveOrchestrationTerminalHandle(
+      flags,
+      cwd,
+      client,
+      'from',
+      terminalWorktree
+    )
     const result = await client.call<{
       runId: string
       status: string
@@ -487,10 +505,10 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       runId: string
       stopped: boolean
     }>('orchestration.runStop', {
-      // Why (#4389): target the coordinator for a specific worktree so stopping
-      // one workspace's run does not tear down another's. Omitting it targets
-      // the legacy global (unscoped) run.
-      worktree: await getOptionalWorktreeSelector(flags, 'worktree', cwd, client)
+      // Why (#4389): pass through an explicit worktree or `all` so the runtime
+      // can stop an exact coordinator. Omitting it keeps the legacy single-run
+      // convenience, but the runtime rejects ambiguity when several runs exist.
+      worktree: await getOptionalOrchestrationWorktreeSelector(flags, cwd, client)
     })
     printResult(result, json, (r) => `Run ${r.runId} stopped`)
   },
