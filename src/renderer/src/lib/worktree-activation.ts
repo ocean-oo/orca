@@ -72,6 +72,7 @@ export type WorktreeStartupPayload = {
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
   launchAgent?: TuiAgent
+  draftPrompt?: string
   startupCommandDelivery?: StartupCommandDelivery
   initialAgentStatus?: { agent: TuiAgent; prompt: string }
   telemetry?: AgentStartedTelemetry
@@ -118,6 +119,7 @@ type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
+      draftPrompt?: string
       initialAgentStatus?: { agent: TuiAgent; prompt: string }
       showSessionRestoredBanner?: boolean
       telemetry?: AgentStartedTelemetry

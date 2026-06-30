@@ -339,6 +339,7 @@ export type TerminalSlice = {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
+      draftPrompt?: string
       /** Initial prompt-start status for agents that lack native prompt hooks. */
       initialAgentStatus?: { agent: TuiAgent; prompt: string }
       /** Show the restored-session banner when this startup command mounts. */
@@ -500,6 +501,7 @@ export type TerminalSlice = {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
+      draftPrompt?: string
       initialAgentStatus?: { agent: TuiAgent; prompt: string }
       showSessionRestoredBanner?: boolean
       telemetry?: AgentStartedTelemetry
@@ -515,6 +517,7 @@ export type TerminalSlice = {
     launchConfig?: SleepingAgentLaunchConfig
     launchToken?: string
     launchAgent?: TuiAgent
+    draftPrompt?: string
     initialAgentStatus?: { agent: TuiAgent; prompt: string }
     showSessionRestoredBanner?: boolean
     telemetry?: AgentStartedTelemetry
