@@ -7,7 +7,7 @@ import {
   getRequiredStringFlag
 } from '../flags'
 import { RuntimeClientError } from '../runtime-client'
-import { getTerminalHandle } from '../selectors'
+import { getOptionalWorktreeSelector, getTerminalHandle } from '../selectors'
 
 // Why: 15 s is well under Claude Code's empirical ~2 min Bash-tool silence
 // budget and generates only ~40 lines per 10 min wait — enough to assure the
@@ -127,7 +127,8 @@ async function resolveOrchestrationTerminalHandle(
   flags: Map<string, string | boolean>,
   cwd: string,
   client: Parameters<CommandHandler>[0]['client'],
-  flagName: 'from' | 'terminal'
+  flagName: 'from' | 'terminal',
+  resolvedWorktree?: string
 ): Promise<string> {
   const explicit = getOptionalStringFlag(flags, flagName)
   if (explicit) {
@@ -136,6 +137,12 @@ async function resolveOrchestrationTerminalHandle(
   const envHandle = process.env.ORCA_TERMINAL_HANDLE
   if (envHandle && envHandle.length > 0) {
     return envHandle
+  }
+  if (resolvedWorktree !== undefined) {
+    const response = await client.call<{ handle: string }>('terminal.resolveActive', {
+      worktree: resolvedWorktree
+    })
+    return response.result.handle
   }
   return await getTerminalHandle(flags, cwd, client)
 }
@@ -460,7 +467,8 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
   },
 
   'orchestration run': async ({ flags, client, cwd, json }) => {
-    const from = await resolveOrchestrationTerminalHandle(flags, cwd, client, 'from')
+    const worktree = await getOptionalWorktreeSelector(flags, 'worktree', cwd, client)
+    const from = await resolveOrchestrationTerminalHandle(flags, cwd, client, 'from', worktree)
     const result = await client.call<{
       runId: string
       status: string
@@ -469,12 +477,12 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       from,
       pollIntervalMs: getOptionalPositiveIntegerFlag(flags, 'poll-interval-ms'),
       maxConcurrent: getOptionalPositiveIntegerFlag(flags, 'max-concurrent'),
-      worktree: getOptionalStringFlag(flags, 'worktree')
+      worktree
     })
     printResult(result, json, (r) => `Run ${r.runId} started (${r.status})`)
   },
 
-  'orchestration run-stop': async ({ flags, client, json }) => {
+  'orchestration run-stop': async ({ flags, client, cwd, json }) => {
     const result = await client.call<{
       runId: string
       stopped: boolean
@@ -482,7 +490,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       // Why (#4389): target the coordinator for a specific worktree so stopping
       // one workspace's run does not tear down another's. Omitting it targets
       // the legacy global (unscoped) run.
-      worktree: getOptionalStringFlag(flags, 'worktree')
+      worktree: await getOptionalWorktreeSelector(flags, 'worktree', cwd, client)
     })
     printResult(result, json, (r) => `Run ${r.runId} stopped`)
   },
