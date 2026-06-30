@@ -32,12 +32,12 @@ const openFileMock = vi.fn()
 const authorizeExternalPathMock = vi.fn()
 const statMock = vi.fn().mockResolvedValue({ isDirectory: false })
 const fsPathExistsMock = vi.fn().mockResolvedValue(true)
-// Why: the workspace-fallback (issue #5024) calls fs.listFiles; default to an
-// empty listing so the fallback runs intentionally rather than being silently
-// swallowed by resolveWorkspaceFileByBasename's try/catch on a missing mock.
-const listFilesMock = vi
-  .fn<(args: { rootPath: string }) => Promise<string[]>>()
-  .mockResolvedValue([])
+// Why: the workspace-fallback (issue #5024) calls a targeted basename resolver;
+// default to "no unique match" so the fallback runs intentionally rather than
+// being silently swallowed by resolveWorkspaceFileByBasename's try/catch.
+const resolveUniqueFileByBasenameMock = vi
+  .fn<(args: { rootPath: string; basename: string }) => Promise<string | null>>()
+  .mockResolvedValue(null)
 const runtimeEnvironmentCallMock = vi.fn()
 const runtimeEnvironmentTransportCallMock = vi.fn()
 const setActiveWorktreeMock = vi.fn()
@@ -112,7 +112,7 @@ beforeEach(() => {
   })
   vi.mocked(getConnectionId).mockReturnValue(null)
   openFilePathMock.mockResolvedValue(true)
-  listFilesMock.mockResolvedValue([])
+  resolveUniqueFileByBasenameMock.mockResolvedValue(null)
   __resetWorkspaceFileIndexCacheForTest()
   storeState.settings = undefined
   storeState.worktreesByRepo = {}
@@ -130,7 +130,7 @@ beforeEach(() => {
         authorizeExternalPath: authorizeExternalPathMock,
         pathExists: fsPathExistsMock,
         stat: statMock,
-        listFiles: listFilesMock
+        resolveUniqueFileByBasename: resolveUniqueFileByBasenameMock
       },
       runtimeEnvironments: { call: runtimeEnvironmentTransportCallMock }
     }
@@ -1245,10 +1245,9 @@ describe('createFilePathLinkProvider range bounds', () => {
 
   it('linkifies a bare filename that misses cwd but is unique in the worktree (issue #5024)', async () => {
     setPlatform('Macintosh')
-    listFilesMock.mockResolvedValue([
-      'src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx',
-      'README.md'
-    ])
+    resolveUniqueFileByBasenameMock.mockResolvedValue(
+      'src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx'
+    )
     const { provider, linkTooltip } = createProviderSetup(
       [makeBufferLine('TerminalContextMenu.test.tsx')],
       // The cwd-relative probe misses; the workspace fallback should resolve it.
@@ -1260,7 +1259,10 @@ describe('createFilePathLinkProvider range bounds', () => {
     })
 
     expect(links.map((link) => link.text)).toEqual(['TerminalContextMenu.test.tsx'])
-    expect(listFilesMock).toHaveBeenCalledWith({ rootPath: '/repo' })
+    expect(resolveUniqueFileByBasenameMock).toHaveBeenCalledWith({
+      rootPath: '/repo',
+      basename: 'TerminalContextMenu.test.tsx'
+    })
     links[0]!.hover?.({} as MouseEvent, links[0]!.text)
     expect(linkTooltip.textContent).toBe(
       '/repo/src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx (⌘+click to open or ⇧⌘+click for default app)'
@@ -1269,7 +1271,7 @@ describe('createFilePathLinkProvider range bounds', () => {
 
   it('does not link a bare filename that is ambiguous in the worktree (issue #5024)', async () => {
     setPlatform('Macintosh')
-    listFilesMock.mockResolvedValue(['src/a/index.ts', 'src/b/index.ts'])
+    resolveUniqueFileByBasenameMock.mockResolvedValue(null)
     const { provider } = createProviderSetup(
       [makeBufferLine('index.ts')],
       new Map([['active\0/repo/index.ts', false]])

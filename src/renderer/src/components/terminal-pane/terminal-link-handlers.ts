@@ -142,8 +142,9 @@ export function createFilePathLinkProvider(
                 if (!exists) {
                   // Why (issue #5024): a bare filename that doesn't exist at the
                   // cwd often refers to a file nested elsewhere in the worktree.
-                  // Resolve it against the worktree's own file list (local/SSH;
-                  // runtime hosts are skipped). Only a unique match links.
+                  // Resolve it with a targeted worktree basename lookup
+                  // (local/SSH; runtime hosts are skipped). Only a unique
+                  // match links.
                   const workspaceMatch =
                     !isRemoteRuntimePath && !/[\\/]/.test(parsed.pathText)
                       ? await resolveWorkspaceFileByBasename({

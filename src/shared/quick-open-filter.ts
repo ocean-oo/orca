@@ -242,6 +242,8 @@ export type RgArgsOptions = {
   searchRoot: string
   /** Root-relative, `/`-separated prefixes (from buildExcludePathPrefixes). */
   excludePathPrefixes: readonly string[]
+  /** Optional positive rg globs that narrow the file universe before excludes. */
+  includeGlobs?: readonly string[]
   /** On Windows rg emits `\\`-separated paths; pass true to force `/` output. */
   forceSlashSeparator: boolean
 }
@@ -266,6 +268,7 @@ export type RgArgs = {
  */
 export function buildRgArgsForQuickOpen(opts: RgArgsOptions): RgArgs {
   const sepArgs = opts.forceSlashSeparator ? ['--path-separator', '/'] : []
+  const includeGlobs = (opts.includeGlobs ?? []).flatMap((glob) => ['--glob', glob])
   const hiddenDirGlobs = buildHiddenDirExcludeGlobs()
   const excludeGlobs: string[] = []
   for (const prefix of opts.excludePathPrefixes) {
@@ -279,6 +282,7 @@ export function buildRgArgsForQuickOpen(opts: RgArgsOptions): RgArgs {
     '--files',
     '--hidden',
     ...sepArgs,
+    ...includeGlobs,
     ...hiddenDirGlobs,
     ...excludeGlobs,
     opts.searchRoot
@@ -291,6 +295,7 @@ export function buildRgArgsForQuickOpen(opts: RgArgsOptions): RgArgs {
     '--hidden',
     '--no-ignore-vcs',
     ...sepArgs,
+    ...includeGlobs,
     ...hiddenDirGlobs,
     ...excludeGlobs,
     opts.searchRoot
@@ -368,14 +373,19 @@ export type GitLsFilesArgs = {
  * their existing non-git fallback limits in the callers.
  */
 export function buildGitLsFilesArgsForQuickOpen(
-  excludePathPrefixes: readonly string[] = []
+  excludePathPrefixes: readonly string[] = [],
+  positivePathspecs: readonly string[] = []
 ): GitLsFilesArgs {
   const excludeSpecs: string[] = []
   for (const prefix of excludePathPrefixes) {
     excludeSpecs.push(`:(exclude,glob)${escapeGlobPath(prefix)}`)
     excludeSpecs.push(`:(exclude,glob)${escapeGlobPath(prefix)}/**`)
   }
-  const trailingPathspecs = excludeSpecs.length > 0 ? ['--', '.', ...excludeSpecs] : []
+  const positiveSpecs = positivePathspecs.length > 0 ? [...positivePathspecs] : ['.']
+  const trailingPathspecs =
+    excludeSpecs.length > 0 || positivePathspecs.length > 0
+      ? ['--', ...positiveSpecs, ...excludeSpecs]
+      : []
 
   // Why: newline output C-quotes tabs/newlines, which makes Quick Open return
   // fake paths when rg is unavailable. NUL output preserves real Git paths.

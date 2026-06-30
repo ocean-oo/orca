@@ -170,6 +170,19 @@ describe('buildRgArgsForQuickOpen', () => {
     // Glob metacharacters in a literal name must be escaped.
     expect(primary).toContain('!feature\\[1\\]')
   })
+
+  it('places positive include globs before exclude globs so excludes still win', () => {
+    const { primary } = buildRgArgsForQuickOpen({
+      searchRoot: '/r',
+      includeGlobs: ['**/index.ts'],
+      excludePathPrefixes: ['packages/app'],
+      forceSlashSeparator: false
+    })
+    const includeIdx = primary.indexOf('**/index.ts')
+    const excludeIdx = primary.indexOf('!packages/app')
+    expect(includeIdx).toBeGreaterThanOrEqual(0)
+    expect(excludeIdx).toBeGreaterThan(includeIdx)
+  })
 })
 
 describe('normalizeQuickOpenRgLine', () => {
@@ -259,5 +272,13 @@ describe('buildGitLsFilesArgsForQuickOpen', () => {
     expect(primary).toContain(':(exclude,glob)packages/app/**')
     expect(ignoredPass).toContain(':(exclude,glob)packages/app')
     expect(ignoredPass).toContain(':(exclude,glob)packages/app/**')
+  })
+
+  it('positive pathspecs narrow the scan while preserving excludes', () => {
+    const { primary } = buildGitLsFilesArgsForQuickOpen(['packages/app'], [':(glob)**/index.ts'])
+    const dashDashIdx = primary.indexOf('--')
+    expect(primary[dashDashIdx + 1]).toBe(':(glob)**/index.ts')
+    expect(primary).not.toContain('.')
+    expect(primary).toContain(':(exclude,glob)packages/app')
   })
 })

@@ -1,34 +1,17 @@
 import { joinAbsolutePath } from '@/lib/terminal-path-normalization'
 
-type WorkspaceFileIndexEntry = { fetchedAt: number; basenameToPaths: Map<string, string[]> }
+type WorkspaceBasenameResolutionEntry = { fetchedAt: number; relativePath: string | null }
 
-type ListWorkspaceFiles = (args: { rootPath: string; connectionId?: string }) => Promise<string[]>
+type ResolveUniqueWorkspaceFile = (args: {
+  rootPath: string
+  basename: string
+  connectionId?: string
+}) => Promise<string | null>
 
-// Why: the link provider runs per hovered line, so cache the worktree's file
-// list (the same listing Quick Open uses) and refresh it on a short TTL rather
-// than re-listing on every lookup.
-const WORKSPACE_FILE_INDEX_TTL_MS = 15_000
-const workspaceFileIndexCache = new Map<string, WorkspaceFileIndexEntry>()
-
-function basenameOf(relativePath: string): string {
-  const normalized = relativePath.replace(/\\/g, '/')
-  const slash = normalized.lastIndexOf('/')
-  return slash === -1 ? normalized : normalized.slice(slash + 1)
-}
-
-function buildBasenameIndex(files: readonly string[]): Map<string, string[]> {
-  const index = new Map<string, string[]>()
-  for (const relativePath of files) {
-    const basename = basenameOf(relativePath)
-    const existing = index.get(basename)
-    if (existing) {
-      existing.push(relativePath)
-    } else {
-      index.set(basename, [relativePath])
-    }
-  }
-  return index
-}
+// Why: the link provider runs per hovered line; cache the tiny basename answer
+// briefly instead of re-running a local/SSH filesystem scan on every lookup.
+const WORKSPACE_BASENAME_RESOLUTION_TTL_MS = 15_000
+const workspaceBasenameResolutionCache = new Map<string, WorkspaceBasenameResolutionEntry>()
 
 export type ResolveWorkspaceFileArgs = {
   basename: string
@@ -36,7 +19,7 @@ export type ResolveWorkspaceFileArgs = {
   connectionId?: string | null
   /** Test seams. */
   now?: number
-  listFiles?: ListWorkspaceFiles
+  resolveUniqueFileByBasename?: ResolveUniqueWorkspaceFile
 }
 
 /**
@@ -45,9 +28,9 @@ export type ResolveWorkspaceFileArgs = {
  * Why (issue #5024): agent output frequently references a repo file by bare
  * name (e.g. `TerminalContextMenu.test.tsx`), which does not exist at the
  * terminal's cwd root, so the link provider's cwd-relative existence check
- * misses it. Falling back to the worktree's own file list makes those mentions
- * clickable. Only a UNIQUE basename match is returned — multiple files sharing
- * a name are ambiguous and left unlinked rather than guessed.
+ * misses it. Falling back to the worktree's basename resolver makes those
+ * mentions clickable. Only a UNIQUE basename match is returned — multiple
+ * files sharing a name are ambiguous and left unlinked rather than guessed.
  */
 export async function resolveWorkspaceFileByBasename(
   args: ResolveWorkspaceFileArgs
@@ -58,29 +41,34 @@ export async function resolveWorkspaceFileByBasename(
   }
   const connectionId = args.connectionId ?? undefined
   const now = args.now ?? Date.now()
-  const cacheKey = `${connectionId ?? 'local'}::${worktreePath}`
+  const cacheKey = `${connectionId ?? 'local'}::${worktreePath}::${basename}`
 
-  let entry = workspaceFileIndexCache.get(cacheKey)
-  if (!entry || now - entry.fetchedAt > WORKSPACE_FILE_INDEX_TTL_MS) {
-    const list = args.listFiles ?? ((listArgs) => window.api.fs.listFiles(listArgs))
-    let files: string[]
+  let entry = workspaceBasenameResolutionCache.get(cacheKey)
+  if (!entry || now - entry.fetchedAt > WORKSPACE_BASENAME_RESOLUTION_TTL_MS) {
+    const resolveUnique =
+      args.resolveUniqueFileByBasename ??
+      ((lookupArgs) => window.api.fs.resolveUniqueFileByBasename(lookupArgs))
+    let relativePath: string | null
     try {
-      files = await list({ rootPath: worktreePath, ...(connectionId ? { connectionId } : {}) })
+      relativePath = await resolveUnique({
+        rootPath: worktreePath,
+        basename,
+        ...(connectionId ? { connectionId } : {})
+      })
     } catch {
-      // Best-effort: a failed listing must not break link detection.
+      // Best-effort: a failed lookup must not break link detection.
       return null
     }
-    entry = { fetchedAt: now, basenameToPaths: buildBasenameIndex(files) }
-    workspaceFileIndexCache.set(cacheKey, entry)
+    entry = { fetchedAt: now, relativePath }
+    workspaceBasenameResolutionCache.set(cacheKey, entry)
   }
 
-  const matches = entry.basenameToPaths.get(basename)
-  if (!matches || matches.length !== 1) {
+  if (!entry.relativePath) {
     return null
   }
-  return joinAbsolutePath(worktreePath, matches[0])
+  return joinAbsolutePath(worktreePath, entry.relativePath)
 }
 
 export function __resetWorkspaceFileIndexCacheForTest(): void {
-  workspaceFileIndexCache.clear()
+  workspaceBasenameResolutionCache.clear()
 }

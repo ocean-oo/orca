@@ -12,93 +12,98 @@ afterEach(() => {
 
 describe('resolveWorkspaceFileByBasename', () => {
   it('resolves a bare filename to a unique nested workspace file (issue #5024)', async () => {
-    const listFiles = vi.fn(async () => [
-      'src/a/Foo.ts',
-      'src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx',
-      'README.md'
-    ])
+    const resolveUniqueFileByBasename = vi.fn(
+      async () => 'src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx'
+    )
     const result = await resolveWorkspaceFileByBasename({
       basename: 'TerminalContextMenu.test.tsx',
       worktreePath: WT,
-      listFiles,
+      resolveUniqueFileByBasename,
       now: 1000
     })
     expect(result).toBe(
       '/Users/me/repo/src/renderer/src/components/terminal-pane/TerminalContextMenu.test.tsx'
     )
-    expect(listFiles).toHaveBeenCalledWith({ rootPath: WT })
+    expect(resolveUniqueFileByBasename).toHaveBeenCalledWith({
+      rootPath: WT,
+      basename: 'TerminalContextMenu.test.tsx'
+    })
   })
 
   it('returns null when multiple files share the basename (ambiguous, never guesses)', async () => {
-    const listFiles = vi.fn(async () => ['a/index.ts', 'b/index.ts'])
+    const resolveUniqueFileByBasename = vi.fn(async () => null)
     expect(
       await resolveWorkspaceFileByBasename({
         basename: 'index.ts',
         worktreePath: WT,
-        listFiles,
+        resolveUniqueFileByBasename,
         now: 1000
       })
     ).toBeNull()
   })
 
   it('returns null when no file matches', async () => {
-    const listFiles = vi.fn(async () => ['a/x.ts'])
+    const resolveUniqueFileByBasename = vi.fn(async () => null)
     expect(
       await resolveWorkspaceFileByBasename({
         basename: 'missing.ts',
         worktreePath: WT,
-        listFiles,
+        resolveUniqueFileByBasename,
         now: 1000
       })
     ).toBeNull()
   })
 
-  it('caches the file list within the TTL and refetches once it expires', async () => {
-    const listFiles = vi.fn(async () => ['a/Foo.ts'])
+  it('caches the basename result within the TTL and refetches once it expires', async () => {
+    const resolveUniqueFileByBasename = vi.fn(async () => 'a/Foo.ts')
     await resolveWorkspaceFileByBasename({
       basename: 'Foo.ts',
       worktreePath: WT,
-      listFiles,
+      resolveUniqueFileByBasename,
       now: 1000
     })
     await resolveWorkspaceFileByBasename({
       basename: 'Foo.ts',
       worktreePath: WT,
-      listFiles,
+      resolveUniqueFileByBasename,
       now: 5000
     })
-    expect(listFiles).toHaveBeenCalledTimes(1)
+    expect(resolveUniqueFileByBasename).toHaveBeenCalledTimes(1)
     await resolveWorkspaceFileByBasename({
       basename: 'Foo.ts',
       worktreePath: WT,
-      listFiles,
+      resolveUniqueFileByBasename,
       now: 1000 + 20_000
     })
-    expect(listFiles).toHaveBeenCalledTimes(2)
+    expect(resolveUniqueFileByBasename).toHaveBeenCalledTimes(2)
   })
 
   it('keys the cache by connection and forwards connectionId for SSH worktrees', async () => {
-    const remote = vi.fn(async () => ['y/remote.ts'])
+    const remote = vi.fn(async () => 'y/remote.ts')
     const result = await resolveWorkspaceFileByBasename({
       basename: 'remote.ts',
       worktreePath: WT,
       connectionId: 'ssh-1',
-      listFiles: remote,
+      resolveUniqueFileByBasename: remote,
       now: 1
     })
     expect(result).toBe('/Users/me/repo/y/remote.ts')
-    expect(remote).toHaveBeenCalledWith({ rootPath: WT, connectionId: 'ssh-1' })
+    expect(remote).toHaveBeenCalledWith({
+      rootPath: WT,
+      basename: 'remote.ts',
+      connectionId: 'ssh-1'
+    })
   })
 
-  it('returns null without throwing when listing fails', async () => {
-    const listFiles = vi.fn(async () => {
+  it('returns null without throwing when the basename lookup fails', async () => {
+    const resolveUniqueFileByBasename = vi.fn(async () => {
       throw new Error('listing unavailable')
     })
     expect(
       await resolveWorkspaceFileByBasename({
         basename: 'x.ts',
         worktreePath: WT,
-        listFiles,
+        resolveUniqueFileByBasename,
         now: 1
       })
     ).toBeNull()
