@@ -20,8 +20,8 @@ export {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-export function formatTimeAgo(ts: number): string {
-  const diff = Date.now() - ts
+export function formatTimeAgo(ts: number, now = Date.now()): string {
+  const diff = now - ts
   if (diff < 60_000) {
     return 'just now'
   }
@@ -35,12 +35,13 @@ export function formatTimeAgo(ts: number): string {
 
 export function formatResetCreditExpiry(
   expiresAt: number | null | undefined,
-  count: number
+  count: number,
+  now = Date.now()
 ): string | null {
   if (!expiresAt) {
     return null
   }
-  const duration = formatResetDuration(expiresAt - Date.now())
+  const duration = formatResetDuration(expiresAt - now)
   if (duration === 'now') {
     return count > 1
       ? translate('auto.components.status.bar.tooltip.7ec6e030a0', 'Next expires now')
@@ -171,12 +172,14 @@ export function ProviderPanel({
   p,
   inverted = false,
   className,
-  showResetCredits = true
+  showResetCredits = true,
+  now = Date.now()
 }: {
   p: ProviderRateLimits | null
   inverted?: boolean
   className?: string
   showResetCredits?: boolean
+  now?: number
 }): React.JSX.Element {
   const textClass = inverted ? 'text-background' : 'text-foreground'
   const mutedClass = inverted ? 'text-background/60' : 'text-muted-foreground'
@@ -226,14 +229,14 @@ export function ProviderPanel({
     )
   }
 
-  const updatedAgo = p.updatedAt ? `Updated ${formatTimeAgo(p.updatedAt)}` : 'Not yet updated'
+  const updatedAgo = p.updatedAt ? `Updated ${formatTimeAgo(p.updatedAt, now)}` : 'Not yet updated'
   const resetCreditCount =
     showResetCredits && p.provider === 'codex'
       ? (p.rateLimitResetCredits?.availableCount ?? null)
       : null
   const resetCreditExpiry =
     resetCreditCount != null
-      ? formatResetCreditExpiry(p.rateLimitResetCredits?.nextExpiresAt, resetCreditCount)
+      ? formatResetCreditExpiry(p.rateLimitResetCredits?.nextExpiresAt, resetCreditCount, now)
       : null
 
   const PanelWindowSection = ({
@@ -247,7 +250,7 @@ export function ProviderPanel({
       return null
     }
     const leftPct = Math.max(0, Math.round(100 - w.usedPercent))
-    const resetLabel = w.resetsAt ? formatResetCountdown(w.resetsAt - Date.now()) : null
+    const resetLabel = w.resetsAt != null ? formatResetCountdown(w.resetsAt - now) : null
 
     return (
       <div className="space-y-1">

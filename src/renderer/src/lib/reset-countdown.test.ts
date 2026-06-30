@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatResetCountdown, formatResetDuration } from './reset-countdown'
+import {
+  formatResetCountdown,
+  formatResetDuration,
+  getResetCountdownNextTickDelay
+} from './reset-countdown'
 
 const HOUR = 60 * 60_000
 const MINUTE = 60_000
@@ -10,12 +14,12 @@ describe('formatResetDuration', () => {
     expect(formatResetDuration(-1)).toBe('now')
   })
 
-  it('returns "<1m" for sub-minute positive durations, not "0m"', () => {
-    // Why: the 30s tick makes the final minute before reset reachable; "0m"
-    // would read as already-reset.
-    expect(formatResetDuration(1)).toBe('<1m')
-    expect(formatResetDuration(30_000)).toBe('<1m')
-    expect(formatResetDuration(59_999)).toBe('<1m')
+  it('preserves the existing "0m" copy for sub-minute positive durations', () => {
+    // Why: issue #5399 only changes the status badge's source value; the
+    // expanded panel and Codex reset-credit final-minute wording stay stable.
+    expect(formatResetDuration(1)).toBe('0m')
+    expect(formatResetDuration(30_000)).toBe('0m')
+    expect(formatResetDuration(59_999)).toBe('0m')
   })
 
   it('returns whole minutes under an hour', () => {
@@ -48,12 +52,50 @@ describe('formatResetCountdown', () => {
     expect(formatResetCountdown(3 * HOUR + 31 * MINUTE)).toBe('Resets in 3h 31m')
   })
 
-  it('reads "Resets in <1m" in the final minute', () => {
-    expect(formatResetCountdown(30_000)).toBe('Resets in <1m')
+  it('preserves the existing final-minute label', () => {
+    expect(formatResetCountdown(30_000)).toBe('Resets in 0m')
   })
 
   it('reads "Resets now" once elapsed', () => {
     expect(formatResetCountdown(0)).toBe('Resets now')
     expect(formatResetCountdown(-1)).toBe('Resets now')
+  })
+})
+
+describe('getResetCountdownNextTickDelay', () => {
+  it('ticks just after the next minute boundary for minute-granularity labels', () => {
+    const now = Date.parse('2026-06-20T12:00:00.000Z')
+    const resetAt = now + 3 * MINUTE + 12_345
+
+    expect(getResetCountdownNextTickDelay(now, [resetAt])).toBe(12_346)
+  })
+
+  it('ticks just after the reset time during the final minute', () => {
+    const now = Date.parse('2026-06-20T12:00:00.000Z')
+    const resetAt = now + 30_000
+
+    expect(getResetCountdownNextTickDelay(now, [resetAt])).toBe(30_001)
+  })
+
+  it('ticks on the soonest reset label boundary across providers', () => {
+    const now = Date.parse('2026-06-20T12:00:00.000Z')
+
+    expect(
+      getResetCountdownNextTickDelay(now, [now + 10 * MINUTE + 45_000, now + 5 * MINUTE + 5_000])
+    ).toBe(5_001)
+  })
+
+  it('uses hour boundaries for day-granularity labels', () => {
+    const now = Date.parse('2026-06-20T12:00:00.000Z')
+    const resetAt = now + 2 * 24 * HOUR + 4 * HOUR + 17 * MINUTE
+
+    expect(getResetCountdownNextTickDelay(now, [resetAt])).toBe(17 * MINUTE + 1)
+  })
+
+  it('does not schedule a tick when no future reset is visible', () => {
+    const now = Date.parse('2026-06-20T12:00:00.000Z')
+
+    expect(getResetCountdownNextTickDelay(now, [])).toBeNull()
+    expect(getResetCountdownNextTickDelay(now, [now, now - 1])).toBeNull()
   })
 })

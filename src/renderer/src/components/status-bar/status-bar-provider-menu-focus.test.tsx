@@ -75,7 +75,7 @@ function findChildByType(node: unknown, typeName: string): ReactElementLike {
   throw new Error(`Could not find ${typeName}`)
 }
 
-async function renderProviderDetailsMenu(): Promise<unknown> {
+async function renderProviderDetailsMenu(now?: number): Promise<unknown> {
   const { ProviderDetailsMenu } = await import('./StatusBar')
   return ProviderDetailsMenu({
     provider: {
@@ -98,7 +98,8 @@ async function renderProviderDetailsMenu(): Promise<unknown> {
     },
     compact: false,
     iconOnly: false,
-    ariaLabel: 'Open Codex usage details'
+    ariaLabel: 'Open Codex usage details',
+    ...(now !== undefined ? { now } : {})
   })
 }
 
@@ -127,5 +128,12 @@ describe('ProviderDetailsMenu focus handoff', () => {
       preventDefault
     })
     expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('passes the shared countdown timestamp into the provider panel', async () => {
+    const element = await renderProviderDetailsMenu(123_456)
+    const panel = findChildByType(element, 'ProviderPanel')
+
+    expect(panel.props.now).toBe(123_456)
   })
 })
