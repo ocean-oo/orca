@@ -87,6 +87,12 @@ describe('buildExcludePathPrefixes', () => {
     ])
   })
 
+  it('handles mixed-case UNC roots and paths', () => {
+    expect(
+      buildExcludePathPrefixes('\\\\Server\\Share\\Repo', ['//server/share/repo/packages/app'])
+    ).toEqual(['packages/app'])
+  })
+
   it('strips trailing slashes', () => {
     expect(buildExcludePathPrefixes('/r', ['/r/a/', '/r/b///'])).toEqual(['a', 'b'])
   })
