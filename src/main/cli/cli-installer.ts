@@ -1066,9 +1066,8 @@ function isMissingError(error: unknown): boolean {
 
 // Why: Windows refuses user-environment writes (Group Policy / restricted HKCU
 // ACL / EDR-managed env) with a localized message that can arrive as mojibake,
-// so detection keys off the Latin PowerShell error envelope tokens
-// (FullyQualifiedErrorId, MethodInvocationException) that stay readable
-// regardless of the OS display language, plus stable English ACL substrings.
+// so detection keys off permission-specific .NET/ACL markers that stay
+// readable instead of generic PowerShell method-invocation wrappers.
 function isWindowsUserPathPermissionError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false
@@ -1080,7 +1079,6 @@ function isWindowsUserPathPermissionError(error: unknown): boolean {
   const haystack = `${error.message}\n${stderr}`
   return (
     haystack.includes('UnauthorizedAccessException') ||
-    haystack.includes('MethodInvocationException') ||
     haystack.includes('Requested registry access is not allowed') ||
     haystack.includes('Access is denied') ||
     haystack.includes('Access to the registry key')

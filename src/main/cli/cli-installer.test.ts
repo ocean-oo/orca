@@ -379,26 +379,35 @@ describe('CliInstaller', () => {
     })
   })
 
-  it('propagates a non-permission Windows PATH write error unchanged', async () => {
-    const fixture = await makeFixture()
-    const installPath = join(fixture.root, 'Programs', 'Orca', 'bin', 'orca.cmd')
-    const installer = new CliInstaller({
-      platform: 'win32',
-      isPackaged: false,
-      userDataPath: fixture.userDataPath,
-      execPath: 'C:\\Users\\me\\AppData\\Local\\Orca\\Orca.exe',
-      appPath: fixture.appPath,
-      commandPathOverride: installPath,
-      userPathReader: async () => 'C:\\Windows\\System32',
-      userPathWriter: async () => {
-        throw new Error('Windows PATH command timed out after 5000ms.')
-      }
-    })
+  it.each([
+    ['PowerShell timeout', 'Windows PATH command timed out after 5000ms.'],
+    [
+      'generic PowerShell method failure',
+      "Command failed: powershell -NoProfile -Command [Environment]::SetEnvironmentVariable('Path', '...', 'User')\nCategoryInfo : NotSpecified: (:) [], MethodInvocationException\nFullyQualifiedErrorId : MethodInvocationException"
+    ]
+  ])(
+    'propagates a non-permission Windows PATH write error unchanged: %s',
+    async (_name, message) => {
+      const fixture = await makeFixture()
+      const installPath = join(fixture.root, 'Programs', 'Orca', 'bin', 'orca.cmd')
+      const installer = new CliInstaller({
+        platform: 'win32',
+        isPackaged: false,
+        userDataPath: fixture.userDataPath,
+        execPath: 'C:\\Users\\me\\AppData\\Local\\Orca\\Orca.exe',
+        appPath: fixture.appPath,
+        commandPathOverride: installPath,
+        userPathReader: async () => 'C:\\Windows\\System32',
+        userPathWriter: async () => {
+          throw new Error(message)
+        }
+      })
 
-    await expect(installer.install()).rejects.toThrow(
-      'Windows PATH command timed out after 5000ms.'
-    )
-  })
+      const result = installer.install()
+      await expect(result).rejects.toThrow(message)
+      await expect(result).rejects.not.toThrow(/Windows blocked updating your user PATH/)
+    }
+  )
 
   it('settles when the Windows PATH query hangs', async () => {
     vi.useFakeTimers()
