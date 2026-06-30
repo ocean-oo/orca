@@ -140,6 +140,8 @@ export function AddRepoNestedImportStep({
             placeholder={folderName}
           />
         </div>
+        {/* Why: zero selected repos disables import, so expose the existing
+        folder-add flow instead of leaving this step as a dead end. */}
         {hasNoSelectedRepos ? (
           <p className="shrink-0 text-xs text-muted-foreground">
             {translate(
