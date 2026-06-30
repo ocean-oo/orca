@@ -613,6 +613,131 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
+  it('does not let Claude background tool progress restart a completed turn', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      const listener = vi.fn()
+      server.setListener(listener)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          hookEventName: 'UserPromptSubmit',
+          payload: { state: 'working', prompt: 'write release notes', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+
+      vi.setSystemTime(2_000)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          payload: {
+            state: 'done',
+            prompt: 'write release notes',
+            agentType: 'claude',
+            lastAssistantMessage: 'Release notes are ready.'
+          }
+        },
+        'conn-1'
+      )
+
+      vi.setSystemTime(30_000)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'PreToolUse',
+          payload: {
+            state: 'working',
+            prompt: 'write release notes',
+            agentType: 'claude',
+            toolName: 'Write',
+            toolInput: 'CLAUDE.md memory update'
+          }
+        },
+        'conn-1'
+      )
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          state: 'done',
+          prompt: 'write release notes',
+          agentType: 'claude',
+          receivedAt: 2_000,
+          stateStartedAt: 2_000
+        })
+      ])
+      expect(listener).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('allows a fresh Claude prompt to rerun the same text after completion', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const server = new AgentHookServer()
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          hookEventName: 'UserPromptSubmit',
+          payload: { state: 'working', prompt: 'write release notes', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+
+      vi.setSystemTime(2_000)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hookEventName: 'Stop',
+          payload: { state: 'done', prompt: 'write release notes', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+
+      vi.setSystemTime(30_000)
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          hasExplicitPrompt: true,
+          hookEventName: 'UserPromptSubmit',
+          payload: { state: 'working', prompt: 'write release notes', agentType: 'claude' }
+        },
+        'conn-1'
+      )
+
+      expect(server.getStatusSnapshot()).toEqual([
+        expect.objectContaining({
+          state: 'working',
+          prompt: 'write release notes',
+          agentType: 'claude',
+          receivedAt: 30_000,
+          stateStartedAt: 30_000
+        })
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('allows an immediate same-prompt retry after an inferred interrupt', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)

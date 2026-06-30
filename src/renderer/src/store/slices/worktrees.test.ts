@@ -4839,6 +4839,67 @@ describe('worktree remote runtime mutations', () => {
     )
   })
 
+  it('coalesces rapid background activity stamps to avoid sidebar re-sort churn', async () => {
+    vi.useFakeTimers()
+    try {
+      mockApi.worktrees.updateMeta.mockClear()
+      const store = createTestStore()
+      const wt = makeWorktree({
+        id: 'repo1::/path/wt1',
+        repoId: 'repo1',
+        path: '/path/wt1',
+        lastActivityAt: 1_000
+      })
+      store.setState({
+        activeWorktreeId: 'repo1::/path/other',
+        sortEpoch: 7,
+        worktreesByRepo: { repo1: [wt] }
+      } as Partial<AppState>)
+
+      vi.setSystemTime(10_000)
+      store.getState().bumpWorktreeActivity(wt.id)
+      await Promise.resolve()
+
+      expect(store.getState().worktreesByRepo.repo1[0]?.lastActivityAt).toBe(1_000)
+      expect(store.getState().sortEpoch).toBe(7)
+      expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('persists background activity once the coalescing window has elapsed', async () => {
+    vi.useFakeTimers()
+    try {
+      mockApi.worktrees.updateMeta.mockClear()
+      const store = createTestStore()
+      const wt = makeWorktree({
+        id: 'repo1::/path/wt1',
+        repoId: 'repo1',
+        path: '/path/wt1',
+        lastActivityAt: 1_000
+      })
+      store.setState({
+        activeWorktreeId: 'repo1::/path/other',
+        sortEpoch: 7,
+        worktreesByRepo: { repo1: [wt] }
+      } as Partial<AppState>)
+
+      vi.setSystemTime(17_000)
+      store.getState().bumpWorktreeActivity(wt.id)
+      await Promise.resolve()
+
+      expect(store.getState().worktreesByRepo.repo1[0]?.lastActivityAt).toBe(17_000)
+      expect(store.getState().sortEpoch).toBe(8)
+      expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
+        worktreeId: wt.id,
+        updates: { lastActivityAt: 17_000 }
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('clears stale hosted review cache and force-refetches when removing linked PR metadata', async () => {
     const store = createTestStore()
     const wt = makeWorktree({

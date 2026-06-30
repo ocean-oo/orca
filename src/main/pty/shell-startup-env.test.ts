@@ -10,7 +10,11 @@ vi.mock('fs', () => ({
   readFileSync: readFileSyncMock
 }))
 
-import { __resetShellStartupEnvCache, readShellStartupEnvVar } from './shell-startup-env'
+import {
+  __resetShellStartupEnvCache,
+  readShellStartupEnvVar,
+  readShellStartupPathSegments
+} from './shell-startup-env'
 
 describe('readShellStartupEnvVar', () => {
   const originalPlatform = process.platform
@@ -306,5 +310,34 @@ describe('readShellStartupEnvVar', () => {
   it('does not match an OPENCODE_CONFIG_DIR mention in a comment', () => {
     mockStartupFiles({ '.zshrc': '# export OPENCODE_CONFIG_DIR=/from-comment\n' })
     expect(readShellStartupEnvVar('OPENCODE_CONFIG_DIR', '/home/alice')).toBeUndefined()
+  })
+
+  it('reads exported PATH prepends without spawning the shell', () => {
+    mockStartupFiles({ '.zshrc': 'export PATH="$HOME/.cargo/bin:$PATH"\n' })
+
+    expect(readShellStartupPathSegments('/home/alice', '/bin/zsh', '/usr/bin:/bin')).toEqual([
+      '/home/alice/.cargo/bin',
+      '/usr/bin',
+      '/bin'
+    ])
+  })
+
+  it('reads bare PATH assignments because PATH is already exported', () => {
+    mockStartupFiles({ '.zshrc': 'PATH="$HOME/bin:$PATH"\n' })
+
+    expect(readShellStartupPathSegments('/home/alice', '/bin/zsh', '/usr/bin:/bin')).toEqual([
+      '/home/alice/bin',
+      '/usr/bin',
+      '/bin'
+    ])
+  })
+
+  it('does not expand PATH references inside single quotes', () => {
+    mockStartupFiles({ '.zshrc': "export PATH='$HOME/bin:$PATH'\n" })
+
+    expect(readShellStartupPathSegments('/home/alice', '/bin/zsh', '/usr/bin:/bin')).toEqual([
+      '$HOME/bin',
+      '$PATH'
+    ])
   })
 })

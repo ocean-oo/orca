@@ -6,6 +6,7 @@ import { posix } from 'path'
 // a stale .bash_profile on a zsh user would clobber the real .zshrc value.
 const ZSH_ENV_FILE = '.zshenv'
 const ZSH_AFTER_ENV_FILES = ['.zprofile', '.zshrc', '.zlogin']
+const POSIX_PATH_DELIMITER = ':'
 // Why: Orca launches bash as a login shell (see local-pty-shell-ready.ts
 // getBashShellReadyRcfileContent and daemon/shell-ready.ts) which sources
 // .bash_profile / .bash_login / .profile but intentionally does NOT force
@@ -35,6 +36,30 @@ function parseExportedValue(content: string, name: string, home: string): string
   }
 
   return lastMatch
+}
+
+function parsePathValue(content: string, home: string, basePath: string): string | undefined {
+  const assignment = /^(?:export\s+)?PATH=(.+)$/
+  let currentPath = basePath
+  let matched = false
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    const match = assignment.exec(line)
+    if (!match?.[1]) {
+      continue
+    }
+    const decommented = stripTrailingComment(match[1])
+    const { text, quoted } = unquoteShellValue(decommented)
+    const expandedHome = quoted === "'" ? text : expandHome(text, home)
+    const expandedPath = quoted === "'" ? expandedHome : expandPath(expandedHome, currentPath)
+    if (expandedPath.length > 0) {
+      currentPath = expandedPath
+      matched = true
+    }
+  }
+
+  return matched ? currentPath : undefined
 }
 
 function readStartupFile(path: string): string | null {
@@ -121,6 +146,23 @@ function expandHome(value: string, home: string): string {
     .replace(/\$HOME(?![A-Za-z0-9_])/g, home)
 }
 
+function expandPath(value: string, currentPath: string): string {
+  // Why: shell startup files commonly prepend to PATH with "$PATH"; resolving
+  // that statically avoids the macOS interactive-shell spawn on startup.
+  return value.replace(/\$\{PATH\}/g, currentPath).replace(/\$PATH(?![A-Za-z0-9_])/g, currentPath)
+}
+
+function splitPosixPath(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(POSIX_PATH_DELIMITER)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+    )
+  ]
+}
+
 const cache = new Map<string, string | undefined>()
 
 /**
@@ -181,6 +223,41 @@ export function readShellStartupEnvVar(
 
   cache.set(cacheKey, lastMatch)
   return lastMatch
+}
+
+/**
+ * Best-effort static read of PATH assignments from POSIX shell startup files.
+ *
+ * Why: on managed macOS machines an interactive login shell probe can block in
+ * posix_spawn before JavaScript can arm a timeout. A static PATH read preserves
+ * common `PATH="$HOME/bin:$PATH"` customizations without spawning a shell.
+ */
+export function readShellStartupPathSegments(
+  home = process.env.HOME,
+  shell = process.env.SHELL,
+  basePath = process.env.PATH
+): string[] {
+  if (!home || process.platform === 'win32') {
+    return []
+  }
+
+  let currentPath = basePath ?? ''
+  let foundAssignment = false
+
+  for (const path of shellStartupFilePaths(home, shell)) {
+    const content = readStartupFile(path)
+    if (content === null) {
+      continue
+    }
+
+    const nextPath = parsePathValue(content, home, currentPath)
+    if (nextPath !== undefined) {
+      currentPath = nextPath
+      foundAssignment = true
+    }
+  }
+
+  return foundAssignment ? splitPosixPath(currentPath) : []
 }
 
 /**

@@ -16735,6 +16735,22 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  it('does not count saved session tabs without live PTYs as current mobile terminals', async () => {
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
+      makeWorkspaceSessionWithHeadlessTerminal()
+    )
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    const { worktrees } = await runtime.getWorktreePs()
+    expect(worktrees[0]).toMatchObject({
+      worktreeId: TEST_WORKTREE_ID,
+      hasHostSidebarActivity: false,
+      status: 'inactive',
+      liveTerminalCount: 0,
+      hasAttachedPty: false
+    })
+  })
+
   it('falls back to the path-keyed GitHub cache entry', async () => {
     const runtimeStore = {
       ...store,

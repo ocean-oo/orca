@@ -9,12 +9,17 @@ import {
   type HydrationResult
 } from './hydrate-shell-path'
 
-const { spawnMock } = vi.hoisted(() => ({
+const { readShellStartupPathSegmentsMock, spawnMock } = vi.hoisted(() => ({
+  readShellStartupPathSegmentsMock: vi.fn(),
   spawnMock: vi.fn()
 }))
 
 vi.mock('child_process', () => ({
   spawn: spawnMock
+}))
+
+vi.mock('../pty/shell-startup-env', () => ({
+  readShellStartupPathSegments: readShellStartupPathSegmentsMock
 }))
 
 type HydrationSpawner = (shell: string) => Promise<HydrationResult>
@@ -31,14 +36,27 @@ function createMockShellProcess(): ChildProcessWithoutNullStreams {
 }
 
 describe('hydrateShellPath', () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
   const originalPath = process.env.PATH
+
+  function setPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: platform
+    })
+  }
 
   beforeEach(() => {
     _resetHydrateShellPathCache()
+    readShellStartupPathSegmentsMock.mockReset()
+    readShellStartupPathSegmentsMock.mockReturnValue([])
     spawnMock.mockReset()
   })
 
   afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, 'platform', originalPlatform)
+    }
     if (originalPath === undefined) {
       delete process.env.PATH
     } else {
@@ -64,6 +82,36 @@ describe('hydrateShellPath', () => {
     expect(result.ok).toBe(true)
     expect(result.segments).toEqual(['/Users/tester/.opencode/bin', '/Users/tester/.cargo/bin'])
     expect(result.failureReason).toBe('none')
+  })
+
+  it('uses static startup-file PATH hydration on macOS without spawning a shell', async () => {
+    setPlatform('darwin')
+    process.env.PATH = '/usr/bin:/bin'
+    readShellStartupPathSegmentsMock.mockReturnValue(['/Users/tester/.cargo/bin', '/usr/bin'])
+
+    const result = await hydrateShellPath({ shellOverride: '/bin/zsh', force: true })
+
+    expect(result).toEqual({
+      segments: ['/Users/tester/.cargo/bin', '/usr/bin'],
+      ok: true,
+      failureReason: 'none'
+    })
+    expect(readShellStartupPathSegmentsMock).toHaveBeenCalledWith(
+      process.env.HOME,
+      '/bin/zsh',
+      '/usr/bin:/bin'
+    )
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('reports empty_path when macOS static startup-file hydration finds no PATH assignment', async () => {
+    setPlatform('darwin')
+    readShellStartupPathSegmentsMock.mockReturnValue([])
+
+    const result = await hydrateShellPath({ shellOverride: '/bin/zsh', force: true })
+
+    expect(result).toEqual({ segments: [], ok: false, failureReason: 'empty_path' })
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 
   it('caches the hydration result so repeated calls do not re-spawn', async () => {
@@ -139,7 +187,11 @@ describe('hydrateShellPath', () => {
     spawnMock.mockReturnValue(proc)
 
     try {
-      const resultPromise = hydrateShellPath({ shellOverride: '/bin/zsh', force: true })
+      const resultPromise = hydrateShellPath({
+        shellOverride: '/bin/zsh',
+        force: true,
+        strategy: 'interactive'
+      })
       const assertion = expect(resultPromise).resolves.toEqual({
         segments: [],
         ok: false,

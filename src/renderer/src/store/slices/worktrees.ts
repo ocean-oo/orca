@@ -69,6 +69,7 @@ const ACTIVE_WORKTREE_TERMINAL_PREP_DELAY_MS = 300
 const ACTIVE_WORKTREE_TERMINAL_PREP_INPUT_QUIET_MS = 450
 const ACTIVE_WORKTREE_TERMINAL_PREP_IDLE_TIMEOUT_MS = 180
 const WORKTREE_REFRESH_CONCURRENCY = 5
+const WORKTREE_ACTIVITY_RESTAMP_MIN_INTERVAL_MS = 15_000
 const pendingActivationTerminalPrepCancels = new Map<string, () => void>()
 const detachedHeadAutoDerivedDisplayNames = new Map<string, string>()
 const folderWorkspaceWorktreeCache = new WeakMap<FolderWorkspace, Worktree>()
@@ -3739,6 +3740,17 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const worktree = findKnownWorktreeById(s, worktreeId)
       if (!worktree) {
         return {}
+      }
+      const msSinceLastActivity = now - worktree.lastActivityAt
+      if (
+        Number.isFinite(worktree.lastActivityAt) &&
+        worktree.lastActivityAt > 0 &&
+        msSinceLastActivity >= 0 &&
+        msSinceLastActivity < WORKTREE_ACTIVITY_RESTAMP_MIN_INTERVAL_MS
+      ) {
+        // Why: bursty PTY lifecycle events from multiple agents can otherwise
+        // rewrite metadata and re-sort the sidebar several times per moment.
+        return s
       }
       shouldPersist = true
       // Skip sortEpoch bump for the active worktree. Terminal events

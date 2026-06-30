@@ -22,7 +22,8 @@ type WorktreeAgentRowsState = Pick<
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'tabsByWorktree'
->
+> &
+  Partial<Pick<AppState, 'recentlyClosedAgentStatusTabIds'>>
 
 type TabWorktreeIndexCache = {
   tabsByWorktree: WorktreeAgentRowsState['tabsByWorktree']
@@ -32,6 +33,7 @@ type TabWorktreeIndexCache = {
 type LiveEntriesByWorktreeCache = {
   tabsByWorktree: WorktreeAgentRowsState['tabsByWorktree']
   agentStatusByPaneKey: WorktreeAgentRowsState['agentStatusByPaneKey']
+  recentlyClosedAgentStatusTabIds: WorktreeAgentRowsState['recentlyClosedAgentStatusTabIds']
   entriesByWorktree: Map<string, AgentStatusEntry[]>
 }
 
@@ -82,9 +84,11 @@ function getTabIdToWorktreeId(
 function getLiveEntriesByWorktree(state: WorktreeAgentRowsState): Map<string, AgentStatusEntry[]> {
   const agentStatusByPaneKey = state.agentStatusByPaneKey ?? EMPTY_RECORD
   const tabsByWorktree = state.tabsByWorktree ?? EMPTY_RECORD
+  const recentlyClosedAgentStatusTabIds = state.recentlyClosedAgentStatusTabIds ?? EMPTY_RECORD
   if (
     liveEntriesByWorktreeCache?.tabsByWorktree === tabsByWorktree &&
-    liveEntriesByWorktreeCache.agentStatusByPaneKey === agentStatusByPaneKey
+    liveEntriesByWorktreeCache.agentStatusByPaneKey === agentStatusByPaneKey &&
+    liveEntriesByWorktreeCache.recentlyClosedAgentStatusTabIds === recentlyClosedAgentStatusTabIds
   ) {
     return liveEntriesByWorktreeCache.entriesByWorktree
   }
@@ -97,7 +101,19 @@ function getLiveEntriesByWorktree(state: WorktreeAgentRowsState): Map<string, Ag
     if (!parsed) {
       continue
     }
-    const worktreeId = tabIdToWorktreeId.get(parsed.tabId) ?? entry.worktreeId
+    if (
+      recentlyClosedAgentStatusTabIds[parsed.tabId] ||
+      (entry.tabId && recentlyClosedAgentStatusTabIds[entry.tabId])
+    ) {
+      continue
+    }
+    const currentTabWorktreeId = tabIdToWorktreeId.get(parsed.tabId)
+    if (!currentTabWorktreeId && entry.state === 'done') {
+      // Why: worktreeId fallback is for early live child-agent attribution.
+      // A completed row whose tab is gone is stale and should not render live.
+      continue
+    }
+    const worktreeId = currentTabWorktreeId ?? entry.worktreeId
     if (!worktreeId) {
       continue
     }
@@ -114,6 +130,7 @@ function getLiveEntriesByWorktree(state: WorktreeAgentRowsState): Map<string, Ag
   liveEntriesByWorktreeCache = {
     tabsByWorktree,
     agentStatusByPaneKey,
+    recentlyClosedAgentStatusTabIds,
     entriesByWorktree
   }
   return entriesByWorktree

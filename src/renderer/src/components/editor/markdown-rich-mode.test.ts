@@ -14,6 +14,16 @@ describe('getMarkdownRichModeUnsupportedMessage', () => {
     expect(getMarkdownRichModeUnsupportedMessage('# Title\n\n- one\n- two\n')).toBeNull()
   })
 
+  it('falls back to source mode for emphasis syntax rich editing would rewrite', () => {
+    expect(getMarkdownRichModeUnsupportedMessage('Keep _word_ unchanged.\n')).toContain('rewrite')
+    expect(getMarkdownRichModeUnsupportedMessage('Keep __word__ unchanged.\n')).toContain('rewrite')
+  })
+
+  it('falls back to source mode for alternate unordered-list markers', () => {
+    expect(getMarkdownRichModeUnsupportedMessage('* one\n* two\n')).toContain('rewrite')
+    expect(getMarkdownRichModeUnsupportedMessage('+ one\n+ two\n')).toContain('rewrite')
+  })
+
   it('allows common raw html in markdown files', () => {
     expect(getMarkdownRichModeUnsupportedMessage('Before <span>hi</span> after\n')).toBeNull()
   })
@@ -38,6 +48,11 @@ describe('getMarkdownRichModeUnsupportedMessage', () => {
     expect(getMarkdownRichModeUnsupportedMessage('Use `<Widget />` in docs.\n')).toBeNull()
     expect(getMarkdownRichModeUnsupportedMessage('```tsx\n<Widget />\n```\n')).toBeNull()
     expect(getMarkdownRichModeUnsupportedMessage('```tsx\r\n<Widget />\r\n```\r\n')).toBeNull()
+  })
+
+  it('ignores format-sensitive markdown markers inside code spans and fences', () => {
+    expect(getMarkdownRichModeUnsupportedMessage('Use `_word_` in docs.\n')).toBeNull()
+    expect(getMarkdownRichModeUnsupportedMessage('```md\n* keep this literal\n```\n')).toBeNull()
   })
 
   it('allows angle brackets in ordinary prose', () => {

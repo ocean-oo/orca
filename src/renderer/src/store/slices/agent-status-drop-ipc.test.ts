@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type AgentStatusEntry } from '../../../../shared/agent-status-types'
+import { makePaneKey } from '../../../../shared/stable-pane-id'
 import type { TerminalTab } from '../../../../shared/types'
 import type { RetainedAgentEntry } from './agent-status'
 import { createTestStore } from './store-test-helpers'
@@ -118,6 +119,25 @@ describe('dropAgentStatusByTabPrefix -> IPC fan-out', () => {
       'tab-old': true,
       'tab-new': true
     })
+  })
+
+  it('ignores late statuses routed to a closed tab even when the pane key differs', () => {
+    stubWindowApi()
+    const store = createTestStore()
+    const childPaneKey = makePaneKey('tab-child', '33333333-3333-4333-8333-333333333333')
+
+    store.getState().dropAgentStatusByTabPrefix('tab-closed')
+    store
+      .getState()
+      .setAgentStatus(
+        childPaneKey,
+        { state: 'done', prompt: 'p', agentType: 'pi' },
+        'Pi',
+        { updatedAt: 1_000, stateStartedAt: 1_000 },
+        { tabId: 'tab-closed', worktreeId: 'wt-1' }
+      )
+
+    expect(store.getState().agentStatusByPaneKey[childPaneKey]).toBeUndefined()
   })
 })
 

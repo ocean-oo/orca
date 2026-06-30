@@ -285,6 +285,22 @@ function isToolProgressWorkingAfterInterrupt(next: AgentHookEventPayload): boole
   return next.hookEventName !== undefined && TOOL_PROGRESS_HOOK_EVENTS.has(next.hookEventName)
 }
 
+function isClaudeToolProgressAfterCompletedTurn(
+  previous: EnrichedAgentHookEventPayload | undefined,
+  next: AgentHookEventPayload
+): boolean {
+  return (
+    previous?.payload.state === 'done' &&
+    previous.payload.agentType === 'claude' &&
+    next.payload.state === 'working' &&
+    next.payload.agentType === 'claude' &&
+    previous.payload.prompt === next.payload.prompt &&
+    next.hasExplicitPrompt !== true &&
+    next.hookEventName !== undefined &&
+    TOOL_PROGRESS_HOOK_EVENTS.has(next.hookEventName)
+  )
+}
+
 function paneCacheKeyTabId(key: string): string | null {
   const paneKey = key.split('\0', 1)[0] ?? key
   return parsePaneKey(paneKey)?.tabId ?? parseLegacyNumericPaneKey(paneKey)?.tabId ?? null
@@ -730,6 +746,11 @@ export class AgentHookServer {
           }
     const effectivePayload = attachClaudePermissionToolUseId(previous, identityResolvedPayload)
     if (previous && shouldKeepClaudePermissionVisible(previous, effectivePayload)) {
+      return previous
+    }
+    if (previous && isClaudeToolProgressAfterCompletedTurn(previous, effectivePayload)) {
+      // Why: background Claude hooks (for example memory-update helpers) can run
+      // after Stop; without a fresh prompt they must not restart notifications.
       return previous
     }
     // Why: some TUIs can emit a delayed tool/working hook after Ctrl+C already

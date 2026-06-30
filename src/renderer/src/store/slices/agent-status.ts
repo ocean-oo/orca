@@ -968,12 +968,15 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
 
     setAgentStatus: (paneKey, payload, terminalTitle, timing, routing, metadata) => {
       const updatedAt = timing?.updatedAt ?? Date.now()
+      const paneTabId = getTabIdFromPaneKey(paneKey)
       if (
         // Why: a closed terminal tab is no longer a valid destination for hook
         // replays or late status events, even if main still receives them.
+        // Some child-agent rows carry the closed tab only in routing metadata.
+        isRecentlyClosedAgentStatusTab(get().recentlyClosedAgentStatusTabIds, paneTabId) ||
         isRecentlyClosedAgentStatusTab(
           get().recentlyClosedAgentStatusTabIds,
-          getTabIdFromPaneKey(paneKey)
+          routing?.tabId ?? null
         )
       ) {
         return

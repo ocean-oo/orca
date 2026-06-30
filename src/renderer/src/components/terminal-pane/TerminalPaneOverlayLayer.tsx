@@ -12,6 +12,10 @@ import {
 import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { useNativeChatToggleShortcut } from '../native-chat/use-native-chat-toggle-shortcut'
+import {
+  shouldObserveTerminalOverlayFallbackRect,
+  shouldUseTerminalOverlayCssAnchorPositioning
+} from './terminal-overlay-positioning'
 
 type TerminalOverlayAssignment = {
   unifiedTabId: string
@@ -23,26 +27,30 @@ const EMPTY_TERMINAL_TABS: readonly TerminalTab[] = []
 const EMPTY_UNIFIED_TABS: readonly Tab[] = []
 const EMPTY_GROUPS: readonly TabGroup[] = []
 const EMPTY_ACTIVITY_PORTALS: ActivityTerminalPortalTarget[] = []
-const HAS_CSS_ANCHOR_POSITIONING =
-  typeof CSS !== 'undefined' &&
-  CSS.supports('position-anchor', '--orca-terminal-overlay-probe') &&
-  CSS.supports('top', 'anchor(--orca-terminal-overlay-probe top)') &&
-  CSS.supports('width', 'anchor-size(--orca-terminal-overlay-probe width)')
 const MIN_OVERLAY_FIT_WIDTH_PX = 48
 const MIN_OVERLAY_FIT_HEIGHT_PX = 24
-
-function shouldUseCssAnchorPositioning(): boolean {
-  return (
-    HAS_CSS_ANCHOR_POSITIONING &&
-    (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ !== true
-  )
-}
 
 type MeasuredFallbackRect = {
   top: number
   left: number
   width: number
   height: number
+}
+
+function areMeasuredFallbackRectsEqual(
+  a: MeasuredFallbackRect | null,
+  b: MeasuredFallbackRect | null
+): boolean {
+  return (
+    a?.top === b?.top && a?.left === b?.left && a?.width === b?.width && a?.height === b?.height
+  )
+}
+
+function updateMeasuredFallbackRect(
+  setRect: React.Dispatch<React.SetStateAction<MeasuredFallbackRect | null>>,
+  nextRect: MeasuredFallbackRect | null
+): void {
+  setRect((prev) => (areMeasuredFallbackRectsEqual(prev, nextRect) ? prev : nextRect))
 }
 
 type TerminalOverlaySlotProps = {
@@ -84,13 +92,19 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
   const [shouldMeasureHiddenStartup, setShouldMeasureHiddenStartup] = useState(
     () => useAppStore.getState().pendingStartupByTabId[terminalTabId] !== undefined
   )
+  const shouldObserveFallbackRect = shouldObserveTerminalOverlayFallbackRect({
+    anchorName,
+    groupId,
+    isVisible,
+    shouldMeasureHiddenStartup
+  })
   useLayoutEffect(() => {
     if (isVisible && shouldMeasureHiddenStartup) {
       setShouldMeasureHiddenStartup(false)
     }
   }, [isVisible, shouldMeasureHiddenStartup])
   useLayoutEffect(() => {
-    if (!anchorName || shouldUseCssAnchorPositioning() || !groupId) {
+    if (!shouldObserveFallbackRect || !groupId) {
       return
     }
 
@@ -108,12 +122,12 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       const parent = overlay?.parentElement
       const body = findBody()
       if (!parent || !body) {
-        setMeasuredFallbackRect(null)
+        updateMeasuredFallbackRect(setMeasuredFallbackRect, null)
         return
       }
       const parentRect = parent.getBoundingClientRect()
       const bodyRect = body.getBoundingClientRect()
-      setMeasuredFallbackRect({
+      updateMeasuredFallbackRect(setMeasuredFallbackRect, {
         top: bodyRect.top - parentRect.top,
         left: bodyRect.left - parentRect.left,
         width: bodyRect.width,
@@ -136,7 +150,7 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       resizeObserver.disconnect()
       window.removeEventListener('resize', updateRect)
     }
-  }, [anchorName, groupId, isVisible])
+  }, [groupId, shouldObserveFallbackRect])
 
   useLayoutEffect(() => {
     if (!isVisible || !anchorName) {
@@ -175,7 +189,7 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
 
   const style: React.CSSProperties = useMemo(
     () =>
-      anchorName && shouldUseCssAnchorPositioning()
+      anchorName && shouldUseTerminalOverlayCssAnchorPositioning()
         ? {
             position: 'absolute',
             positionAnchor: anchorName,

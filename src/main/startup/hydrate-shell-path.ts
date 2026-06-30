@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { delimiter } from 'path'
 import type { ShellHydrationFailureReason } from '../../shared/types'
+import { readShellStartupPathSegments } from '../pty/shell-startup-env'
 
 // Why: GUI-launched Electron on macOS/Linux inherits a minimal PATH from launchd
 // that does not include dirs appended by the user's shell rc files (~/.zshrc,
@@ -153,6 +154,8 @@ function spawnShellAndReadPath(shell: string): Promise<HydrationResult> {
 
 type HydrateOptions = {
   force?: boolean
+  /** Defaults to static startup-file parsing on macOS and shell spawning elsewhere. */
+  strategy?: 'auto' | 'interactive' | 'startup-files'
   /** Override for tests — defaults to running `spawn` against the real shell. */
   spawner?: (shell: string) => Promise<HydrationResult>
   /** Override for tests — defaults to `pickShell()`. */
@@ -174,6 +177,22 @@ export function hydrateShellPath(options: HydrateOptions = {}): Promise<Hydratio
     // Windows uses cmd/PowerShell rather than a POSIX login shell — the
     // `patchPackagedProcessPath` static list is sufficient there.
     cached = Promise.resolve({ segments: [], ok: false, failureReason: 'no_shell' })
+    return cached
+  }
+  const strategy = options.strategy ?? 'auto'
+  if (
+    !options.spawner &&
+    (strategy === 'startup-files' || (strategy === 'auto' && process.platform === 'darwin'))
+  ) {
+    // Why: macOS Endpoint Security agents can wedge interactive shell probes
+    // inside posix_spawn before JS timers exist. Static PATH parsing keeps
+    // packaged startup non-blocking while preserving common PATH exports.
+    const segments = readShellStartupPathSegments(process.env.HOME, shell, process.env.PATH)
+    cached = Promise.resolve(
+      segments.length > 0
+        ? { segments, ok: true, failureReason: 'none' }
+        : { segments: [], ok: false, failureReason: 'empty_path' }
+    )
     return cached
   }
   cached = (options.spawner ?? spawnShellAndReadPath)(shell)

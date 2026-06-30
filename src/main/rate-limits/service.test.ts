@@ -501,6 +501,81 @@ describe('RateLimitService', () => {
     })
   })
 
+  it('keeps a full refresh alive when Claude auth preparation fails', async () => {
+    const service = new RateLimitService()
+    service.setClaudeAuthPreparationResolver(async () => {
+      throw new Error('runtime auth unavailable')
+    })
+
+    vi.mocked(fetchCodexRateLimits).mockResolvedValueOnce(okProvider('codex', 20, Date.now()))
+
+    await expect(service.refresh()).resolves.toEqual(expect.objectContaining({}))
+
+    const state = service.getState()
+    expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
+    expect(fetchCodexRateLimits).toHaveBeenCalledTimes(1)
+    expect(state.claude).toMatchObject({
+      provider: 'claude',
+      status: 'error',
+      error: 'Failed to prepare Claude auth: runtime auth unavailable'
+    })
+    expect(state.codex).toMatchObject({
+      provider: 'codex',
+      status: 'ok'
+    })
+  })
+
+  it('keeps a full refresh alive when Codex home preparation fails', async () => {
+    const service = new RateLimitService()
+    service.setClaudeAuthPreparationResolver(async () => ({
+      configDir: '/tmp/.claude',
+      runtime: 'host',
+      wslDistro: null,
+      wslLinuxConfigDir: null,
+      envPatch: {},
+      stripAuthEnv: false,
+      provenance: 'system'
+    }))
+    service.setCodexHomePathResolver(() => {
+      throw new Error('runtime home unavailable')
+    })
+
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(okProvider('claude', 10, Date.now()))
+
+    await expect(service.refresh()).resolves.toEqual(expect.objectContaining({}))
+
+    const state = service.getState()
+    expect(fetchClaudeRateLimits).toHaveBeenCalledTimes(1)
+    expect(fetchCodexRateLimits).not.toHaveBeenCalled()
+    expect(state.claude).toMatchObject({
+      provider: 'claude',
+      status: 'ok'
+    })
+    expect(state.codex).toMatchObject({
+      provider: 'codex',
+      status: 'error',
+      error: 'Failed to prepare Codex home: runtime home unavailable'
+    })
+  })
+
+  it('settles Claude-only refreshes when auth preparation fails', async () => {
+    const service = new RateLimitService()
+    service.setClaudeAuthPreparationResolver(async () => {
+      throw new Error('keychain unavailable')
+    })
+
+    await expect(
+      service.refreshClaudeForTarget({ runtime: 'host', wslDistro: null })
+    ).resolves.toEqual(expect.objectContaining({}))
+
+    expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
+    expect(service.getState().claude).toMatchObject({
+      provider: 'claude',
+      status: 'error',
+      error: 'Failed to prepare Claude auth: keychain unavailable'
+    })
+  })
+
   it('does not use Claude PTY fallback for WSL system-default usage refreshes', async () => {
     const service = new RateLimitService()
     service.setClaudeFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })

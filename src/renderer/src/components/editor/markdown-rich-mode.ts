@@ -6,6 +6,7 @@ export type MarkdownRichModeUnsupportedReason =
   | 'html-or-jsx'
   | 'reference-links'
   | 'footnotes'
+  | 'format-sensitive-markdown'
   | 'other'
 
 type UnsupportedMatch = {
@@ -47,6 +48,18 @@ const UNSUPPORTED_PATTERNS: UnsupportedMatch[] = [
       )
     },
     pattern: /^\[\^[^\]]+\]:\s+/m
+  },
+  {
+    reason: 'format-sensitive-markdown',
+    get message() {
+      return translate(
+        'auto.components.editor.markdown.rich.mode.d6a40cbbd2',
+        "Editable only in code mode because rich editing would rewrite this file's markdown syntax."
+      )
+    },
+    // Why: TipTap serializes these valid forms into its canonical markdown
+    // (`_x_` -> `*x*`, `* item` -> `- item`), creating noisy whole-file diffs.
+    pattern: /(^|\n)\s{0,3}[*+]\s+\S|(^|[^\w\\])_{1,2}\S[^\n]*?\S?_{1,2}(?!\w)/
   }
 ]
 

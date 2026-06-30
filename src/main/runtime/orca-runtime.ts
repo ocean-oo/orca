@@ -9057,18 +9057,19 @@ export class OrcaRuntimeService {
       if (!summary) {
         continue
       }
-      // Why: desktop can show terminal tabs that are not mounted as renderer
-      // leaves and are not currently visible in the PTY provider list. Mobile
-      // still needs those worktrees to show as terminal-bearing entries.
-      summary.liveTerminalCount = Math.max(summary.liveTerminalCount, tabs.length)
-      summary.hasAttachedPty = summary.hasAttachedPty || tabs.some((tab) => tab.ptyId !== null)
-      if (tabs.some((tab) => tab.ptyId !== null && this.ptysById.get(tab.ptyId)?.connected)) {
+      // Why: persisted session tabs can outlive their PTY and hook status.
+      // Mobile's worktree.ps projection should show current host activity, not
+      // resurrect stale terminal rows after the real terminal was closed (#6072).
+      const liveSavedTabs = tabs.filter(
+        (tab) => tab.ptyId && this.ptysById.get(tab.ptyId)?.connected
+      )
+      if (liveSavedTabs.length > 0) {
         summary.hasHostSidebarActivity = true
       }
-      for (const tab of tabs) {
+      for (const tab of liveSavedTabs) {
         summary.status = mergeWorktreeStatus(
           summary.status,
-          getSavedTabWorktreeStatus(tab.title, tab.ptyId !== null)
+          getSavedTabWorktreeStatus(tab.title, true)
         )
       }
     }

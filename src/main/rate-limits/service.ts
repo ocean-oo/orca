@@ -37,6 +37,18 @@ type ClaudeAuthPreparationResolver = (
   target?: ClaudeAccountSelectionTarget
 ) => Promise<ClaudeRuntimeAuthPreparation>
 
+type ClaudeAuthPreparationResolution = {
+  authPreparation: ClaudeRuntimeAuthPreparation | undefined
+  provenance: string
+  error: unknown | null
+}
+
+type CodexHomePathResolution = {
+  homePath: string | null
+  provenance: string
+  error: unknown | null
+}
+
 type OpenCodeGoRateLimitConfig = {
   sessionCookie: string
   workspaceIdOverride: string
@@ -782,6 +794,82 @@ export class RateLimitService {
     return codexHomePath ? `${targetKey}:managed:${codexHomePath}` : `${targetKey}:system`
   }
 
+  private getCodexPreparationErrorProvenance(
+    target: NormalizedCodexAccountSelectionTarget
+  ): string {
+    const targetKey = target.runtime === 'wsl' ? `wsl:${target.wslDistro ?? '__default__'}` : 'host'
+    return `${targetKey}:preparation-error`
+  }
+
+  private getClaudePreparationErrorProvenance(
+    target: NormalizedClaudeAccountSelectionTarget
+  ): string {
+    const targetKey = target.runtime === 'wsl' ? `wsl:${target.wslDistro ?? '__default__'}` : 'host'
+    return `${targetKey}:preparation-error`
+  }
+
+  private getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Unknown error'
+  }
+
+  private resolveCodexHomePath(
+    target: NormalizedCodexAccountSelectionTarget
+  ): CodexHomePathResolution {
+    try {
+      const homePath = this.codexHomePathResolver?.(target) ?? null
+      return {
+        homePath,
+        provenance: this.getCodexProvenance(target, homePath),
+        error: null
+      }
+    } catch (error) {
+      return {
+        homePath: null,
+        provenance: this.getCodexPreparationErrorProvenance(target),
+        error
+      }
+    }
+  }
+
+  private async resolveClaudeAuthPreparation(
+    target: NormalizedClaudeAccountSelectionTarget
+  ): Promise<ClaudeAuthPreparationResolution> {
+    try {
+      const authPreparation = await this.claudeAuthPreparationResolver?.(target)
+      return {
+        authPreparation,
+        provenance: authPreparation?.provenance ?? 'system',
+        error: null
+      }
+    } catch (error) {
+      return {
+        authPreparation: undefined,
+        provenance: this.getClaudePreparationErrorProvenance(target),
+        error
+      }
+    }
+  }
+
+  private buildPreparationErrorState(
+    provider: 'claude' | 'codex',
+    error: unknown,
+    context: string
+  ): ProviderRateLimits {
+    // Why: runtime auth/home preparation can fail during update relaunches;
+    // degrade one provider instead of aborting the whole auto-refresh loop.
+    return {
+      provider,
+      session: null,
+      weekly: null,
+      updatedAt: Date.now(),
+      error: `${context}: ${this.getErrorMessage(error)}`,
+      status: 'error',
+      usageMetadata: {
+        failureKind: 'unknown'
+      }
+    }
+  }
+
   private getMissingWslCodexHomeResult(
     target: NormalizedCodexAccountSelectionTarget
   ): ProviderRateLimits | null {
@@ -837,12 +925,14 @@ export class RateLimitService {
 
   private async runFetchAllCycle(): Promise<void> {
     const claudeTarget = this.claudeFetchTarget
-    const claudeAuthPreparation = await this.claudeAuthPreparationResolver?.(claudeTarget)
-    const claudeProvenance = claudeAuthPreparation?.provenance ?? 'system'
+    const claudeAuthResolution = await this.resolveClaudeAuthPreparation(claudeTarget)
+    const claudeAuthPreparation = claudeAuthResolution.authPreparation
+    const claudeProvenance = claudeAuthResolution.provenance
     const claudeGeneration = this.claudeFetchGeneration
     const codexTarget = this.codexFetchTarget
-    const codexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
-    const codexProvenance = this.getCodexProvenance(codexTarget, codexHomePath)
+    const codexHomeResolution = this.resolveCodexHomePath(codexTarget)
+    const codexHomePath = codexHomeResolution.homePath
+    const codexProvenance = codexHomeResolution.provenance
     const codexGeneration = this.codexFetchGeneration
     const previousState = this.state
     const openCodeGoConfig = this.openCodeGoConfigResolver?.()
@@ -874,20 +964,38 @@ export class RateLimitService {
       kimi: this.withFetchingStatus(previousState.kimi, 'kimi')
     })
 
-    const missingWslCodexHome = codexHomePath
+    const missingWslCodexHome = codexHomeResolution.error
       ? null
-      : this.getMissingWslCodexHomeResult(codexTarget)
+      : codexHomePath
+        ? null
+        : this.getMissingWslCodexHomeResult(codexTarget)
     const [claudeResult, codexResult, geminiResult, opencodeGoResult, kimiResult] =
       await Promise.allSettled([
-        fetchClaudeRateLimits({
-          authPreparation: claudeAuthPreparation,
-          allowPtyFallback: this.shouldAllowClaudePtyFallback(claudeAuthPreparation)
-        }),
+        claudeAuthResolution.error
+          ? Promise.resolve(
+              this.buildPreparationErrorState(
+                'claude',
+                claudeAuthResolution.error,
+                'Failed to prepare Claude auth'
+              )
+            )
+          : fetchClaudeRateLimits({
+              authPreparation: claudeAuthPreparation,
+              allowPtyFallback: this.shouldAllowClaudePtyFallback(claudeAuthPreparation)
+            }),
         missingWslCodexHome ??
-          fetchCodexRateLimits({
-            codexHomePath,
-            allowPtyFallback: this.shouldAllowCodexPtyFallback()
-          }),
+          (codexHomeResolution.error
+            ? Promise.resolve(
+                this.buildPreparationErrorState(
+                  'codex',
+                  codexHomeResolution.error,
+                  'Failed to prepare Codex home'
+                )
+              )
+            : fetchCodexRateLimits({
+                codexHomePath,
+                allowPtyFallback: this.shouldAllowCodexPtyFallback()
+              })),
         fetchGeminiRateLimits(geminiCliOAuthEnabled),
         fetchOpenCodeGoRateLimits(cookie, workspaceIdOverride || undefined),
         fetchKimiRateLimits()
@@ -960,17 +1068,47 @@ export class RateLimitService {
             status: 'error'
           } satisfies ProviderRateLimits)
 
-    const latestCodexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
-    const latestClaudeAuthPreparation = await this.claudeAuthPreparationResolver?.(claudeTarget)
-    const latestClaudeProvenance = latestClaudeAuthPreparation?.provenance ?? 'system'
-    const latestCodexProvenance = this.getCodexProvenance(codexTarget, latestCodexHomePath)
-    const shouldApplyCodex =
-      codexGeneration === this.codexFetchGeneration && codexProvenance === latestCodexProvenance
-    const shouldApplyClaude =
+    const latestCodexHomeResolution = codexHomeResolution.error
+      ? codexHomeResolution
+      : this.resolveCodexHomePath(codexTarget)
+    const latestClaudeAuthResolution = claudeAuthResolution.error
+      ? claudeAuthResolution
+      : await this.resolveClaudeAuthPreparation(claudeTarget)
+    const latestClaudeProvenance = latestClaudeAuthResolution.provenance
+    const latestCodexProvenance = latestCodexHomeResolution.provenance
+    const codexGenerationStillCurrent = codexGeneration === this.codexFetchGeneration
+    const claudeGenerationStillCurrent =
       claudeGeneration === this.claudeFetchGeneration &&
-      claudeProvenance === latestClaudeProvenance &&
       this.isSameClaudeTarget(claudeTarget, this.claudeFetchTarget)
+    const shouldApplyCodex =
+      codexGenerationStillCurrent &&
+      (codexHomeResolution.error
+        ? true
+        : !latestCodexHomeResolution.error && codexProvenance === latestCodexProvenance)
+    const shouldApplyClaude =
+      claudeGenerationStillCurrent &&
+      (claudeAuthResolution.error
+        ? true
+        : !latestClaudeAuthResolution.error && claudeProvenance === latestClaudeProvenance)
     const shouldApplyOpencode = opencodeGeneration === this.opencodeFetchGeneration
+    const codexPreparationError =
+      codexGenerationStillCurrent && !codexHomeResolution.error && latestCodexHomeResolution.error
+        ? this.buildPreparationErrorState(
+            'codex',
+            latestCodexHomeResolution.error,
+            'Failed to prepare Codex home'
+          )
+        : null
+    const claudePreparationError =
+      claudeGenerationStillCurrent &&
+      !claudeAuthResolution.error &&
+      latestClaudeAuthResolution.error
+        ? this.buildPreparationErrorState(
+            'claude',
+            latestClaudeAuthResolution.error,
+            'Failed to prepare Claude auth'
+          )
+        : null
 
     // Why: account switches can race in-flight Codex fetches. Only apply a
     // Codex result if both the selected-account provenance and the request
@@ -980,10 +1118,14 @@ export class RateLimitService {
       ...previousState,
       claude: shouldApplyClaude
         ? this.applyStalePolicy(claude, previousState.claude)
-        : this.state.claude,
+        : claudePreparationError
+          ? this.applyStalePolicy(claudePreparationError, previousState.claude)
+          : this.state.claude,
       codex: shouldApplyCodex
         ? this.applyStalePolicy(codex, previousState.codex)
-        : this.state.codex,
+        : codexPreparationError
+          ? this.applyStalePolicy(codexPreparationError, previousState.codex)
+          : this.state.codex,
       gemini: this.applyStalePolicy(gemini, previousState.gemini),
       opencodeGo: shouldApplyOpencode
         ? opencodeConfigChanged
@@ -998,8 +1140,9 @@ export class RateLimitService {
 
   private async runFetchCodexOnlyCycle(): Promise<void> {
     const codexTarget = this.codexFetchTarget
-    const codexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
-    const codexProvenance = this.getCodexProvenance(codexTarget, codexHomePath)
+    const codexHomeResolution = this.resolveCodexHomePath(codexTarget)
+    const codexHomePath = codexHomeResolution.homePath
+    const codexProvenance = codexHomeResolution.provenance
     const codexGeneration = this.codexFetchGeneration
     const previousState = this.state
 
@@ -1008,35 +1151,61 @@ export class RateLimitService {
       codex: this.withFetchingStatus(previousState.codex, 'codex')
     })
 
-    const missingWslCodexHome = codexHomePath
+    const missingWslCodexHome = codexHomeResolution.error
       ? null
-      : this.getMissingWslCodexHomeResult(codexTarget)
-    const codex = await (
-      missingWslCodexHome
-        ? Promise.resolve(missingWslCodexHome)
-        : fetchCodexRateLimits({
-            codexHomePath,
-            allowPtyFallback: this.shouldAllowCodexPtyFallback()
+      : codexHomePath
+        ? null
+        : this.getMissingWslCodexHomeResult(codexTarget)
+    const codex = codexHomeResolution.error
+      ? this.buildPreparationErrorState(
+          'codex',
+          codexHomeResolution.error,
+          'Failed to prepare Codex home'
+        )
+      : await (
+          missingWslCodexHome
+            ? Promise.resolve(missingWslCodexHome)
+            : fetchCodexRateLimits({
+                codexHomePath,
+                allowPtyFallback: this.shouldAllowCodexPtyFallback()
+              })
+        ).catch(
+          (err): ProviderRateLimits => ({
+            provider: 'codex',
+            session: null,
+            weekly: null,
+            updatedAt: Date.now(),
+            error: err instanceof Error ? err.message : 'Unknown error',
+            status: 'error'
           })
-    ).catch(
-      (err): ProviderRateLimits => ({
-        provider: 'codex',
-        session: null,
-        weekly: null,
-        updatedAt: Date.now(),
-        error: err instanceof Error ? err.message : 'Unknown error',
-        status: 'error'
-      })
-    )
+        )
 
-    const latestCodexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
-    const latestCodexProvenance = this.getCodexProvenance(codexTarget, latestCodexHomePath)
+    const latestCodexHomeResolution = codexHomeResolution.error
+      ? codexHomeResolution
+      : this.resolveCodexHomePath(codexTarget)
+    const codexGenerationStillCurrent = codexGeneration === this.codexFetchGeneration
     const shouldApplyCodex =
-      codexGeneration === this.codexFetchGeneration && codexProvenance === latestCodexProvenance
+      codexGenerationStillCurrent &&
+      (codexHomeResolution.error
+        ? true
+        : !latestCodexHomeResolution.error &&
+          codexProvenance === latestCodexHomeResolution.provenance)
+    const codexPreparationError =
+      codexGenerationStillCurrent && !codexHomeResolution.error && latestCodexHomeResolution.error
+        ? this.buildPreparationErrorState(
+            'codex',
+            latestCodexHomeResolution.error,
+            'Failed to prepare Codex home'
+          )
+        : null
 
     this.updateState({
       ...this.state,
-      codex: shouldApplyCodex ? this.applyStalePolicy(codex, previousState.codex) : this.state.codex
+      codex: shouldApplyCodex
+        ? this.applyStalePolicy(codex, previousState.codex)
+        : codexPreparationError
+          ? this.applyStalePolicy(codexPreparationError, previousState.codex)
+          : this.state.codex
     })
 
     this.lastFetchAt = Date.now()
@@ -1044,8 +1213,9 @@ export class RateLimitService {
 
   private async runFetchClaudeOnlyCycle(): Promise<void> {
     const claudeTarget = this.claudeFetchTarget
-    const claudeAuthPreparation = await this.claudeAuthPreparationResolver?.(claudeTarget)
-    const claudeProvenance = claudeAuthPreparation?.provenance ?? 'system'
+    const claudeAuthResolution = await this.resolveClaudeAuthPreparation(claudeTarget)
+    const claudeAuthPreparation = claudeAuthResolution.authPreparation
+    const claudeProvenance = claudeAuthResolution.provenance
     const claudeGeneration = this.claudeFetchGeneration
     const previousState = this.state
 
@@ -1054,32 +1224,56 @@ export class RateLimitService {
       claude: this.withFetchingStatus(previousState.claude, 'claude')
     })
 
-    const claude = await fetchClaudeRateLimits({
-      authPreparation: claudeAuthPreparation,
-      allowPtyFallback: this.shouldAllowClaudePtyFallback(claudeAuthPreparation)
-    }).catch(
-      (err): ProviderRateLimits => ({
-        provider: 'claude',
-        session: null,
-        weekly: null,
-        updatedAt: Date.now(),
-        error: err instanceof Error ? err.message : 'Unknown error',
-        status: 'error'
-      })
-    )
+    const claude = claudeAuthResolution.error
+      ? this.buildPreparationErrorState(
+          'claude',
+          claudeAuthResolution.error,
+          'Failed to prepare Claude auth'
+        )
+      : await fetchClaudeRateLimits({
+          authPreparation: claudeAuthPreparation,
+          allowPtyFallback: this.shouldAllowClaudePtyFallback(claudeAuthPreparation)
+        }).catch(
+          (err): ProviderRateLimits => ({
+            provider: 'claude',
+            session: null,
+            weekly: null,
+            updatedAt: Date.now(),
+            error: err instanceof Error ? err.message : 'Unknown error',
+            status: 'error'
+          })
+        )
 
-    const latestClaudeAuthPreparation = await this.claudeAuthPreparationResolver?.(claudeTarget)
-    const latestClaudeProvenance = latestClaudeAuthPreparation?.provenance ?? 'system'
-    const shouldApplyClaude =
+    const latestClaudeAuthResolution = claudeAuthResolution.error
+      ? claudeAuthResolution
+      : await this.resolveClaudeAuthPreparation(claudeTarget)
+    const claudeGenerationStillCurrent =
       claudeGeneration === this.claudeFetchGeneration &&
-      claudeProvenance === latestClaudeProvenance &&
       this.isSameClaudeTarget(claudeTarget, this.claudeFetchTarget)
+    const shouldApplyClaude =
+      claudeGenerationStillCurrent &&
+      (claudeAuthResolution.error
+        ? true
+        : !latestClaudeAuthResolution.error &&
+          claudeProvenance === latestClaudeAuthResolution.provenance)
+    const claudePreparationError =
+      claudeGenerationStillCurrent &&
+      !claudeAuthResolution.error &&
+      latestClaudeAuthResolution.error
+        ? this.buildPreparationErrorState(
+            'claude',
+            latestClaudeAuthResolution.error,
+            'Failed to prepare Claude auth'
+          )
+        : null
 
     this.updateState({
       ...this.state,
       claude: shouldApplyClaude
         ? this.applyStalePolicy(claude, previousState.claude)
-        : this.state.claude
+        : claudePreparationError
+          ? this.applyStalePolicy(claudePreparationError, previousState.claude)
+          : this.state.claude
     })
 
     this.lastFetchAt = Date.now()
