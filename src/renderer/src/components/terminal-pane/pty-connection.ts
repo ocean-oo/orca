@@ -1389,6 +1389,13 @@ export function connectPanePty(
   // mounted and rebinds to a NEW ptyId, and that replacement's later real exit
   // must still run — a one-shot boolean would strand the pane on rebind.
   let handledExitPtyId: string | null = null
+  // Why: tracks the ptyId of a genuine fresh spawn — onPtySpawn fires only for
+  // fresh spawns, never reattach/coldRestore (pty-transport.ts). Lets the
+  // sole-pane exit branch tell "this newborn shell died on its own" from "a
+  // reattached persisted session was already dead", so a failing .envrc/direnv
+  // on a brand-new worktree keeps its dead terminal visible instead of bouncing
+  // the user to Landing.
+  let spawnedFreshPtyId: string | null = null
   const onExit = (ptyId: string): void => {
     if (handledExitPtyId === ptyId) {
       return
@@ -1436,6 +1443,20 @@ export function connectPanePty(
     manager.setPaneGpuRendering(pane.id, true)
     const panes = manager.getPanes()
     if (panes.length <= 1) {
+      // Why: a worktree's sole newborn terminal can die on shell startup — e.g.
+      // a PR branch ships an .envrc whose direnv command fails, so the login
+      // shell exits non-zero immediately. Routing that through onPtyExitRef
+      // closes the only tab, which deactivates the worktree (setActiveWorktree
+      // (null)) and strands the user on the Landing screen for a worktree that
+      // was just created. Keep the dead pane mounted instead (mirrors the
+      // freshly-split guard below) so the direnv error stays visible and the
+      // worktree stays active. Gated on a genuine fresh spawn (onPtySpawn fired
+      // for this ptyId — reattach/coldRestore skip it) that the user never typed
+      // into, so a reattached-dead session or an explicit `exit` still tears
+      // down as before.
+      if (spawnedFreshPtyId === ptyId && !Number.isFinite(lastTerminalInputAt)) {
+        return
+      }
       deps.onPtyExitRef.current(ptyId)
       return
     }
@@ -1623,6 +1644,11 @@ export function connectPanePty(
   }
 
   const onPtySpawn = (ptyId: string): void => {
+    // Why: record that this exact PTY was freshly spawned (not reattached), so a
+    // newborn shell that dies before any interaction (e.g. failing direnv on a
+    // just-created worktree) can be kept visible rather than tearing down the
+    // worktree. Reattach/coldRestore skip onPtySpawn (pty-transport.ts).
+    spawnedFreshPtyId = ptyId
     // Why: Command Code has no prompt-start hook. Seed the visible working row
     // once the PTY exists, then let real hook events refine or complete it.
     bindActivePanePty(ptyId, { seedInitialAgentStatus: true })

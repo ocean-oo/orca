@@ -953,6 +953,82 @@ describe('connectPanePty', () => {
     expect(manager.setActivePane).toHaveBeenCalledWith(1, { focus: true })
   })
 
+  it('keeps a worktree sole terminal mounted when its freshly-spawned PTY exits before input (direnv failure)', async () => {
+    // Why (regression): a PR worktree can ship an .envrc whose direnv command
+    // fails, so the only terminal's login shell exits non-zero immediately. The
+    // sole-pane branch must NOT route to onPtyExitRef — that closes the tab and
+    // deactivates the just-created worktree (setActiveWorktree(null)), bouncing
+    // the user to the Landing screen. The dead pane stays mounted instead.
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+      | ((ptyId: string) => void)
+      | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    expect(onPtySpawn).toBeTypeOf('function')
+    expect(onPtyExit).toBeTypeOf('function')
+
+    // A genuine fresh spawn (onPtySpawn fires only for non-reattach spawns) that
+    // the user never typed into.
+    onPtySpawn?.('tab-pty')
+    onPtyExit?.('tab-pty')
+
+    expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
+  it('tears down the sole terminal when a freshly-spawned PTY exits after the user typed input', async () => {
+    // Why: an explicit `exit` (or any typed input) is a deliberate close, not a
+    // failed-startup shell, so the worktree should deactivate as before.
+    const { connectPanePty } = await import('./pty-connection')
+    const pane = createPane(1)
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+      | ((ptyId: string) => void)
+      | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    expect(onPtySpawn).toBeTypeOf('function')
+    expect(onPtyExit).toBeTypeOf('function')
+
+    onPtySpawn?.('tab-pty')
+    sendTerminalInputThroughPane(pane, 'exit\r')
+    onPtyExit?.('tab-pty')
+
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
+  it('tears down the sole terminal when a reattached (not freshly spawned) PTY exits', async () => {
+    // Why: reattach/coldRestore skip onPtySpawn, so a previously-live session
+    // that is now dead must still route through onPtyExitRef — the keep-mounted
+    // guard is strictly for brand-new shells that died on startup.
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    expect(onPtyExit).toBeTypeOf('function')
+
+    // No onPtySpawn call: simulates a reattach to a persisted session.
+    onPtyExit?.('tab-pty')
+
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
   it('closes a split pane when an established PTY exits after output', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
