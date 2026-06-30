@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
-import { buildAgentFeatureSkillInstallCommand } from '../../../../shared/agent-feature-install-commands'
+import {
+  buildAgentFeatureSkillHomeCommand,
+  buildAgentFeatureSkillInstallCommand
+} from '../../../../shared/agent-feature-install-commands'
 import {
   buildSkillCommandForRuntime,
   buildSkillInstallCommandForRuntime,
@@ -18,6 +21,7 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
 
     expect(command).toContain("wsl.exe -d 'Ubuntu' -- sh -c")
     expect(command).toContain('getent passwd')
+    expect(command).toContain('cd "\\$HOME" &&')
     expect(command).toContain('npx skills add orchestration -y')
   })
 
@@ -30,6 +34,7 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
 
     expect(command).toContain("wsl.exe -d 'Fedora Remix' -- sh -c")
     expect(command).toContain('getent passwd')
+    expect(command).toContain('cd "\\$HOME" &&')
     expect(command).toContain('npx skills update orchestration')
   })
 
@@ -43,12 +48,20 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
         },
         'win32'
       )
-    ).toBe(buildAgentFeatureSkillInstallCommand(['orchestration']))
+    ).toBe(
+      buildAgentFeatureSkillHomeCommand(
+        buildAgentFeatureSkillInstallCommand(['orchestration']),
+        'windows-powershell'
+      )
+    )
   })
 
   it('treats missing runtime as a Windows host fallback for skill updates', () => {
     expect(buildSkillCommandForRuntime('npx skills update orca-cli', undefined, 'win32')).toBe(
-      buildAgentFeatureSkillInstallCommand(['orca-cli'])
+      buildAgentFeatureSkillHomeCommand(
+        buildAgentFeatureSkillInstallCommand(['orca-cli']),
+        'windows-powershell'
+      )
     )
   })
 
@@ -62,7 +75,7 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
         },
         'linux'
       )
-    ).toBe('npx skills update orchestration')
+    ).toBe(buildAgentFeatureSkillHomeCommand('npx skills update orchestration', 'posix'))
   })
 
   it('preserves the selected WSL distro for skill discovery', () => {

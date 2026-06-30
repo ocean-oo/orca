@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildAgentFeatureSkillHomeCommand,
   buildAgentFeatureSkillInstallCommand,
   buildAgentFeatureSkillUpdateCommand,
   COMPUTER_USE_SKILL_UPDATE_COMMAND,
@@ -30,6 +31,23 @@ describe('agent feature skill commands', () => {
   it('builds single-skill update commands', () => {
     expect(buildAgentFeatureSkillUpdateCommand('orchestration')).toBe(
       'npx skills update orchestration'
+    )
+  })
+
+  it('wraps copied project-scoped commands so they land in the home skill source', () => {
+    const installCommand = buildAgentFeatureSkillInstallCommand(['orchestration'])
+
+    expect(buildAgentFeatureSkillHomeCommand(installCommand, 'posix')).toBe(
+      'cd "$HOME" && npx skills add https://github.com/stablyai/orca --skill orchestration -y'
+    )
+    expect(buildAgentFeatureSkillHomeCommand(installCommand, 'windows-powershell')).toBe(
+      'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Location -Path ~ -ErrorAction Stop; npx skills add https://github.com/stablyai/orca --skill orchestration -y"'
+    )
+  })
+
+  it('rejects blank home-scoped commands', () => {
+    expect(() => buildAgentFeatureSkillHomeCommand('  ', 'posix')).toThrow(
+      'A skill command is required.'
     )
   })
 
