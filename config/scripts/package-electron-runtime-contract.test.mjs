@@ -85,6 +85,17 @@ describe('Electron runtime package contract', () => {
     )
   })
 
+  it('pins the Windows release builder to the VS 2022 runner image', () => {
+    const releaseWorkflow = parse(
+      readFileSync(join(projectDir, '.github/workflows/release-cut.yml'), 'utf8')
+    )
+    const windowsReleaseEntry = releaseWorkflow.jobs.build.strategy.matrix.include.find(
+      ({ platform }) => platform === 'win'
+    )
+
+    expect(windowsReleaseEntry.os).toBe('windows-2022')
+  })
+
   it('preflights SignPath module install before Windows signing side effects', () => {
     const releaseWorkflow = readFileSync(
       join(projectDir, '.github/workflows/release-cut.yml'),
