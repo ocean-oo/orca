@@ -353,6 +353,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     experimentalAgentHibernation: false,
     agentHibernationIdleMs: 30 * 60 * 1000,
     experimentalNewWorktreeCardStyle: false,
+    experimentalEphemeralVms: false,
     compactWorktreeCards: false,
     experimentalWorktreeSymlinks: false,
     // Why: local desktop remains the default server until the user explicitly
@@ -475,6 +476,7 @@ export function getDefaultUIState(): PersistedUIState {
     workspaceBoardColumnWidth: 308,
     syncTaskStatusFromWorkspaceBoard: false,
     _workspaceStatusesDefaultOrderMigrated: true,
+    _workspaceStatusesReorderedDefaultRepaired: true,
     _workspaceStatusesDefaultWorkflowMigrated: true,
     _workspaceStatusesDefaultVisualsMigrated: true,
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
