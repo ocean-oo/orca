@@ -1,7 +1,7 @@
-import { execFileSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
-import path from 'path'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -241,6 +241,34 @@ describe('createInitialCommit', () => {
 
     expect(git(tmpDir, ['rev-parse', 'refs/remotes/origin/develop']).trim()).toBe(remoteSha)
     expect(() => git(tmpDir, ['rev-parse', '--verify', 'refs/heads/main'])).toThrow()
+  })
+
+  it('bounds fallback branch enumeration to one ref per namespace', async () => {
+    const calls: string[][] = []
+    const exec = (async (argv) => {
+      calls.push(argv)
+      if (argv[0] === 'symbolic-ref' && argv[1] === '--short') {
+        return { stdout: 'main\n' }
+      }
+      if (argv[0] === 'for-each-ref' && argv.includes('refs/heads')) {
+        expect(argv).toContain('--count=1')
+        return { stdout: '' }
+      }
+      if (argv[0] === 'for-each-ref' && argv.includes('refs/remotes')) {
+        expect(argv).toContain('--count=1')
+        expect(argv).toContain('--exclude=refs/remotes/*/HEAD')
+        return { stdout: 'origin/develop\n' }
+      }
+      throw new Error(`simulated git failure: ${argv.join(' ')}`)
+    }) satisfies GitExec
+
+    await expect(createInitialCommit(exec)).resolves.toEqual({
+      ok: true,
+      baseRef: 'origin/develop'
+    })
+
+    const refCalls = calls.filter((argv) => argv[0] === 'for-each-ref')
+    expect(refCalls).toHaveLength(2)
   })
 
   it('maps missing identity failures to the shared guidance message', async () => {

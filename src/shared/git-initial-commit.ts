@@ -85,31 +85,44 @@ async function resolveExistingHeadBaseRef(exec: GitExec): Promise<string | null>
   return tryExecStdout(exec, ['rev-parse', 'HEAD'])
 }
 
-async function listShortRefs(exec: GitExec, namespace: string): Promise<string[]> {
-  const stdout = await tryExecStdout(exec, ['for-each-ref', '--format=%(refname:short)', namespace])
-  if (!stdout) {
-    return []
-  }
-  return stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+async function firstShortRef(
+  exec: GitExec,
+  namespace: string,
+  excludes: readonly string[] = []
+): Promise<string | null> {
+  const stdout = await tryExecStdout(exec, [
+    'for-each-ref',
+    '--count=1',
+    '--format=%(refname:short)',
+    ...excludes.map((pattern) => `--exclude=${pattern}`),
+    namespace
+  ])
+  return (
+    stdout
+      ?.split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? null
+  )
 }
 
 async function resolveAnyExistingBranchRef(exec: GitExec): Promise<string | null> {
-  const localBranches = await listShortRefs(exec, 'refs/heads')
   const headBranch = await tryExecStdout(exec, ['symbolic-ref', '--short', 'HEAD'])
-  if (headBranch && localBranches.includes(headBranch)) {
+  if (
+    headBranch &&
+    (await tryExecStdout(exec, [
+      'rev-parse',
+      '--quiet',
+      '--verify',
+      `refs/heads/${headBranch}^{commit}`
+    ]))
+  ) {
     return headBranch
   }
-  const localBranch = localBranches[0]
+  const localBranch = await firstShortRef(exec, 'refs/heads')
   if (localBranch) {
     return localBranch
   }
-  const remoteBranches = (await listShortRefs(exec, 'refs/remotes')).filter(
-    (ref) => !ref.endsWith('/HEAD')
-  )
-  return remoteBranches[0] ?? null
+  return firstShortRef(exec, 'refs/remotes', ['refs/remotes/*/HEAD'])
 }
 
 async function resolveExistingBaseRef(exec: GitExec): Promise<string | null> {
