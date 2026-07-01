@@ -810,6 +810,51 @@ describe('connectPanePty', () => {
     })
   })
 
+  it('does not pass startup OSC color replies to native Windows ConPTY spawns', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    )
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+      mockStoreState = {
+        ...mockStoreState,
+        worktreesByRepo: {
+          repo1: [
+            {
+              id: 'wt-1',
+              repoId: 'repo1',
+              path: 'C:\\Users\\neil\\orca\\workspaces\\orca\\seafan',
+              displayName: 'feat/notis'
+            }
+          ]
+        }
+      }
+
+      connectPanePty(
+        createPane(1) as never,
+        createManager(1) as never,
+        createDeps({
+          cwd: 'C:\\Users\\neil\\orca\\workspaces\\orca\\seafan',
+          startup: {
+            command: 'codex',
+            telemetry: {
+              agent_kind: 'codex',
+              launch_source: 'tab_bar_quick_launch',
+              request_kind: 'new'
+            }
+          }
+        }) as never
+      )
+      await flushAsyncTicks()
+
+      expect(createdTransportOptions[0]).not.toHaveProperty('terminalColorQueryReplies')
+    } finally {
+      restoreNavigator()
+    }
+  })
+
   it('observes live terminal GitHub PR URLs before agent completion', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()
@@ -5955,6 +6000,64 @@ describe('connectPanePty', () => {
     )
 
     binding.dispose()
+  })
+
+  it('does not answer hidden Codex OSC color queries through native Windows ConPTY', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    )
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport('pty-id')
+      const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          capturedDataCallback.current = callbacks.onData ?? null
+          return 'pty-id'
+        }
+      )
+      transportFactoryQueue.push(transport)
+      mockStoreState = {
+        ...mockStoreState,
+        worktreesByRepo: {
+          repo1: [
+            {
+              id: 'wt-1',
+              repoId: 'repo1',
+              path: 'C:\\Users\\neil\\orca\\workspaces\\orca\\seafan',
+              displayName: 'feat/notis'
+            }
+          ]
+        }
+      }
+
+      const pane = createPane(1)
+      const manager = createManager(1)
+      const binding = connectPanePty(
+        pane as never,
+        manager as never,
+        createDeps({
+          cwd: 'C:\\Users\\neil\\orca\\workspaces\\orca\\seafan',
+          isVisibleRef: { current: false },
+          startup: { command: 'codex' }
+        }) as never
+      )
+      await flushAsyncTicks(6)
+
+      const queries = '\x1b]10;?\x1b\\\x1b]11;?\x1b\\'
+      capturedDataCallback.current?.(`${queries}startup frame\r\n`)
+
+      expect(transport.sendInput).not.toHaveBeenCalled()
+      expect(pane.terminal.write).not.toHaveBeenCalledWith(queries, expect.any(Function))
+      expect(pane.terminal.write).not.toHaveBeenCalledWith(
+        `${queries}startup frame\r\n`,
+        expect.any(Function)
+      )
+
+      binding.dispose()
+    } finally {
+      restoreNavigator()
+    }
   })
 
   it('keeps split hidden Codex terminal queries on the live xterm path', async () => {

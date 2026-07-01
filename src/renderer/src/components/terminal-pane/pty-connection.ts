@@ -2112,9 +2112,13 @@ export function connectPanePty(
     recordAcceptedTerminalInputForHibernation()
   }
   const terminalTheme = pane.terminal.options.theme
-  const terminalColorQueryReplies = terminalTheme
-    ? { foreground: terminalTheme.foreground, background: terminalTheme.background }
-    : undefined
+  // Why: ConPTY can turn OSC color replies written as PTY input into visible
+  // prompt text by swallowing ESC and echoing the printable remainder.
+  const shouldSendOscColorQueryReplies = !isNativeWindowsConpty
+  const terminalColorQueryReplies =
+    shouldSendOscColorQueryReplies && terminalTheme
+      ? { foreground: terminalTheme.foreground, background: terminalTheme.background }
+      : undefined
   const transportOptions = {
     cwd: deps.cwd,
     env: paneEnv,
@@ -2220,6 +2224,7 @@ export function connectPanePty(
     parser: pane.terminal.parser,
     sendInput: (data) => transport.sendInput(data),
     isReplaying: () => isPaneReplaying(deps.replayingPanesRef, pane.id),
+    disableOscColorReplies: !shouldSendOscColorQueryReplies,
     ...(isNativeWindowsConpty ? { da1Response: CONPTY_DA1_RESPONSE } : {})
   })
   const respondToTerminalPixelSizeQueries = createTerminalPixelSizeQueryResponder(
@@ -3608,7 +3613,7 @@ export function connectPanePty(
         hiddenStartupRendererQueryPending
       )
       hiddenStartupRendererQueryPending = extracted.pending
-      if (extracted.oscColorQueryData) {
+      if (extracted.oscColorQueryData && shouldSendOscColorQueryReplies) {
         // Why: Codex's startup palette probe has a 100 ms budget. Answer
         // hidden color queries directly so renderer scheduling cannot miss it.
         sendTerminalOscColorQueryReplies(extracted.oscColorQueryData, pane.terminal, (reply) =>
@@ -4241,7 +4246,7 @@ export function connectPanePty(
           hiddenStartupRendererQuery: true
         })
       }
-      if (pendingForegroundQuery?.oscColorQueryData) {
+      if (pendingForegroundQuery?.oscColorQueryData && shouldSendOscColorQueryReplies) {
         sendTerminalOscColorQueryReplies(
           pendingForegroundQuery.oscColorQueryData,
           pane.terminal,

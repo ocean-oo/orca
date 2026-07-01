@@ -15,6 +15,7 @@ type TerminalCapabilityRepliesDeps = {
   sendInput: (data: string) => boolean | void
   isReplaying: () => boolean
   da1Response?: string
+  disableOscColorReplies?: boolean
 }
 
 function isPrimaryDeviceAttributesQuery(params: (number | number[])[]): boolean {
@@ -130,6 +131,9 @@ export function installTerminalCapabilityReplyHandlers(
       return true
     }),
     deps.parser.registerOscHandler(10, (data) => {
+      if (deps.disableOscColorReplies) {
+        return false
+      }
       const slots = terminalOscColorQuerySlotsForBody(10, data.trim())
       if (!slots) {
         return false
@@ -140,6 +144,9 @@ export function installTerminalCapabilityReplyHandlers(
       return sendTerminalOscColorQueryRepliesForSlots(slots, deps.terminal, deps.sendInput)
     }),
     deps.parser.registerOscHandler(11, (data) => {
+      if (deps.disableOscColorReplies) {
+        return false
+      }
       const slots = terminalOscColorQuerySlotsForBody(11, data.trim())
       if (!slots) {
         return false
