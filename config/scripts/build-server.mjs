@@ -16,6 +16,7 @@ import { join } from 'node:path'
 const __dirname = import.meta.dirname
 const ROOT = join(__dirname, '..', '..')
 const SERVER_ENTRY = join(ROOT, 'src', 'server', 'index.ts')
+const SERVER_CLI_ENTRY = join(ROOT, 'src', 'server', 'cli.ts')
 const ELECTRON_SHIM = join(ROOT, 'src', 'main', 'server', 'electron-shim.ts')
 const OUT_DIR = join(ROOT, 'out', 'server')
 
@@ -47,12 +48,16 @@ const externalNativeAddons = {
 }
 
 const result = await build({
-  entryPoints: [SERVER_ENTRY],
+  entryPoints: {
+    'orca-server': SERVER_ENTRY,
+    orca: SERVER_CLI_ENTRY
+  },
   bundle: true,
   platform: 'node',
   target: 'node20',
   format: 'cjs',
-  outfile: join(OUT_DIR, 'orca-server.js'),
+  outdir: OUT_DIR,
+  entryNames: '[name]',
   // Why: some deps (jsonc-parser) ship a UMD `main` whose conditional
   // require('./impl/...') esbuild cannot statically resolve. Preferring the
   // ESM `module` field bundles the analyzable ESM entry instead.
@@ -104,12 +109,12 @@ const serverPkg = {
   version: rootPkg.version,
   description: 'Headless, Electron-free Orca runtime server',
   type: 'commonjs',
-  bin: { 'orca-server': './orca-server.js' },
+  bin: { orca: './orca.js', 'orca-server': './orca-server.js' },
   main: './orca-server.js',
   // Why: limit the published tarball to the runtime artifacts. Without this npm
   // would include stray files in OUT_DIR (metafile.json, etc.). The prebuilts
   // dir + scripts are load-bearing for the toolchain-free node-pty install.
-  files: ['orca-server.js', 'package.json', 'scripts/', 'prebuilds/'],
+  files: ['orca.js', 'orca-server.js', 'package.json', 'scripts/', 'prebuilds/'],
   // Why: after deps install, drop the matching shipped node-pty prebuilt into
   // place so no compiler is needed on supported platforms. Falls back silently
   // to node-pty's own source build when no prebuilt matches (see the script).
@@ -137,7 +142,7 @@ copyFileSync(
   join(OUT_DIR, 'scripts', 'install-node-pty-prebuilt.mjs')
 )
 console.log(
-  `Wrote ${join(OUT_DIR, 'package.json')} (type: commonjs, bin: orca-server, postinstall: prebuilt installer)`
+  `Wrote ${join(OUT_DIR, 'package.json')} (type: commonjs, bin: orca + orca-server, postinstall: prebuilt installer)`
 )
 
-console.log('\norca-server bundle complete.')
+console.log('\norca server bundles complete.')

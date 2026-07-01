@@ -21,11 +21,7 @@ import { setSecretStore } from '../../shared/secret-store'
 import { NodeAppEnvironment } from './node-app-environment'
 import { NodeSecretStore } from './node-secret-store'
 import { warnIfSharingDesktopUserData } from './shared-user-data-guard'
-import {
-  parseServerArgs,
-  type NodeServerOptions,
-  printNodeServerHelp
-} from './node-server-args'
+import { parseServerArgs, type NodeServerOptions, printNodeServerHelp } from './node-server-args'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { OrcaRuntimeRpcServer } from '../runtime/runtime-rpc'
 
@@ -40,6 +36,9 @@ export async function runNodeServer(argv: string[] = process.argv.slice(2)): Pro
   const env = new NodeAppEnvironment({ userDataPath: options.userDataPath })
   setAppEnvironment(env)
   const userDataPath = env.getPath('userData')
+  // Why: terminals spawned by the server run `orca ...` locally. Pin the
+  // inherited CLI lookup path to this server's metadata, including --user-data.
+  process.env.ORCA_USER_DATA_PATH = userDataPath
   // Warn if we're about to share a desktop install's userData (data-race risk).
   warnIfSharingDesktopUserData({
     userDataPath,

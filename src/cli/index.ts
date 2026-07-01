@@ -13,6 +13,10 @@ import { printHelp } from './help'
 import { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
 
+declare global {
+  var __ORCA_CLI_DISABLE_AUTO_MAIN__: boolean | undefined
+}
+
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'
 
@@ -130,6 +134,6 @@ async function runAgentTeamsTmuxShim(argv: string[]): Promise<void> {
   }
 }
 
-if (require.main === module) {
+if (require.main === module && globalThis.__ORCA_CLI_DISABLE_AUTO_MAIN__ !== true) {
   void main()
 }
