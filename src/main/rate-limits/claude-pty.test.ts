@@ -258,6 +258,112 @@ describe('fetchViaPty', () => {
     })
   })
 
+  it('does not let an incomplete Fable section consume later usage sections', async () => {
+    const term = makeMockTerm()
+    spawnMock.mockReturnValue(term)
+
+    const resultPromise = fetchViaPty()
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    term.emitData(`
+      Plan usage limits
+
+      Fable
+      Usage unavailable
+
+      Current session
+      12% used
+
+      Current week (all models)
+      84% left
+    `)
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'claude',
+      status: 'ok',
+      session: {
+        usedPercent: 12
+      },
+      weekly: {
+        usedPercent: 16
+      },
+      fableWeekly: null,
+      error: null
+    })
+  })
+
+  it('does not treat inline Fable weekly text as a parsed usage label', async () => {
+    const term = makeMockTerm()
+    spawnMock.mockReturnValue(term)
+
+    const resultPromise = fetchViaPty()
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    term.emitData(`
+      Plan usage limits
+
+      Current session
+      Fable weekly usage
+      42% consumed
+
+      Current week (all models)
+      84% left
+    `)
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'claude',
+      status: 'ok',
+      session: null,
+      weekly: {
+        usedPercent: 16
+      },
+      fableWeekly: null,
+      error: null
+    })
+  })
+
+  it('keeps waiting after a bare Fable heading until another usage section renders', async () => {
+    const term = makeMockTerm()
+    spawnMock.mockReturnValue(term)
+    let settled = false
+
+    const resultPromise = fetchViaPty().finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    term.emitData(`
+      Plan usage limits
+
+      Fable
+    `)
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    expect(settled).toBe(false)
+
+    term.emitData(`
+      42% consumed
+
+      Current session
+      12% used
+    `)
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'claude',
+      status: 'ok',
+      session: {
+        usedPercent: 12
+      },
+      fableWeekly: {
+        usedPercent: 42
+      },
+      error: null
+    })
+  })
+
   it('parses 7-day weekly labels without the old Current week heading', async () => {
     const term = makeMockTerm()
     spawnMock.mockReturnValue(term)

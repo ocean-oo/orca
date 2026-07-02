@@ -300,7 +300,6 @@ type OAuthUsageWindow = {
 type OAuthUsageResponse = {
   five_hour?: OAuthUsageWindow
   seven_day?: OAuthUsageWindow
-  fable?: OAuthUsageWindow
   fable_weekly?: OAuthUsageWindow
   fable_seven_day?: OAuthUsageWindow
   seven_day_fable?: OAuthUsageWindow
@@ -378,13 +377,12 @@ function mapWindow(
 }
 
 function mapFableWeeklyWindow(data: OAuthUsageResponse): RateLimitWindow | null {
-  // Why: the Fable weekly bucket is newer than the documented statusline
-  // contract, so accept the observed likely field names without guessing usage.
+  // Why: a bare "fable" field does not prove the window length. Only accept
+  // explicit weekly/seven-day names for the distinct Fable meter.
   return (
     mapWindow(data.fable_weekly, 10080) ??
     mapWindow(data.fable_seven_day, 10080) ??
-    mapWindow(data.seven_day_fable, 10080) ??
-    mapWindow(data.fable, 10080)
+    mapWindow(data.seven_day_fable, 10080)
   )
 }
 
