@@ -115,6 +115,23 @@ describe('schedulePaneRevealRepaint', () => {
     ).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps repainting remaining panes when one pane throws', () => {
+    const explosivePane = {
+      get gpuRenderingEnabled(): boolean {
+        throw new Error('pane torn down mid-frame')
+      }
+    } as never as ManagedPaneInternal
+    const webglAddon = { clearTextureAtlas: vi.fn() }
+    const livePane = createPane({ webglAddon })
+    schedulePaneRevealRepaint(() => [explosivePane, livePane])
+
+    flushFrame()
+    flushFrame()
+
+    expect(webglAddon.clearTextureAtlas).toHaveBeenCalledTimes(1)
+    expect(livePane.terminal.refresh).toHaveBeenCalled()
+  })
+
   it('falls back to a timeout when animation frames are unavailable', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', undefined)

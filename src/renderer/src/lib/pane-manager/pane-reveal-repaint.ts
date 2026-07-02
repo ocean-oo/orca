@@ -28,8 +28,12 @@ function scheduleSettledFrame(callback: () => void): void {
 export function schedulePaneRevealRepaint(getPanes: () => Iterable<ManagedPaneInternal>): void {
   scheduleSettledFrame(() => {
     for (const pane of getPanes()) {
-      reattachWebglIfNeeded(pane)
-      resetWebglTextureAtlas(pane)
+      try {
+        reattachWebglIfNeeded(pane)
+        resetWebglTextureAtlas(pane)
+      } catch {
+        /* ignore — one pane's failure must not block repaint of the rest */
+      }
     }
   })
 }
