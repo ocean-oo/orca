@@ -218,6 +218,8 @@ describe('electron-builder config', () => {
       expect(dittoCalls.map(({ options }) => options.cwd)).toEqual(
         dylibPaths.map((dylibPath) => dirname(dylibPath))
       )
+      expect(dittoCalls.every(({ options }) => options.timeout === 2 * 60 * 1000)).toBe(true)
+      expect(notaryCalls.every(({ options }) => options.timeout === 45 * 60 * 1000)).toBe(true)
       expect(dittoCalls.map(({ args }) => args.at(-1))).toEqual(
         notaryCalls.map(({ args }) => args[2])
       )
@@ -378,7 +380,7 @@ describe('electron-builder config', () => {
         throw new Error('Expected notarization to fail')
       } catch (error) {
         expect(error.message).toContain('Standalone binary notarization subprocess failed')
-        expect(error.message).not.toContain('app-password')
+        expect(error.message).not.toMatch(/release@example\.com|app-password|TEAMID/)
         expect(error.message).toContain('[REDACTED]')
       }
       expect(host.rmSync).toHaveBeenCalled()

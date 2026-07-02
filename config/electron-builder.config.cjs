@@ -446,7 +446,8 @@ function notarizeMacStandaloneBinary(binaryPath, host) {
       ['-c', '-k', '--sequesterRsrc', '--keepParent', basename(binaryPath), archivePath],
       {
         cwd: dirname(binaryPath),
-        stdio: 'inherit'
+        stdio: 'inherit',
+        timeout: macDylibArchiveTimeoutMs
       }
     )
     const credentialArgs = macNotarytoolCredentialArgs()
@@ -455,7 +456,8 @@ function notarizeMacStandaloneBinary(binaryPath, host) {
       'xcrun',
       ['notarytool', 'submit', archivePath, ...credentialArgs, '--wait', '--output-format', 'json'],
       {
-        encoding: 'utf8'
+        encoding: 'utf8',
+        timeout: macDylibNotarytoolTimeoutMs
       },
       credentialArgs,
       binaryPath
@@ -468,6 +470,10 @@ function notarizeMacStandaloneBinary(binaryPath, host) {
     host.rmSync(archiveDir, { recursive: true, force: true })
   }
 }
+
+const macDylibArchiveTimeoutMs = 2 * 60 * 1000
+// Why: release jobs should fail loudly instead of hanging on a stuck submission.
+const macDylibNotarytoolTimeoutMs = 45 * 60 * 1000
 
 const macNotarytoolCredentialFlags = new Set([
   '--apple-id',
