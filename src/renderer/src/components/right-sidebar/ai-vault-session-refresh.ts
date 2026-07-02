@@ -83,5 +83,23 @@ export function useAiVaultSessionRefresh(scopePaths: readonly string[]): {
     void refresh()
   }, [refresh, scopePathsKey])
 
+  // Sessions started while the app was backgrounded should appear when the
+  // user returns; non-force so the main process's 15s scan cache rate-limits
+  // rapid focus flips.
+  useEffect(() => {
+    const onRefocus = (): void => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+      void refresh()
+    }
+    window.addEventListener('focus', onRefocus)
+    document.addEventListener('visibilitychange', onRefocus)
+    return () => {
+      window.removeEventListener('focus', onRefocus)
+      document.removeEventListener('visibilitychange', onRefocus)
+    }
+  }, [refresh])
+
   return { error, loading, refresh, scanResult, sessions }
 }
