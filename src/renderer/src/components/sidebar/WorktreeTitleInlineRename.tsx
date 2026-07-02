@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
+import { WorktreeTitleFieldRename } from './WorktreeTitleFieldRename'
 
 export type WorktreeTitleRenameCommit = { kind: 'cancel' } | { kind: 'save'; displayName: string }
 
@@ -135,12 +136,8 @@ export function WorktreeTitleInlineRename({
   // Why: the sidebar row needs a text-only editor to avoid layout jumps; the
   // hovercard can use a compact field that reads more like native rename UI.
   const editingInputClassName =
-    editingPresentation === 'field'
-      ? 'h-6 rounded-sm border border-input bg-input/40 px-0 py-0 shadow-xs selection:bg-[Highlight] selection:text-[HighlightText] focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring/50 dark:bg-input/30'
-      : 'h-[1lh] rounded-none border-0 !border-transparent !bg-transparent p-0 !shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none dark:!bg-transparent'
+    'h-[1lh] rounded-none border-0 !border-transparent !bg-transparent p-0 !shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none dark:!bg-transparent'
   const suppressMouseSelection = editingPresentation === 'field' && !selectOnFocus
-  const savingInputClassName = editingPresentation === 'field' ? 'pr-6' : 'pr-4'
-  const savingSpinnerClassName = editingPresentation === 'field' ? 'right-1.5' : 'right-0'
 
   const setEditingMode = useCallback(
     (nextEditing: boolean) => {
@@ -171,7 +168,7 @@ export function WorktreeTitleInlineRename({
   const handleInputRef = useCallback(
     (input: HTMLInputElement | null) => {
       clearRenameFocusFrame()
-      if (!input) {
+      if (!input || !editing) {
         return
       }
       // Why: defer focus until after the opening double-click finishes so the
@@ -188,7 +185,7 @@ export function WorktreeTitleInlineRename({
         input.setSelectionRange(caret, caret)
       })
     },
-    [clearRenameFocusFrame, selectOnFocus]
+    [clearRenameFocusFrame, editing, selectOnFocus]
   )
 
   // Why: open the editor when a parent requests it (the workspace.rename
@@ -323,6 +320,35 @@ export function WorktreeTitleInlineRename({
     [cancelRename, commitRename]
   )
 
+  if (editingPresentation === 'field') {
+    return (
+      <WorktreeTitleFieldRename
+        titleElementKey={titleElementKey}
+        displayName={displayName}
+        value={value}
+        disabled={disabled}
+        editing={editing}
+        saving={saving}
+        showUnreadEmphasis={showUnreadEmphasis}
+        className={className}
+        editingClassName={editingClassName}
+        inputClassName={inputClassName}
+        suppressMouseSelection={suppressMouseSelection}
+        rootRef={handleRootRef}
+        inputRef={handleInputRef}
+        onStartRename={startRename}
+        onStopCardEvent={stopCardEvent}
+        onInputDoubleClick={handleInputDoubleClick}
+        onInputDragStart={stopInputDragEvent}
+        onInputMouseDown={handleInputMouseDown}
+        onInputSelect={handleInputSelect}
+        onInputKeyDown={handleKeyDown}
+        onValueChange={setValue}
+        onCommitRename={() => void commitRename()}
+      />
+    )
+  }
+
   if (editing) {
     return (
       <span
@@ -367,7 +393,7 @@ export function WorktreeTitleInlineRename({
             'col-start-1 row-start-1 min-w-0 cursor-text truncate text-foreground outline-none',
             suppressMouseSelection ? 'select-none' : 'select-text',
             editingInputClassName,
-            saving && savingInputClassName,
+            saving && 'pr-4',
             inputClassName
           )}
         />
@@ -375,7 +401,7 @@ export function WorktreeTitleInlineRename({
           <LoaderCircle
             className={cn(
               'pointer-events-none absolute top-1/2 size-3 -translate-y-1/2 animate-spin text-muted-foreground',
-              savingSpinnerClassName
+              'right-0'
             )}
           />
         ) : null}

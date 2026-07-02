@@ -141,4 +141,40 @@ describe('WorktreeTitleInlineRename lifecycle', () => {
     expect(input?.className).toContain('select-none')
     expect(input?.className).not.toContain('select-text')
   })
+
+  it('keeps the hovercard field input mounted while entering edit mode', () => {
+    const nextContainer = document.createElement('div')
+    container = nextContainer
+    root = createRoot(nextContainer)
+
+    act(() => {
+      root?.render(
+        <WorktreeTitleInlineRename
+          displayName="Feature workspace"
+          editingPresentation="field"
+          selectOnFocus={false}
+          onRename={vi.fn()}
+        />
+      )
+    })
+
+    const readInput = nextContainer.querySelector('input')
+    expect(readInput?.readOnly).toBe(true)
+    expect(readInput?.getAttribute('data-worktree-title-rename-input')).toBeNull()
+
+    act(() => {
+      nextContainer
+        .querySelector('[data-worktree-title-inline-rename]')
+        ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+    })
+
+    const editingInput = nextContainer.querySelector('[data-worktree-title-rename-input]')
+    expect(editingInput).toBe(readInput)
+    expect((editingInput as HTMLInputElement | null)?.readOnly).toBe(false)
+
+    act(() => {
+      root?.unmount()
+      root = null
+    })
+  })
 })
