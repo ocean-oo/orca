@@ -203,14 +203,20 @@ describe('WorktreeCardDetailsHover interactions', () => {
     act(() => {
       interactionMocks.onHoverOpenChange?.(true)
     })
+    const identityHeader = container.querySelector('[data-worktree-hover-identity-header]')
     const title = container.querySelector('[data-worktree-title-inline-rename]')
+
+    expect(identityHeader?.className).toContain('cursor-default')
+    expect(title?.className).toContain('cursor-default')
 
     act(() => {
       title?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
     })
     const input = container.querySelector('[data-worktree-title-rename-input]')
 
+    expect(identityHeader?.className).toContain('cursor-text')
     expect(input).not.toBeNull()
+    expect(input?.className).toContain('select-text')
     expect(input?.className).toContain('bg-input/40')
     expect(input?.className).toContain('rounded-sm')
     expect(input?.className).toContain('selection:bg-[Highlight]')

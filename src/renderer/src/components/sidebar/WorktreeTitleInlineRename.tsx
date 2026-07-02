@@ -64,6 +64,7 @@ export function WorktreeTitleInlineRename({
   const editingRef = useRef(false)
   const savingRef = useRef(false)
   const mountedRef = useRef(true)
+  const onEditingChangeRef = useRef(onEditingChange)
   const titleElementRef = useRef<HTMLSpanElement | null>(null)
   const titleResizeObserverRef = useRef<ResizeObserver | null>(null)
   const removeTitleResizeListenerRef = useRef<(() => void) | null>(null)
@@ -71,6 +72,20 @@ export function WorktreeTitleInlineRename({
   const [value, setValue] = useState(displayName)
   const [saving, setSaving] = useState(false)
   const [titleTruncated, setTitleTruncated] = useState(false)
+
+  onEditingChangeRef.current = onEditingChange
+
+  useEffect(() => {
+    return () => {
+      if (!editingRef.current) {
+        return
+      }
+      editingRef.current = false
+      // Why: hovercards keep themselves mounted while renaming; if the title
+      // unmounts after a save, the parent still needs the editing latch cleared.
+      onEditingChangeRef.current?.(false)
+    }
+  }, [])
 
   const measureTitleTruncated = useCallback((element: HTMLSpanElement | null) => {
     const nextTruncated = element ? isWorktreeTitleTruncated(element) : false
