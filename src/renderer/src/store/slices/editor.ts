@@ -62,6 +62,10 @@ import { settingsForRuntimeOwner } from '@/runtime/runtime-rpc-client'
 import { notifyHostOfMirroredEditorClose } from '@/runtime/close-mirrored-editor-tab'
 import { findWorktreeById, getRepoIdFromWorktreeId } from './worktree-helpers'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import {
+  addAdditionalValidWorkspaceKeys,
+  type WorkspaceSessionHydrationOptions
+} from '@/lib/workspace-session-hydration-keys'
 import { createUntitledMarkdownFileWithTemplateSelection } from '@/lib/create-untitled-markdown'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import { translate } from '@/i18n/i18n'
@@ -706,7 +710,10 @@ export type EditorSlice = {
   setPendingEditorReveal: (reveal: PendingEditorReveal | null) => void
 
   // Session hydration — restore editor files from persisted workspace session
-  hydrateEditorSession: (session: WorkspaceSessionState) => void
+  hydrateEditorSession: (
+    session: WorkspaceSessionState,
+    options?: WorkspaceSessionHydrationOptions
+  ) => void
 }
 
 function openWorkspaceEditorItem(
@@ -4182,7 +4189,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   // Why: only edit-mode files are restored — diffs and conflict views depend on
   // transient git state that may have changed between sessions. Restoring them
   // would show stale data or fail to load entirely.
-  hydrateEditorSession: (session) => {
+  hydrateEditorSession: (session, options) => {
     set((s) => {
       const openFilesByWorktree = session.openFilesByWorktree ?? {}
       const persistedActiveFileIdByWorktree = session.activeFileIdByWorktree ?? {}
@@ -4201,6 +4208,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       for (const workspace of s.folderWorkspaces) {
         validWorktreeIds.add(folderWorkspaceKey(workspace.id))
       }
+      addAdditionalValidWorkspaceKeys(validWorktreeIds, options)
 
       const openFiles: OpenFile[] = []
       const editorDrafts: Record<string, string> = {}
