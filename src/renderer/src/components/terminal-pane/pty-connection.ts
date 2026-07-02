@@ -85,6 +85,7 @@ import {
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { makePaneKey, parseLegacyNumericPaneKey } from '../../../../shared/stable-pane-id'
 import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
+import { dispatchTerminalCommandFinishedEvent } from '@/hooks/terminal-command-finished-event'
 import { e2eConfig } from '@/lib/e2e-config'
 import type { AgentStatusEntry, AgentType } from '../../../../shared/agent-status-types'
 import { isWebTerminalSurfaceTabId } from '@/runtime/web-terminal-surface-id'
@@ -1373,6 +1374,9 @@ export function connectPanePty(
   }
   const commandLifecycle = createTerminalCommandLifecycle({
     onCommandFinished: () => {
+      // Why: the finished command may have moved HEAD or the index (e.g.
+      // `git checkout`); nudge git UI now instead of waiting for a poll.
+      dispatchTerminalCommandFinishedEvent(deps.worktreeId)
       const state = useAppStore.getState()
       const entry = state.agentStatusByPaneKey[cacheKey]
       const inferenceResult = flushPendingInterruptInference()

@@ -204,6 +204,33 @@ describe('worktree base directory poller', () => {
     )
   })
 
+  it('reports primary-checkout HEAD changes via polling', async () => {
+    const commonDir = await makeRoot()
+    const received: WorktreeBasePollEvent[][] = []
+    const target = makeTarget('git-common', commonDir)
+    const poller = await startWorktreeBaseDirectoryPoller(
+      target,
+      () => target.repos,
+      (events) => received.push(events),
+      // Force the non-darwin poll path so this test is deterministic on all CI.
+      { pollIntervalMs: POLL_MS, platform: 'linux' }
+    )
+    cleanups.push(() => poller.unsubscribe())
+
+    const headFile = join(commonDir, 'HEAD')
+    await writeFile(headFile, 'ref: refs/heads/main')
+    await waitForEvents(received, (flat) =>
+      flat.some((event) => event.type === 'create' && event.path === headFile)
+    )
+
+    // A branch switch rewrites HEAD in place; the mtime diff must surface it.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await writeFile(headFile, 'ref: refs/heads/feature')
+    await waitForEvents(received, (flat) =>
+      flat.some((event) => event.type === 'update' && event.path === headFile)
+    )
+  })
+
   it('emits deletes for all known worktrees when the root vanishes', async () => {
     const root = await makeRoot()
     const worktree = join(root, 'external-5')
@@ -252,6 +279,34 @@ describe('worktree base directory poller', () => {
       await rm(entry, { recursive: true })
       await waitForEvents(received, (flat) =>
         flat.some((event) => event.type === 'delete' && event.path === entry)
+      )
+    })
+
+    it('covers primary-checkout metadata alongside the narrow stream', async () => {
+      const commonDir = await makeRoot()
+      await mkdir(join(commonDir, 'worktrees'))
+      const received: WorktreeBasePollEvent[][] = []
+      const target = makeTarget('git-common', commonDir)
+      const poller = await startWorktreeBaseDirectoryPoller(
+        target,
+        () => target.repos,
+        (events) => received.push(events),
+        { pollIntervalMs: POLL_MS, platform: 'darwin' }
+      )
+      cleanups.push(() => poller.unsubscribe())
+
+      // The narrow stream is rooted at worktrees/, so top-level HEAD writes
+      // must arrive through the companion metadata poll.
+      const headFile = join(commonDir, 'HEAD')
+      await writeFile(headFile, 'ref: refs/heads/main')
+      await waitForEvents(received, (flat) =>
+        flat.some((event) => event.type === 'create' && event.path === headFile)
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      await writeFile(headFile, 'ref: refs/heads/feature')
+      await waitForEvents(received, (flat) =>
+        flat.some((event) => event.type === 'update' && event.path === headFile)
       )
     })
 

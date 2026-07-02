@@ -14,11 +14,13 @@ import {
 } from '@/lib/passive-macos-app-data-access'
 import { getRightSidebarWorktreeRuntimeSettings } from './file-explorer-runtime-owner'
 import { useGitStatusFileWatchRefresh } from './git-status-file-watch-refresh'
+import { useGitStatusPushSignalRefresh } from './git-status-push-signal-refresh'
 
 const MIN_STATUS_REFRESH_INTERVAL_MS = 3000
 const INTERACTIVE_STATUS_POLL_INTERVAL_MS = MIN_STATUS_REFRESH_INTERVAL_MS
-// Why: file-watch refreshes cover content changes; terminal-only polling is
-// just a fallback for branch switches made inside shells.
+// Why: file-watch refreshes cover content changes and push signals (repo
+// metadata watch, shell command completion) cover branch switches; the
+// terminal-only poll is a last-resort backstop for shells without either.
 const TERMINAL_ONLY_STATUS_POLL_INTERVAL_MS = 30_000
 
 export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
@@ -180,6 +182,13 @@ export function useGitStatusPolling(options: { enabled?: boolean } = {}): void {
     rightSidebarOpen,
     rightSidebarTab,
     worktreePath
+  })
+
+  useGitStatusPushSignalRefresh({
+    activeRepoId,
+    activeWorktreeId,
+    enabled: shouldPollActiveWorktreeGitStatus,
+    fetchStatus
   })
 
   // Why: poll conflict operation for non-active worktrees that have a stale

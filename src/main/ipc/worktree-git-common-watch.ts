@@ -6,13 +6,36 @@ import type {
   WorktreeBaseSubscription
 } from './worktree-base-directory-poller'
 
-// Watches a repo's `<common>/.git/worktrees` metadata — the only subtree the
-// git-common event filter consumes.
-// macOS: a narrow native stream rooted there — a tiny, rare-churn tree —
-// gives instant detection with zero idle cost and zero wide-scope fseventsd
-// delivery. Other platforms: dir-listing poll (no fseventsd to protect, and
+// Watches a repo's `<common>/.git/worktrees` metadata plus the primary
+// checkout's shallow branch/index files — the only paths the git-common event
+// filter consumes.
+// macOS: a narrow native stream rooted at `worktrees/` — a tiny, rare-churn
+// tree — gives instant detection with zero idle cost and zero wide-scope
+// fseventsd delivery; the primary files are covered by a few stat calls per
+// tick (a native stream would have to span the whole common dir, objects
+// included). Other platforms: dir-listing poll (no fseventsd to protect, and
 // on Windows an open directory handle on `worktrees/` could interfere with
 // `git worktree prune` removing it).
+
+// Why: branch switches and commits made in the primary checkout rewrite these
+// top-level files (linked-worktree equivalents live under `worktrees/`).
+// Deliberately excludes FETCH_HEAD-style churn that carries no status change.
+const PRIMARY_CHECKOUT_METADATA_FILES = ['HEAD', 'packed-refs', 'index']
+
+async function snapshotPrimaryCheckoutMetadata(
+  commonDirPath: string
+): Promise<Map<string, number>> {
+  const mtimes = new Map<string, number>()
+  for (const name of PRIMARY_CHECKOUT_METADATA_FILES) {
+    const filePath = join(commonDirPath, name)
+    try {
+      mtimes.set(filePath, (await stat(filePath)).mtimeMs)
+    } catch {
+      // Missing file (e.g. no packed-refs yet) diffs into a create later.
+    }
+  }
+  return mtimes
+}
 
 async function snapshotGitCommon(commonDirPath: string): Promise<Map<string, number>> {
   const mtimes = new Map<string, number>()
@@ -59,15 +82,15 @@ function diffGitCommon(
   return events
 }
 
-async function startGitCommonPoller(
-  target: WorktreeBaseWatchTarget,
+async function startSnapshotDiffPoller(
+  takeSnapshot: () => Promise<Map<string, number>>,
   onEvents: (events: WorktreeBasePollEvent[]) => void,
   pollIntervalMs: number,
   onFullScan?: () => void
 ): Promise<WorktreeBaseSubscription> {
   let disposed = false
   let ticking = false
-  let snapshot = await snapshotGitCommon(target.path)
+  let snapshot = await takeSnapshot()
 
   const timer = setInterval(() => {
     if (disposed || ticking) {
@@ -75,7 +98,7 @@ async function startGitCommonPoller(
     }
     ticking = true
     onFullScan?.()
-    void snapshotGitCommon(target.path)
+    void takeSnapshot()
       .then((next) => {
         if (disposed) {
           return
@@ -101,6 +124,19 @@ async function startGitCommonPoller(
       clearInterval(timer)
     }
   }
+}
+
+async function snapshotGitCommonAndPrimaryMetadata(
+  commonDirPath: string
+): Promise<Map<string, number>> {
+  const [worktrees, primary] = await Promise.all([
+    snapshotGitCommon(commonDirPath),
+    snapshotPrimaryCheckoutMetadata(commonDirPath)
+  ])
+  for (const [path, mtime] of primary) {
+    worktrees.set(path, mtime)
+  }
+  return worktrees
 }
 
 async function startGitCommonNarrowWatch(
@@ -227,7 +263,25 @@ export async function startGitCommonWatch(
   onFullScan?: () => void
 ): Promise<WorktreeBaseSubscription> {
   if (platform === 'darwin') {
-    return startGitCommonNarrowWatch(target, onEvents, pollIntervalMs)
+    const [narrowWatch, primaryMetadataPoll] = await Promise.all([
+      startGitCommonNarrowWatch(target, onEvents, pollIntervalMs),
+      startSnapshotDiffPoller(
+        () => snapshotPrimaryCheckoutMetadata(target.path),
+        onEvents,
+        pollIntervalMs,
+        onFullScan
+      )
+    ])
+    return {
+      unsubscribe: async () => {
+        await Promise.all([narrowWatch.unsubscribe(), primaryMetadataPoll.unsubscribe()])
+      }
+    }
   }
-  return startGitCommonPoller(target, onEvents, pollIntervalMs, onFullScan)
+  return startSnapshotDiffPoller(
+    () => snapshotGitCommonAndPrimaryMetadata(target.path),
+    onEvents,
+    pollIntervalMs,
+    onFullScan
+  )
 }

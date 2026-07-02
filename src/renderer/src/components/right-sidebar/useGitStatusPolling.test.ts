@@ -114,6 +114,9 @@ async function usePollingOnce(
         watchWorktree: vi.fn().mockResolvedValue(undefined),
         unwatchWorktree: vi.fn().mockResolvedValue(undefined),
         onFsChanged: vi.fn(() => vi.fn())
+      },
+      worktrees: {
+        onChanged: vi.fn(() => vi.fn())
       }
     },
     addEventListener: vi.fn(),
@@ -362,6 +365,9 @@ describe('useGitStatusPolling', () => {
           watchWorktree: vi.fn().mockResolvedValue(undefined),
           unwatchWorktree: vi.fn().mockResolvedValue(undefined),
           onFsChanged: vi.fn(() => vi.fn())
+        },
+        worktrees: {
+          onChanged: vi.fn(() => vi.fn())
         }
       },
       addEventListener: vi.fn((type: string, listener: EventListener) => {
@@ -471,6 +477,9 @@ describe('useGitStatusPolling', () => {
           watchWorktree: vi.fn().mockResolvedValue(undefined),
           unwatchWorktree: vi.fn().mockResolvedValue(undefined),
           onFsChanged: vi.fn(() => vi.fn())
+        },
+        worktrees: {
+          onChanged: vi.fn(() => vi.fn())
         }
       },
       addEventListener: vi.fn((type: string, listener: EventListener) => {
@@ -592,6 +601,9 @@ describe('useGitStatusPolling', () => {
           watchWorktree: vi.fn().mockResolvedValue(undefined),
           unwatchWorktree: vi.fn().mockResolvedValue(undefined),
           onFsChanged: vi.fn(() => vi.fn())
+        },
+        worktrees: {
+          onChanged: vi.fn(() => vi.fn())
         }
       },
       addEventListener: vi.fn((type: string, listener: EventListener) => {
@@ -707,6 +719,9 @@ describe('useGitStatusPolling', () => {
           watchWorktree: vi.fn().mockResolvedValue(undefined),
           unwatchWorktree: vi.fn().mockResolvedValue(undefined),
           onFsChanged: vi.fn(() => vi.fn())
+        },
+        worktrees: {
+          onChanged: vi.fn(() => vi.fn())
         }
       },
       addEventListener: vi.fn(),
