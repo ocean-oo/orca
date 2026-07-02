@@ -59,7 +59,7 @@ export class DaemonStreamBackpressureQueue {
 
     for (let index = 0; index < lines.length; index += 1) {
       const accepted = streamSocket.write(lines[index].line)
-      if (!accepted) {
+      if (accepted === false) {
         this.deferUntilDrain(clientId, streamSocket, lines.slice(index + 1))
         return
       }
