@@ -1103,6 +1103,11 @@ describe('registerWorktreeHandlers', () => {
         }
       ])
 
+    // Why: the conflict probe now runs concurrently with the existing-branch
+    // check; a reusable branch must be checked out even when the probe
+    // reports a conflict for the same name.
+    getBranchConflictKindMock.mockResolvedValue('local')
+
     const result = await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'fix/bug-0',
@@ -1110,7 +1115,6 @@ describe('registerWorktreeHandlers', () => {
       branchNameOverride: 'fix/bug-0'
     })
 
-    expect(getBranchConflictKindMock).not.toHaveBeenCalled()
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
       '/workspace/fix-bug-0',
@@ -1163,6 +1167,8 @@ describe('registerWorktreeHandlers', () => {
         }
       ])
 
+    getBranchConflictKindMock.mockResolvedValue('local')
+
     const result = await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'my-folder',
@@ -1170,7 +1176,6 @@ describe('registerWorktreeHandlers', () => {
       branchNameOverride: 'fix/bug-0'
     })
 
-    expect(getBranchConflictKindMock).not.toHaveBeenCalled()
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
       '/workspace/my-folder',
@@ -1217,6 +1222,8 @@ describe('registerWorktreeHandlers', () => {
         }
       ])
 
+    getBranchConflictKindMock.mockResolvedValue('local')
+
     const result = await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'fix/bug-0',
@@ -1224,7 +1231,6 @@ describe('registerWorktreeHandlers', () => {
       branchNameOverride: 'fix/bug-0'
     })
 
-    expect(getBranchConflictKindMock).not.toHaveBeenCalled()
     expect(getPRForBranchMock).not.toHaveBeenCalled()
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
@@ -1646,6 +1652,8 @@ describe('registerWorktreeHandlers', () => {
         }
       ])
 
+    getBranchConflictKindMock.mockResolvedValue('local')
+
     await handlers['worktrees:create'](null, {
       repoId: 'repo-1',
       name: 'fix-title',
@@ -1653,7 +1661,6 @@ describe('registerWorktreeHandlers', () => {
       branchNameOverride: 'feature/fix'
     })
 
-    expect(getBranchConflictKindMock).not.toHaveBeenCalled()
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
       '/workspace/fix-title',

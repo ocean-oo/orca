@@ -99,7 +99,10 @@ import {
 } from '../../shared/setup-runner-command'
 import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
 import { shouldWaitForSetupBeforeAgentStartup } from '../../shared/setup-agent-startup-policy'
-import { createWorktreeCreateTimingRecorder } from '../worktree-create-timing'
+import {
+  createWorktreeCreateTimingRecorder,
+  formatWorktreeCreateTiming
+} from '../worktree-create-timing'
 import {
   markCodexProjectTrusted,
   markCopilotFolderTrusted,
@@ -1487,20 +1490,20 @@ export async function createRemoteWorktree(
       settings,
       username
     )
-    checkoutExistingBranch = await canCheckoutExistingLocalBranchSsh(
-      provider,
-      repo.path,
-      branchName,
-      baseBranch
-    )
+    // Why: same as the local path — the conflict probe is independent of the
+    // existing-branch check, and SSH round-trips make serializing them even
+    // more expensive. Discard the conflict result when the branch is reused.
+    const [canCheckoutSsh, probedBranchConflictKind] = await Promise.all([
+      canCheckoutExistingLocalBranchSsh(provider, repo.path, branchName, baseBranch),
+      getSshBranchConflictKind(provider, repo.path, branchName, baseBranch)
+    ])
+    checkoutExistingBranch = canCheckoutSsh
     if (checkoutExistingBranch && !selectedExistingLocalBranchName) {
       // Why: once a user-selected branch is safe to reuse, path retries should
       // keep that branch exact instead of creating a sibling branch.
       selectedExistingLocalBranchName = branchName
     }
-    lastBranchConflictKind = checkoutExistingBranch
-      ? null
-      : await getSshBranchConflictKind(provider, repo.path, branchName, baseBranch)
+    lastBranchConflictKind = checkoutExistingBranch ? null : probedBranchConflictKind
     if (lastBranchConflictKind) {
       const selectedReview = isAllowedPushTargetRemoteConflict(
         lastBranchConflictKind,
@@ -1838,6 +1841,10 @@ export async function createRemoteWorktree(
   }
 
   notifyWorktreesChanged(mainWindow, repo.id)
+  const createTiming = timing.finish()
+  console.log(
+    `[worktrees] created ${remotePath} (ssh): ${formatWorktreeCreateTiming(createTiming)}`
+  )
   return {
     worktree: { ...worktree, workspaceLineage },
     ...(workspaceLineage ? { workspaceLineage } : {}),
@@ -1845,7 +1852,7 @@ export async function createRemoteWorktree(
     ...(defaultTabs ? { defaultTabs } : {}),
     ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {}),
-    timing: timing.finish()
+    timing: createTiming
   }
 }
 
@@ -2013,20 +2020,20 @@ export async function createLocalWorktree(
       username,
       localWorktreeGitOptions
     )
-    checkoutExistingBranch = await canCheckoutExistingLocalBranch(
-      repo.path,
-      branchName,
-      baseBranch,
-      localWorktreeGitOptions
-    )
+    // Why: the conflict probe is independent of the existing-branch check, so
+    // run both concurrently — each is 1-3 git spawns at ~100ms+ apiece on
+    // Windows — and discard the conflict result when the branch is reused.
+    const [canCheckout, probedBranchConflictKind] = await Promise.all([
+      canCheckoutExistingLocalBranch(repo.path, branchName, baseBranch, localWorktreeGitOptions),
+      getBranchConflictKind(repo.path, branchName, baseBranch, localWorktreeGitOptions)
+    ])
+    checkoutExistingBranch = canCheckout
     if (checkoutExistingBranch && !selectedExistingLocalBranchName) {
       // Why: suffix retries may need a new path, but an existing branch checkout
       // must keep using the user-selected branch instead of creating a sibling.
       selectedExistingLocalBranchName = branchName
     }
-    lastBranchConflictKind = checkoutExistingBranch
-      ? null
-      : await getBranchConflictKind(repo.path, branchName, baseBranch, localWorktreeGitOptions)
+    lastBranchConflictKind = checkoutExistingBranch ? null : probedBranchConflictKind
     const allowedPushTargetRemoteConflict =
       lastBranchConflictKind &&
       isAllowedPushTargetRemoteConflict(lastBranchConflictKind, branchName, args)
@@ -2454,6 +2461,8 @@ export async function createLocalWorktree(
   )
 
   notifyWorktreesChanged(mainWindow, repo.id)
+  const createTiming = timing.finish()
+  console.log(`[worktrees] created ${worktreePath}: ${formatWorktreeCreateTiming(createTiming)}`)
   return {
     worktree: { ...worktree, workspaceLineage },
     ...(workspaceLineage ? { workspaceLineage } : {}),
@@ -2471,6 +2480,6 @@ export async function createLocalWorktree(
       : {}),
     ...(stagedStartup.startupTerminal ? { startupTerminal: stagedStartup.startupTerminal } : {}),
     ...(stagedStartup.warning ? { warning: stagedStartup.warning } : {}),
-    timing: timing.finish()
+    timing: createTiming
   }
 }

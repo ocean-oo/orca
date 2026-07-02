@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { GIT_PARALLEL_CHECKOUT_CONFIG_ARGS } from '../shared/git-parallel-checkout'
 import { resolveWorktreeAddBaseRef } from '../shared/worktree-base-ref'
 import type { GitExec } from './git-handler-ops'
 import { isUnsupportedWorktreeListZError, parseWorktreeList } from './git-handler-utils'
@@ -63,11 +64,17 @@ export async function addWorktreeOp(git: GitExec, params: Record<string, unknown
       : undefined
 
   const args = checkoutExistingBranch
-    ? ['worktree', 'add', targetDir, branchName]
-    : ['worktree', 'add', '--no-track', '-b', branchName, targetDir]
-  if (!checkoutExistingBranch && noCheckout) {
-    args.splice(3, 0, '--no-checkout')
-  }
+    ? [...GIT_PARALLEL_CHECKOUT_CONFIG_ARGS, 'worktree', 'add', targetDir, branchName]
+    : [
+        ...GIT_PARALLEL_CHECKOUT_CONFIG_ARGS,
+        'worktree',
+        'add',
+        '--no-track',
+        ...(noCheckout ? ['--no-checkout'] : []),
+        '-b',
+        branchName,
+        targetDir
+      ]
   if (effectiveBase) {
     args.push(effectiveBase)
   }

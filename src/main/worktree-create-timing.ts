@@ -29,6 +29,16 @@ function createPhase(
   }
 }
 
+// Why: the timing payload is returned over IPC but nothing displays it, so a
+// slow create was previously undiagnosable from logs. One line per create
+// keeps phase-level regressions visible in the main-process log.
+export function formatWorktreeCreateTiming(timing: WorktreeCreateTiming): string {
+  const phases = timing.phases
+    .map((phase) => `${phase.phase}=${Math.round(phase.durationMs)}ms`)
+    .join(' ')
+  return `${Math.round(timing.totalDurationMs)}ms total${phases ? ` (${phases})` : ''}`
+}
+
 export function createWorktreeCreateTimingRecorder(
   clock: TimingClock = defaultClock
 ): WorktreeCreateTimingRecorder {

@@ -6,6 +6,7 @@ import {
   getBranchCleanupTargetRefs,
   refreshBranchCleanupTargetRefs
 } from '../../shared/git-branch-cleanup'
+import { GIT_PARALLEL_CHECKOUT_CONFIG_ARGS } from '../../shared/git-parallel-checkout'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
 import type {
   GitWorktreeInfo,
@@ -765,8 +766,9 @@ export async function addWorktree(
   options: AddWorktreeOptions = {}
 ): Promise<AddWorktreeResult> {
   let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
-  let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
-  const args = ['worktree', 'add']
+  let localBaseRefUpdateSuggestionPromise: Promise<LocalBaseRefUpdateSuggestion | undefined> =
+    Promise.resolve(undefined)
+  const args = [...GIT_PARALLEL_CHECKOUT_CONFIG_ARGS, 'worktree', 'add']
   let effectiveBase: string | undefined
   if (noCheckout) {
     args.push('--no-checkout')
@@ -798,13 +800,17 @@ export async function addWorktree(
           options
         )
       } else if (options.suggestLocalBaseRefUpdate) {
-        localBaseRefUpdateSuggestion = await getLocalBaseRefUpdateSuggestionForWorktreeCreate(
+        // Why: the suggestion is advisory (it only feeds a toast) but costs
+        // ~6 git calls, so overlap it with `worktree add` instead of
+        // serializing it in front. It inspects the base branch's owner
+        // worktree, never the one being added, so the concurrency is safe.
+        localBaseRefUpdateSuggestionPromise = getLocalBaseRefUpdateSuggestionForWorktreeCreate(
           repoPath,
           baseBranch,
           effectiveBase,
           options.remoteTrackingBase,
           options
-        )
+        ).catch(() => undefined)
       }
       args.push(effectiveBase)
     }
@@ -875,6 +881,7 @@ export async function addWorktree(
   } catch (error) {
     console.warn(`addWorktree: failed to set push.autoSetupRemote for ${worktreePath}`, error)
   }
+  const localBaseRefUpdateSuggestion = await localBaseRefUpdateSuggestionPromise
   return {
     ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {})
@@ -911,7 +918,10 @@ export async function addSparseWorktree(
       ['sparse-checkout', 'set', '--', ...directories],
       gitExecOptions(worktreePath, options)
     )
-    await gitExecFileAsync(['checkout', branch], gitExecOptions(worktreePath, options))
+    await gitExecFileAsync(
+      [...GIT_PARALLEL_CHECKOUT_CONFIG_ARGS, 'checkout', branch],
+      gitExecOptions(worktreePath, options)
+    )
     return addResult
   } catch (error) {
     const wrapped: SparseWorktreeCreateError =

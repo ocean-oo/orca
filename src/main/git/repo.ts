@@ -628,17 +628,31 @@ function getGitHubRemoteUrlForGhLogin(path: string): string {
   return ''
 }
 
+// Why: the username lookup chains synchronous git config/remote probes (up to
+// ~8 subprocesses when no explicit config is set) that block the main process
+// on every workspace create. The backing config changes rarely, so a short
+// per-repo TTL removes that cost without pinning a stale prefix for the
+// whole app session.
+const GIT_USERNAME_CACHE_TTL_MS = 5 * 60_000
+const gitUsernameCache = new Map<string, { value: string; expiresAt: number }>()
+
 /**
  * Get the GitHub/explicit username-style branch prefix for the repo.
  */
 export function getGitUsername(path: string): string {
+  const cached = gitUsernameCache.get(path)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
   // Why: this backs the "Git Username" branch-prefix setting. Commit author
   // email/name are not hosted-account usernames, so keep them out of this path.
-  return normalizeGitUsername(
+  const value = normalizeGitUsername(
     getGitConfigValue(path, 'github.user') ||
       getGitConfigValue(path, 'user.username') ||
       getGhLoginForGitHubRemote(path)
   )
+  gitUsernameCache.set(path, { value, expiresAt: Date.now() + GIT_USERNAME_CACHE_TTL_MS })
+  return value
 }
 
 function hasGitRef(path: string, ref: string): boolean {
