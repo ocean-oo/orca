@@ -4634,6 +4634,42 @@ describe('Store', () => {
     expect(store.getWorktreeLineage(deadKey)).toBeUndefined()
   })
 
+  it('never GCs folder-workspace instance metas — the meta IS the workspace', async () => {
+    const OLD = Date.now() - 40 * 24 * 60 * 60 * 1000
+    const folderInstanceKey = `r1::${join(testState.dir, 'gone-folder')}::workspace:11111111-1111-4111-8111-111111111111`
+    writeDataFile({
+      repos: [makeRepo({ kind: 'folder' })],
+      worktreeMeta: {
+        [folderInstanceKey]: { displayName: 'Session A', comment: '', lastActivityAt: OLD }
+      }
+    })
+
+    const store = await createStore()
+    expect(Object.keys(store.getAllWorktreeMeta())).toContain(folderInstanceKey)
+  })
+
+  it('never GCs Linux-style WSL worktree paths on Windows', async () => {
+    const OLD = Date.now() - 40 * 24 * 60 * 60 * 1000
+    const wslLinkedKey = 'r1::/home/user/gone-worktree'
+    writeDataFile({
+      repos: [makeRepo()],
+      worktreeMeta: {
+        [wslLinkedKey]: { displayName: '', comment: '', lastActivityAt: OLD }
+      }
+    })
+
+    await withPlatform('win32', async () => {
+      const store = await createStore()
+      expect(Object.keys(store.getAllWorktreeMeta())).toContain(wslLinkedKey)
+    })
+  })
+
+  it('tolerates a null worktreeMeta map in the durable file', async () => {
+    writeDataFile({ worktreeMeta: null })
+    const store = await createStore()
+    expect(store.getAllWorktreeMeta()).toEqual({})
+  })
+
   // ── GitHub cache sidecar ───────────────────────────────────────────
 
   it('cache refreshes never rewrite the durable state file', async () => {

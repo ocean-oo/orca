@@ -126,9 +126,14 @@ import {
 import { agentHookServer } from './agent-hooks/server'
 import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
-import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../shared/worktree-id'
+import {
+  FOLDER_WORKSPACE_INSTANCE_SEPARATOR,
+  getRepoIdFromWorktreeId,
+  getWorktreePathBasenameFromId
+} from '../shared/worktree-id'
 import {
   isPathInsideOrEqual,
+  isWindowsAbsolutePathLike,
   normalizeRuntimePathForComparison
 } from '../shared/cross-platform-path'
 import { normalizeTerminalQuickCommands } from '../shared/terminal-quick-commands'
@@ -347,11 +352,20 @@ function getGithubCacheFile(): string {
 const WORKTREE_META_GC_GRACE_MS = 30 * 24 * 60 * 60 * 1000
 
 function gcStaleWorktreeMeta(state: PersistedState): number {
+  // Why: a hand-corrupted file with `"worktreeMeta": null` overrides the
+  // defaults merge; normalize instead of throwing outside the parse guard.
+  state.worktreeMeta ??= {}
   const repoById = new Map(state.repos.map((repo) => [repo.id, repo]))
   const projectIds = new Set((state.projects ?? []).map((project) => project.id))
   const now = Date.now()
   let removed = 0
   for (const key of Object.keys(state.worktreeMeta)) {
+    // Why: folder-project workspace instances are keyed
+    // `repoId::path::workspace:<uuid>` and their meta IS the workspace
+    // record — never a filesystem-checkout row. Skip them entirely.
+    if (key.includes(FOLDER_WORKSPACE_INSTANCE_SEPARATOR)) {
+      continue
+    }
     const separator = key.indexOf('::')
     if (separator === -1) {
       continue
@@ -377,14 +391,22 @@ function gcStaleWorktreeMeta(state: PersistedState): number {
     if (!isAbsolute(worktreePath) || isWslUncPath(worktreePath)) {
       continue
     }
-    if (existsSync(worktreePath)) {
+    // Why: WSL linked worktrees on Windows carry Linux-style paths from git
+    // porcelain; a Windows existsSync cannot probe those and would falsely
+    // condemn live worktrees.
+    if (process.platform === 'win32' && !isWindowsAbsolutePathLike(worktreePath)) {
       continue
     }
     // Why keep timestamp-less entries: without lastActivityAt/createdAt we
     // cannot prove the 30-day idle grace elapsed; the measured dead entries
     // all carry timestamps, so this costs almost nothing in reclaimed bytes.
+    // Grace runs before the stat so healthy profiles skip the existsSync
+    // fan-out (and its slow-NFS tail) for active entries entirely.
     const newestTouch = Math.max(meta?.lastActivityAt ?? 0, meta?.createdAt ?? 0)
     if (newestTouch === 0 || now - newestTouch < WORKTREE_META_GC_GRACE_MS) {
+      continue
+    }
+    if (existsSync(worktreePath)) {
       continue
     }
     delete state.worktreeMeta[key]
