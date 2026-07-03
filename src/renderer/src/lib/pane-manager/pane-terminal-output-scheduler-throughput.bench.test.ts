@@ -94,3 +94,34 @@ describe.skipIf(!benchEnabled)('scheduler drain ceiling', () => {
     )
   })
 })
+
+// Real-timer smoke: the MessageChannel drain path must actually drain a
+// high-priority backlog without any timer advancing (the clamp-dodge works).
+import { setUseMessageChannelDrainForTesting } from './pane-terminal-output-scheduler'
+
+describe('message-channel drain path', () => {
+  it('drains high-priority output with real timers and no timer advance', async () => {
+    vi.useRealTimers()
+    setUseMessageChannelDrainForTesting(true)
+    try {
+      const writes: string[] = []
+      const terminal = {
+        write: (data: string, cb?: () => void) => {
+          writes.push(data)
+          cb?.()
+        }
+      }
+      const { writeTerminalOutput, discardTerminalOutput } =
+        await import('./pane-terminal-output-scheduler')
+      for (let i = 0; i < 40; i++) {
+        writeTerminalOutput(terminal as never, `chunk-${i};`, { foreground: true })
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      expect(writes.join('')).toContain('chunk-39;')
+      discardTerminalOutput(terminal as never)
+    } finally {
+      setUseMessageChannelDrainForTesting(null)
+      vi.useFakeTimers()
+    }
+  })
+})

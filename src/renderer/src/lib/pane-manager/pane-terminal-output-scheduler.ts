@@ -125,6 +125,47 @@ const backlogRecoveryByTerminal = new WeakMap<
 >()
 let drainTimer: ReturnType<typeof setTimeout> | null = null
 let drainTimerDelayMs: number | null = null
+// Why a MessageChannel for zero-delay drains: Chromium clamps nested
+// setTimeout(0) to ~4ms, which stacks a dead gap onto every parse-clocked
+// drain tick under flood (measured: standing queue ~18ms vs VS Code ~7ms).
+// A posted message is still a macrotask — input events and paint are
+// serviced between posts — so the cooperative yield survives without the
+// clamp. Cancellation is by generation: posts carry the generation they
+// were armed with and no-op when it has moved on.
+let drainImmediatePending = false
+let drainImmediateGeneration = 0
+let useMessageChannelDrain = typeof MessageChannel !== 'undefined' && !isVitestEnv()
+let drainChannel: MessageChannel | null = null
+
+function isVitestEnv(): boolean {
+  // Why: vitest fake timers cannot advance MessageChannel macrotasks; the
+  // timer path keeps the existing suites' virtual clock authoritative.
+  return typeof process !== 'undefined' && process.env?.VITEST === 'true'
+}
+
+function getDrainChannel(): MessageChannel {
+  if (drainChannel === null) {
+    drainChannel = new MessageChannel()
+    drainChannel.port1.onmessage = (event: MessageEvent) => {
+      if (event.data !== drainImmediateGeneration || !drainImmediatePending) {
+        return
+      }
+      drainImmediatePending = false
+      drainQueuedOutput()
+    }
+  }
+  return drainChannel
+}
+
+function cancelImmediateDrain(): void {
+  drainImmediateGeneration++
+  drainImmediatePending = false
+}
+
+export function setUseMessageChannelDrainForTesting(value: boolean | null): void {
+  cancelImmediateDrain()
+  useMessageChannelDrain = value ?? (typeof MessageChannel !== 'undefined' && !isVitestEnv())
+}
 const debugEnabled = e2eConfig.exposeStore
 
 // Why the cap is lossy: a hidden/backgrounded Chromium document can throttle
@@ -245,6 +286,10 @@ function exposeDebugApi(): void {
 }
 
 function scheduleDrain(delayMs: number): void {
+  if (drainImmediatePending) {
+    // An immediate drain is already armed — nothing can beat zero delay.
+    return
+  }
   if (drainTimer !== null) {
     if (drainTimerDelayMs !== null && drainTimerDelayMs <= delayMs) {
       return
@@ -258,6 +303,11 @@ function scheduleDrain(delayMs: number): void {
   }
   if (debugEnabled) {
     debugState.scheduledDrainCount++
+  }
+  if (delayMs === 0 && useMessageChannelDrain) {
+    drainImmediatePending = true
+    getDrainChannel().port2.postMessage(drainImmediateGeneration)
+    return
   }
   drainTimer = setTimeout(drainQueuedOutput, delayMs)
   drainTimerDelayMs = delayMs
@@ -893,8 +943,17 @@ function drainQueuedOutput(): void {
   }
   recordQueueDebugPressure()
   if (queuedByTerminal.size > 0 && hasDrainableBacklog()) {
+    // Why 0 on the channel path: the 4ms high-priority interval existed to
+    // yield between ticks, but a posted message already yields — Chromium
+    // services input and paint between macrotasks. The explicit sleep only
+    // deepened the standing queue (~4ms per 128KB tick). Timer path keeps
+    // the interval so fake-timer tests retain stepwise drain semantics.
     scheduleDrain(
-      hasHighPriorityBacklog() ? HIGH_PRIORITY_DRAIN_INTERVAL_MS : BACKGROUND_DRAIN_INTERVAL_MS
+      hasHighPriorityBacklog()
+        ? useMessageChannelDrain
+          ? 0
+          : HIGH_PRIORITY_DRAIN_INTERVAL_MS
+        : BACKGROUND_DRAIN_INTERVAL_MS
     )
   }
 }
