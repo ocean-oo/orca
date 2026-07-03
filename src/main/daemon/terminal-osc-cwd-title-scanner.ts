@@ -14,7 +14,17 @@ export class TerminalOscCwdTitleScanner {
   lastTitle: string | null = null
 
   scan(data: string): void {
-    const input = this.scanTail + data
+    // Why the pre-filter: this runs on the daemon's per-chunk hot path; flood
+    // chunks with no OSC introducer must not pay the title/URI walks
+    // (measured share of a 2.2x ingest regression — findings log 2026-07-03).
+    // Correctness across splits: an OSC intro spanning chunks either left a
+    // non-empty scanTail or this chunk ends with a bare ESC, which
+    // extractOscScanTail retains for the next call.
+    if (this.scanTail.length === 0 && !data.includes('\x1b]')) {
+      this.scanTail = data.endsWith('\x1b') ? extractOscScanTail(data, OSC_SCAN_TAIL_LIMIT) : ''
+      return
+    }
+    const input = this.scanTail.length === 0 ? data : this.scanTail + data
     this.scanTail = extractOscScanTail(input, OSC_SCAN_TAIL_LIMIT)
     scanOsc7Uris(input, (uri) => {
       const parsed = parseFileUriPath(uri)

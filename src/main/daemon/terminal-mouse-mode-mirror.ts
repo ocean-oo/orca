@@ -31,7 +31,22 @@ export class TerminalMouseModeMirror {
   }
 
   scan(data: string): void {
-    const input = this.scanTail + data
+    // Why the pre-filter: this runs on the daemon's per-chunk hot path for
+    // every session; a flood chunk with no private-mode/reset introducer
+    // must not pay the regex pass (measured share of a 2.2x ingest
+    // regression — findings log 2026-07-03). Split sequences stay correct:
+    // an introducer split across chunks either left a non-empty scanTail
+    // (previous partial) or ends this chunk, which extractScanTail retains.
+    if (
+      this.scanTail.length === 0 &&
+      !data.includes('\x1b[?') &&
+      !data.includes('\x1bc') &&
+      !data.includes('\x9b')
+    ) {
+      this.scanTail = this.extractScanTail(data)
+      return
+    }
+    const input = this.scanTail.length === 0 ? data : this.scanTail + data
     this.scanTail = this.extractScanTail(input)
     // oxlint-disable-next-line no-control-regex -- terminal escape sequences require control chars
     const privateModeRe = /\x1bc|\x1b\[\?([0-9;]+)([hl])|\x9b\?([0-9;]+)([hl])/g
