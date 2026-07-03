@@ -207,6 +207,20 @@ agent-TUI shape (DEC-2026 frames + erase/repaint) is 6.5× worse than plain
 text inside Orca while being equal-cost everywhere else — profile it in the
 renderer first (task #9).
 
+### 2026-07-02 — dev-build check of #7139/#7150 (confounded; directional only)
+
+Dev build of orca-performance (282-col window, 3MB fixtures, dev-mode
+overhead): DSR idle p50 0.64 ms (unchanged), **DSR under load p50 161 ms** —
+the cooperative-drain branch does not move the under-load class. In
+hindsight this is structural: DSR replies are ordered within the output
+stream, so the metric measures output-queue depth; #7139 paces draining to
+protect input-send responsiveness but cannot reorder the queue. Implications:
+(1) the 134 ms-class number is fixed only by shrinking the queue (producer
+flow control) or raising drain rate (the 51× throughput hunt); (2) #7153's
+own wins (freeze class, bounded memory, input-loss guards) must be validated
+with freeze scenarios and real typing, not DSR. Also learned: dev-mode runs
+are ~2× slower across the board and fences need `--dsr-timeout-ms` headroom.
+
 ## Success criteria (baseline-relative; finalize after task 1)
 
 - DSR-under-load p90 in Orca within striking distance of iTerm2 on the same
