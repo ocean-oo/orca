@@ -3495,6 +3495,14 @@ const api = {
       ipcRenderer.on('window:fullscreen-changed', listener)
       return () => ipcRenderer.removeListener('window:fullscreen-changed', listener)
     },
+    /** Fired when the OS resumes from sleep (main relays powerMonitor). A
+     *  focus-preserving display wake fires no renderer focus/visibility
+     *  events, so terminal wake recovery listens to this explicit signal. */
+    onSystemResumed: (callback: () => void): (() => void) => {
+      const listener = () => callback()
+      ipcRenderer.on('system:resumed', listener)
+      return () => ipcRenderer.removeListener('system:resumed', listener)
+    },
     /** Desktop custom titlebar only: minimize via renderer-drawn window controls. */
     minimize: (): void => {
       ipcRenderer.send('window:minimize')

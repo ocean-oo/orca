@@ -2699,6 +2699,7 @@ export type PreloadApi = {
       callback: (payload: RichMarkdownContextMenuCommandPayload) => void
     ) => () => void
     onFullscreenChanged: (callback: (isFullScreen: boolean) => void) => () => void
+    onSystemResumed: (callback: () => void) => () => void
     minimize: () => void
     maximize: () => void
     isMaximized: () => Promise<boolean>

@@ -1122,6 +1122,10 @@ let didFinishLoadHandler: (() => void) | null = null
 let didFinishLoadWebContents: WebContents | null = null
 let rendererLifecycleResetWebContents: WebContents | null = null
 let rendererLifecycleResetHandler: (() => void) | null = null
+// Why: the ACK in-flight counters live in the registerPtyHandlers closure, but
+// renderer lifecycle events are handled at module scope. This indirection lets
+// the lifecycle reset zero the closure-owned delivery gate.
+let resetRendererInFlightDeliveryGate: () => void = () => {}
 
 // Why: the "Restart daemon" path needs to re-bind provider→renderer listeners
 // against the freshly-created adapter after replaceDaemonProvider swaps the
@@ -1193,6 +1197,10 @@ function markRendererPtysHiddenForRendererLifecycleReset(): void {
   // surviving daemon/SSH PTYs fail closed until the new renderer reports again.
   activeRendererPtys.clear()
   visibleRendererPtys.clear()
+  // Why: a reload/navigation destroys the renderer-side dispatcher, so ACKs
+  // for already-sent data can never arrive. Stale in-flight counters would
+  // gate every PTY (including newly created ones) in the fresh renderer.
+  resetRendererInFlightDeliveryGate()
 }
 
 function clearRendererLifecycleResetHandlers(): void {
@@ -1370,6 +1378,9 @@ export function registerPtyHandlers(
   const trustedTerminalHandleEnv = new Set<string>()
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let rendererInFlightTotalChars = 0
+  let ackStallWatchdogTimer: ReturnType<typeof setTimeout> | null = null
+  let ackGateBlockedSinceMs: number | null = null
+  let lastAckReceivedAtMs: number | null = null
   const PTY_BATCH_INTERVAL_MS = 8
   const PTY_BATCH_DRAIN_CONTINUE_MS = 1
   const PTY_BATCH_FLUSH_CHUNK_CHARS = 16 * 1024
@@ -1380,6 +1391,13 @@ export function registerPtyHandlers(
   // Why: active panes need a bounded lane through old hidden bulk output so a
   // keystroke redraw can reach the renderer before every background ACK lands.
   const PTY_RENDERER_ACTIVE_PTY_IN_FLIGHT_RESERVE_CHARS = 512 * 1024
+  // Why: renderer ACKs can be lost across a system suspend, pinning the
+  // in-flight counters at the cap and silently gating every PTY (old and new)
+  // forever. Healthy renderers ACK continuously even under heavy load, so a
+  // full stall window with gate-blocked sends and zero ACKs means the
+  // outstanding ACKs are gone. A false fire only over-delivers transiently —
+  // the very next gating cycle bounds delivery again.
+  const PTY_ACK_STALL_WATCHDOG_MS = 10_000
   // Why: keep the immediate path bounded to keystroke-sized TUI redraws;
   // large output and non-interactive output must still use the batcher.
   const INTERACTIVE_OUTPUT_WINDOW_MS = 100
@@ -1515,6 +1533,59 @@ export function registerPtyHandlers(
     )
   }
 
+  function disarmAckStallWatchdog(): void {
+    ackGateBlockedSinceMs = null
+    if (ackStallWatchdogTimer) {
+      clearTimeout(ackStallWatchdogTimer)
+      ackStallWatchdogTimer = null
+    }
+  }
+
+  // Why: armed lazily on the first gate-blocked send and disarmed by every
+  // renderer ACK, so the watchdog never fires under healthy heavy load and
+  // costs nothing while delivery is unblocked.
+  function noteAckGateBlockedSend(): void {
+    if (ackStallWatchdogTimer) {
+      return
+    }
+    ackGateBlockedSinceMs = Date.now()
+    ackStallWatchdogTimer = setTimeout(resetDeliveryGateAfterAckStall, PTY_ACK_STALL_WATCHDOG_MS)
+    ackStallWatchdogTimer.unref?.()
+  }
+
+  function resetDeliveryGateAfterAckStall(): void {
+    ackStallWatchdogTimer = null
+    const gateBlockedSinceMs = ackGateBlockedSinceMs
+    ackGateBlockedSinceMs = null
+    if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed?.() === true) {
+      return
+    }
+    // Why: reaching here means zero ACKs arrived for the full stall window
+    // (any ACK disarms the timer). Only reset while delivery is still blocked
+    // on unacked bytes, so an idle-but-healthy renderer is never touched.
+    if (rendererInFlightTotalChars === 0 || pendingData.size === 0) {
+      return
+    }
+    console.warn('[pty] ack stall watchdog: resetting in-flight delivery counters', {
+      gateBlockedForMs: gateBlockedSinceMs === null ? null : Date.now() - gateBlockedSinceMs,
+      msSinceLastAck: lastAckReceivedAtMs === null ? null : Date.now() - lastAckReceivedAtMs,
+      rendererInFlightChars: rendererInFlightTotalChars,
+      rendererInFlightPtyCount: rendererInFlightCharsByPty.size,
+      pendingPtyCount: pendingData.size
+    })
+    rendererInFlightCharsByPty.clear()
+    rendererInFlightTotalChars = 0
+    recordPtyRendererDeliveryPressure()
+    schedulePendingDataFlush(0)
+  }
+
+  resetRendererInFlightDeliveryGate = () => {
+    disarmAckStallWatchdog()
+    rendererInFlightCharsByPty.clear()
+    rendererInFlightTotalChars = 0
+    recordPtyRendererDeliveryPressure()
+  }
+
   function sendPtyDataToRenderer(id: string, payload: PtyDataPayload): void {
     const charCount = getPtyPayloadCharCount(payload)
     rendererInFlightCharsByPty.set(id, (rendererInFlightCharsByPty.get(id) ?? 0) + charCount)
@@ -1606,6 +1677,7 @@ export function registerPtyHandlers(
   function flushPendingData(): void {
     flushTimer = null
     if (mainWindow.isDestroyed()) {
+      disarmAckStallWatchdog()
       pendingData.clear()
       rendererInFlightCharsByPty.clear()
       rendererInFlightTotalChars = 0
@@ -1618,6 +1690,7 @@ export function registerPtyHandlers(
         break
       }
       if (!canSendPtyDataToRenderer(id, { interactive: activeRendererPtys.has(id) })) {
+        noteAckGateBlockedSend()
         continue
       }
       pendingData.delete(id)
@@ -1766,6 +1839,7 @@ export function registerPtyHandlers(
           clearTimeout(flushTimer)
           flushTimer = null
         }
+        disarmAckStallWatchdog()
         pendingData.clear()
         rendererInFlightCharsByPty.clear()
         rendererInFlightTotalChars = 0
@@ -1799,6 +1873,7 @@ export function registerPtyHandlers(
         // terminal output already handed to the renderer. The reserve is
         // bounded, and the per-PTY cap still prevents an active TUI runaway.
         if (!canSendPtyDataToRenderer(payload.id, { interactive: true })) {
+          noteAckGateBlockedSend()
           pendingData.set(payload.id, pending)
           recordPtyRendererDeliveryPressure()
           return
@@ -3435,6 +3510,10 @@ export function registerPtyHandlers(
   // PTY ingestion. Agent/status consumers still see every chunk through the
   // provider/runtime path while background renderer writes wait their turn.
   ipcMain.on('pty:ackData', (_event, args: { id: string; charCount: number }) => {
+    lastAckReceivedAtMs = Date.now()
+    // Why: any renderer ACK proves the ACK channel is alive; the stall window
+    // restarts from the next gate-blocked send.
+    disarmAckStallWatchdog()
     const charCount = Number.isFinite(args.charCount) ? Math.max(0, args.charCount) : 0
     const current = rendererInFlightCharsByPty.get(args.id) ?? 0
     const acknowledged = Math.min(current, charCount)

@@ -6936,7 +6936,9 @@ describe('registerPtyHandlers', () => {
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
       vi.advanceTimersByTime(1)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
-      expect(vi.getTimerCount()).toBe(0)
+      // Why: the only remaining timer is the ack-stall watchdog armed by the
+      // gate-blocked flush; the flush loop itself stopped rescheduling.
+      expect(vi.getTimerCount()).toBe(1)
       expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
         pendingPtyCount: 1,
         pendingChars: 88 * 1024,
@@ -6987,6 +6989,201 @@ describe('registerPtyHandlers', () => {
         peakRendererInFlightChars: 512 * 1024 + 'second-terminal-output'.length,
         ackGatedFlushSkipCount: 0
       })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  const ACK_STALL_WATCHDOG_WARNING =
+    '[pty] ack stall watchdog: resetting in-flight delivery counters'
+
+  function countAckStallWarnings(warnSpy: { mock: { calls: unknown[][] } }): number {
+    return warnSpy.mock.calls.filter((call) => call[0] === ACK_STALL_WATCHDOG_WARNING).length
+  }
+
+  /** Saturates one PTY to its 512 KiB in-flight cap so the next flush attempt
+   *  is gate-blocked and arms the ack-stall watchdog. Leaves 88 KiB pending. */
+  async function spawnAndSaturateRendererDeliveryGate(
+    mockProc: ReturnType<typeof createMockProc>
+  ): Promise<{ id: string }> {
+    registerPtyHandlers(mainWindow as never)
+    const spawnResult = (await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      cwd: '/tmp'
+    })) as { id: string }
+    mainWindow.webContents.send.mockClear()
+    mockProc.emitData('x'.repeat(600 * 1024))
+    vi.advanceTimersByTime(8)
+    for (let index = 0; index < 32; index++) {
+      vi.advanceTimersByTime(1)
+    }
+    return spawnResult
+  }
+
+  it('resets the renderer delivery gate after gate-blocked sends see no ACKs for the stall window', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      await spawnAndSaturateRendererDeliveryGate(mockProc)
+      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
+      expect(countAckStallWarnings(warnSpy)).toBe(0)
+
+      vi.advanceTimersByTime(9_999)
+      expect(countAckStallWarnings(warnSpy)).toBe(0)
+      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
+
+      vi.advanceTimersByTime(1)
+      expect(countAckStallWarnings(warnSpy)).toBe(1)
+      expect(warnSpy).toHaveBeenCalledWith(
+        ACK_STALL_WATCHDOG_WARNING,
+        expect.objectContaining({
+          rendererInFlightChars: 512 * 1024,
+          rendererInFlightPtyCount: 1,
+          pendingPtyCount: 1
+        })
+      )
+      // Why: the reset must reopen the gate so the held pendingData delivers
+      // without any renderer ACK ever arriving.
+      vi.runOnlyPendingTimers()
+      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(33)
+
+      for (let index = 0; index < 5; index++) {
+        vi.advanceTimersByTime(1)
+      }
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        pendingPtyCount: 0,
+        pendingChars: 0,
+        rendererInFlightChars: 88 * 1024
+      })
+      expect(countAckStallWarnings(warnSpy)).toBe(1)
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not fire the ack-stall watchdog while renderer ACKs keep arriving', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+      const ackData = getPtyAckDataListener()
+
+      // Healthy heavy load: delivery stays gate-blocked for far longer than
+      // the stall window, but ACKs keep trickling in and restart it each time.
+      for (let round = 0; round < 3; round++) {
+        vi.advanceTimersByTime(5_000)
+        ackData(null, { id: spawnResult.id, charCount: 16 * 1024 })
+        vi.advanceTimersByTime(2)
+      }
+      vi.advanceTimersByTime(5_000)
+
+      expect(countAckStallWarnings(warnSpy)).toBe(0)
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 512 * 1024
+      })
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('disarms the ack-stall watchdog when an ACK arrives and restarts the stall window', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+      const ackData = getPtyAckDataListener()
+
+      vi.advanceTimersByTime(9_000)
+      ackData(null, { id: spawnResult.id, charCount: 16 * 1024 })
+
+      // Past the original 10s deadline: the ACK disarmed the first timer.
+      vi.advanceTimersByTime(2_000)
+      expect(countAckStallWarnings(warnSpy)).toBe(0)
+
+      // No further ACKs while still gate-blocked: the re-armed watchdog fires
+      // one full window after the next gate-blocked send.
+      vi.advanceTimersByTime(9_000)
+      expect(countAckStallWarnings(warnSpy)).toBe(1)
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('cleans up the ack-stall watchdog when the window is destroyed', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+    let destroyed = false
+    const destroyableWindow = {
+      isDestroyed: () => destroyed,
+      webContents: { on: vi.fn(), send: vi.fn(), removeListener: vi.fn() }
+    }
+
+    try {
+      registerPtyHandlers(destroyableWindow as never)
+      await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24, cwd: '/tmp' })
+      destroyableWindow.webContents.send.mockClear()
+      mockProc.emitData('x'.repeat(600 * 1024))
+      vi.advanceTimersByTime(8)
+      for (let index = 0; index < 32; index++) {
+        vi.advanceTimersByTime(1)
+      }
+      expect(destroyableWindow.webContents.send).toHaveBeenCalledTimes(32)
+      expect(vi.getTimerCount()).toBe(1)
+
+      destroyed = true
+      mockProc.emitData('post-destroy output')
+
+      expect(vi.getTimerCount()).toBe(0)
+      vi.advanceTimersByTime(60_000)
+      expect(countAckStallWarnings(warnSpy)).toBe(0)
+      expect(destroyableWindow.webContents.send).toHaveBeenCalledTimes(32)
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('zeroes renderer in-flight delivery counters when the renderer lifecycle resets', async () => {
+    vi.useFakeTimers()
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      await spawnAndSaturateRendererDeliveryGate(mockProc)
+      const handleRendererLoading = getMainWindowWebContentsListener('did-start-loading')
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightPtyCount: 1,
+        rendererInFlightChars: 512 * 1024
+      })
+
+      handleRendererLoading()
+
+      // Why: reload kills the renderer dispatcher that would have ACKed, so
+      // keeping the counters would gate PTYs in the fresh renderer forever.
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightPtyCount: 0,
+        rendererInFlightChars: 0
+      })
+      expect(vi.getTimerCount()).toBe(0)
+
+      mockProc.emitData('after-reload')
+      vi.advanceTimersByTime(8)
+      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(33)
     } finally {
       vi.useRealTimers()
     }
@@ -7085,7 +7282,9 @@ describe('registerPtyHandlers', () => {
         vi.advanceTimersByTime(1)
       }
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(512)
-      expect(vi.getTimerCount()).toBe(0)
+      // Why: the ack-stall watchdog stays armed while bulk delivery is
+      // gate-blocked; no flush timer remains scheduled.
+      expect(vi.getTimerCount()).toBe(1)
 
       writeListener(mainWindowIpcEvent, {
         id: interactiveSpawn.id,

@@ -2229,6 +2229,9 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     setShortcutRecorderFocused: () => {},
     onRichMarkdownContextCommand: () => noopUnsubscribe,
     onFullscreenChanged: () => noopUnsubscribe,
+    // Why: web clients run in a browser tab; the host OS resume signal only
+    // exists in the Electron shell.
+    onSystemResumed: () => noopUnsubscribe,
     minimize: () => {},
     maximize: () => {},
     onMaximizeChanged: () => noopUnsubscribe,
