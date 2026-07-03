@@ -815,8 +815,28 @@ const api = {
     ackColdRestore: (id: string): void => {
       ipcRenderer.send('pty:ackColdRestore', { id })
     },
-    ackData: (id: string, charCount: number): void => {
-      ipcRenderer.send('pty:ackData', { id, charCount })
+    /** charCount is the legacy per-chunk delta; processedChars is the
+     *  cumulative per-pty total (self-healing under lost ACK messages). */
+    ackData: (id: string, charCount: number, processedChars?: number): void => {
+      ipcRenderer.send('pty:ackData', {
+        id,
+        charCount,
+        ...(typeof processedChars === 'number' ? { processedChars } : {})
+      })
+    },
+    /** Main asks for the renderer's cumulative processed totals when terminal
+     *  delivery looks stuck on lost ACKs. */
+    onDeliveryResyncRequest: (callback: (payload: { requestId: number }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { requestId: number }) =>
+        callback(payload)
+      ipcRenderer.on('pty:requestDeliveryResync', listener)
+      return () => ipcRenderer.removeListener('pty:requestDeliveryResync', listener)
+    },
+    respondDeliveryResync: (payload: {
+      requestId: number
+      processedCharsByPty: Record<string, number>
+    }): void => {
+      ipcRenderer.send('pty:deliveryResyncResponse', payload)
     },
     setActiveRendererPty: (id: string, active: boolean): void => {
       ipcRenderer.send('pty:setActiveRendererPty', { id, active })

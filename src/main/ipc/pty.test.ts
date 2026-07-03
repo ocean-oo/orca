@@ -534,13 +534,16 @@ describe('registerPtyHandlers', () => {
 
   function getPtyAckDataListener(): (
     event: unknown,
-    args: { id: string; charCount: number }
+    args: { id: string; charCount?: number; processedChars?: number }
   ) => void {
     const ackCall = onMock.mock.calls.find((call: unknown[]) => call[0] === 'pty:ackData')
     if (!ackCall) {
       throw new Error('missing pty:ackData listener')
     }
-    return ackCall[1] as (event: unknown, args: { id: string; charCount: number }) => void
+    return ackCall[1] as (
+      event: unknown,
+      args: { id: string; charCount?: number; processedChars?: number }
+    ) => void
   }
 
   function getPtySetActiveRendererPtyListener(): (
@@ -6936,9 +6939,7 @@ describe('registerPtyHandlers', () => {
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
       vi.advanceTimersByTime(1)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
-      // Why: the only remaining timer is the ack-stall watchdog armed by the
-      // gate-blocked flush; the flush loop itself stopped rescheduling.
-      expect(vi.getTimerCount()).toBe(1)
+      expect(vi.getTimerCount()).toBe(0)
       expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
         pendingPtyCount: 1,
         pendingChars: 88 * 1024,
@@ -6994,15 +6995,44 @@ describe('registerPtyHandlers', () => {
     }
   })
 
-  const ACK_STALL_WATCHDOG_WARNING =
-    '[pty] ack stall watchdog: resetting in-flight delivery counters'
+  const DELIVERY_RESYNC_UNANSWERED_WARNING =
+    '[pty] delivery resync probe unanswered — renderer IPC unresponsive'
 
-  function countAckStallWarnings(warnSpy: { mock: { calls: unknown[][] } }): number {
-    return warnSpy.mock.calls.filter((call) => call[0] === ACK_STALL_WATCHDOG_WARNING).length
+  function countResyncUnansweredWarnings(warnSpy: { mock: { calls: unknown[][] } }): number {
+    return warnSpy.mock.calls.filter((call) => call[0] === DELIVERY_RESYNC_UNANSWERED_WARNING)
+      .length
   }
 
-  /** Saturates one PTY to its 512 KiB in-flight cap so the next flush attempt
-   *  is gate-blocked and arms the ack-stall watchdog. Leaves 88 KiB pending. */
+  function getPtyDataSendCalls(): unknown[][] {
+    return mainWindow.webContents.send.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'pty:data'
+    )
+  }
+
+  function getDeliveryResyncProbeCalls(): unknown[][] {
+    return mainWindow.webContents.send.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'pty:requestDeliveryResync'
+    )
+  }
+
+  function getDeliveryResyncResponseListener(): (
+    event: unknown,
+    args: { requestId: number; processedCharsByPty: Record<string, number> }
+  ) => void {
+    const responseCall = onMock.mock.calls.find(
+      (call: unknown[]) => call[0] === 'pty:deliveryResyncResponse'
+    )
+    if (!responseCall) {
+      throw new Error('missing pty:deliveryResyncResponse listener')
+    }
+    return responseCall[1] as (
+      event: unknown,
+      args: { requestId: number; processedCharsByPty: Record<string, number> }
+    ) => void
+  }
+
+  /** Saturates one PTY to its 512 KiB in-flight cap so delivery is fully
+   *  gated for that PTY. Leaves 88 KiB pending and no timers scheduled. */
   async function spawnAndSaturateRendererDeliveryGate(
     mockProc: ReturnType<typeof createMockProc>
   ): Promise<{ id: string }> {
@@ -7021,54 +7051,38 @@ describe('registerPtyHandlers', () => {
     return spawnResult
   }
 
-  it('resets the renderer delivery gate after gate-blocked sends see no ACKs for the stall window', async () => {
+  it('self-heals lost ACKs when a later cumulative ACK arrives', async () => {
     vi.useFakeTimers()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const mockProc = createMockProc()
     spawnMock.mockReturnValue(mockProc.proc)
 
     try {
-      await spawnAndSaturateRendererDeliveryGate(mockProc)
-      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
-      expect(countAckStallWarnings(warnSpy)).toBe(0)
-
-      vi.advanceTimersByTime(9_999)
-      expect(countAckStallWarnings(warnSpy)).toBe(0)
-      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
-
-      vi.advanceTimersByTime(1)
-      expect(countAckStallWarnings(warnSpy)).toBe(1)
-      expect(warnSpy).toHaveBeenCalledWith(
-        ACK_STALL_WATCHDOG_WARNING,
-        expect.objectContaining({
-          rendererInFlightChars: 512 * 1024,
-          rendererInFlightPtyCount: 1,
-          pendingPtyCount: 1
-        })
-      )
-      // Why: the reset must reopen the gate so the held pendingData delivers
-      // without any renderer ACK ever arriving.
-      vi.runOnlyPendingTimers()
-      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(33)
-
-      for (let index = 0; index < 5; index++) {
-        vi.advanceTimersByTime(1)
-      }
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+      expect(getPtyDataSendCalls()).toHaveLength(32)
       expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
-        pendingPtyCount: 0,
-        pendingChars: 0,
-        rendererInFlightChars: 88 * 1024
+        rendererInFlightChars: 512 * 1024,
+        rendererInFlightPtyCount: 1
       })
-      expect(countAckStallWarnings(warnSpy)).toBe(1)
+
+      // Every per-chunk ACK was lost, but the next ACK carries the renderer's
+      // full cumulative total — the debt clears without any timer or reset.
+      const ackData = getPtyAckDataListener()
+      ackData(null, { id: spawnResult.id, processedChars: 512 * 1024 })
+
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 0,
+        rendererInFlightPtyCount: 0
+      })
+
+      vi.runOnlyPendingTimers()
+      expect(getPtyDataSendCalls()).toHaveLength(33)
     } finally {
-      warnSpy.mockRestore()
       vi.useRealTimers()
     }
   })
 
-  it('does not fire the ack-stall watchdog while renderer ACKs keep arriving', async () => {
+  it('applies cumulative ACKs idempotently and ignores stale reordered totals', async () => {
     vi.useFakeTimers()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const mockProc = createMockProc()
     spawnMock.mockReturnValue(mockProc.proc)
 
@@ -7076,16 +7090,206 @@ describe('registerPtyHandlers', () => {
       const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
       const ackData = getPtyAckDataListener()
 
-      // Healthy heavy load: delivery stays gate-blocked for far longer than
-      // the stall window, but ACKs keep trickling in and restart it each time.
-      for (let round = 0; round < 3; round++) {
-        vi.advanceTimersByTime(5_000)
-        ackData(null, { id: spawnResult.id, charCount: 16 * 1024 })
-        vi.advanceTimersByTime(2)
-      }
-      vi.advanceTimersByTime(5_000)
+      ackData(null, { id: spawnResult.id, processedChars: 256 * 1024 })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 256 * 1024,
+        maxRendererInFlightCharsByPty: 256 * 1024
+      })
 
-      expect(countAckStallWarnings(warnSpy)).toBe(0)
+      // Replayed duplicate credits nothing further.
+      ackData(null, { id: spawnResult.id, processedChars: 256 * 1024 })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 256 * 1024
+      })
+
+      // A stale reordered total can never move accounting backwards.
+      ackData(null, { id: spawnResult.id, processedChars: 128 * 1024 })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 256 * 1024
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('tolerates mixed legacy delta and cumulative ACK payloads', async () => {
+    vi.useFakeTimers()
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+      const ackData = getPtyAckDataListener()
+
+      // Legacy delta shape (no processedChars) still credits per chunk.
+      ackData(null, { id: spawnResult.id, charCount: 16 * 1024 })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 496 * 1024
+      })
+
+      // A cumulative total then supersedes without double-crediting the delta.
+      ackData(null, { id: spawnResult.id, processedChars: 512 * 1024 })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 0,
+        rendererInFlightPtyCount: 0
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forwards only newly acknowledged cumulative bytes to provider ACK backpressure', async () => {
+    vi.useFakeTimers()
+    const acknowledgeDataEvent = vi.fn()
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      setLocalPtyProvider({
+        spawn: vi.fn(async () => ({ id: 'cumulative-pty' })),
+        write: vi.fn(),
+        resize: vi.fn(),
+        shutdown: vi.fn(),
+        sendSignal: vi.fn(),
+        getCwd: vi.fn(),
+        getInitialCwd: vi.fn(),
+        clearBuffer: vi.fn(),
+        acknowledgeDataEvent,
+        hasChildProcesses: vi.fn(),
+        getForegroundProcess: vi.fn(),
+        serialize: vi.fn(),
+        revive: vi.fn(),
+        onData: vi.fn((callback) => {
+          mockProc.proc.onData((data: string) => callback({ id: 'cumulative-pty', data }))
+          return () => {}
+        }),
+        onReplay: vi.fn(() => () => {}),
+        onExit: vi.fn(() => () => {}),
+        listProcesses: vi.fn(async () => []),
+        attach: vi.fn(),
+        getDefaultShell: vi.fn(),
+        getProfiles: vi.fn()
+      } as never)
+      registerPtyHandlers(mainWindow as never)
+      const ackData = getPtyAckDataListener()
+      mainWindow.webContents.send.mockClear()
+
+      mockProc.emitData('remote-output')
+      vi.advanceTimersByTime(8)
+
+      // Why: cumulative totals are clamped to what main actually sent, and a
+      // replayed total must credit SSH/relay flow control with zero, not
+      // duplicate bytes.
+      ackData(null, { id: 'cumulative-pty', processedChars: 1024 })
+      ackData(null, { id: 'cumulative-pty', processedChars: 1024 })
+
+      expect(acknowledgeDataEvent).toHaveBeenNthCalledWith(
+        1,
+        'cumulative-pty',
+        'remote-output'.length
+      )
+      expect(acknowledgeDataEvent).toHaveBeenNthCalledWith(2, 'cumulative-pty', 0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('probes for a delivery resync when data arrives for a fully gated PTY and reconciles on reply', async () => {
+    vi.useFakeTimers()
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+
+      mockProc.emitData('stuck-output')
+      expect(getDeliveryResyncProbeCalls()).toHaveLength(1)
+      const probePayload = getDeliveryResyncProbeCalls()[0]![1] as { requestId: number }
+
+      // Only one probe may be outstanding at a time.
+      mockProc.emitData('still-stuck')
+      expect(getDeliveryResyncProbeCalls()).toHaveLength(1)
+
+      const respondDeliveryResync = getDeliveryResyncResponseListener()
+      respondDeliveryResync(null, {
+        requestId: probePayload.requestId,
+        processedCharsByPty: { [spawnResult.id]: 512 * 1024 }
+      })
+
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 0,
+        rendererInFlightPtyCount: 0
+      })
+
+      // The reconciled gate lets the held pendingData flush again.
+      vi.advanceTimersByTime(8)
+      expect(getPtyDataSendCalls()).toHaveLength(33)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores resync replies with stale request ids', async () => {
+    vi.useFakeTimers()
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
+      mockProc.emitData('stuck-output')
+      const probePayload = getDeliveryResyncProbeCalls()[0]![1] as { requestId: number }
+
+      const respondDeliveryResync = getDeliveryResyncResponseListener()
+      respondDeliveryResync(null, {
+        requestId: probePayload.requestId + 41,
+        processedCharsByPty: { [spawnResult.id]: 512 * 1024 }
+      })
+
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 512 * 1024
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears an unanswered resync probe, warns once per silent streak, and never mutates counters', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+
+    try {
+      await spawnAndSaturateRendererDeliveryGate(mockProc)
+
+      mockProc.emitData('stuck-output')
+      expect(getDeliveryResyncProbeCalls()).toHaveLength(1)
+
+      vi.advanceTimersByTime(4_999)
+      expect(countResyncUnansweredWarnings(warnSpy)).toBe(0)
+
+      vi.advanceTimersByTime(1)
+      expect(countResyncUnansweredWarnings(warnSpy)).toBe(1)
+      expect(warnSpy).toHaveBeenCalledWith(
+        DELIVERY_RESYNC_UNANSWERED_WARNING,
+        expect.objectContaining({
+          rendererInFlightChars: 512 * 1024,
+          pendingPtyCount: 1
+        })
+      )
+      // No blind reset: counters and pending output are untouched.
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        rendererInFlightChars: 512 * 1024,
+        pendingChars: 88 * 1024 + 'stuck-output'.length
+      })
+      expect(getPtyDataSendCalls()).toHaveLength(32)
+
+      // The cleared flag lets the next gated arrival probe again, but a
+      // still-silent renderer does not spam a second warn.
+      mockProc.emitData('still-stuck')
+      expect(getDeliveryResyncProbeCalls()).toHaveLength(2)
+      vi.advanceTimersByTime(5_000)
+      expect(countResyncUnansweredWarnings(warnSpy)).toBe(1)
       expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
         rendererInFlightChars: 512 * 1024
       })
@@ -7095,34 +7299,7 @@ describe('registerPtyHandlers', () => {
     }
   })
 
-  it('disarms the ack-stall watchdog when an ACK arrives and restarts the stall window', async () => {
-    vi.useFakeTimers()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const mockProc = createMockProc()
-    spawnMock.mockReturnValue(mockProc.proc)
-
-    try {
-      const spawnResult = await spawnAndSaturateRendererDeliveryGate(mockProc)
-      const ackData = getPtyAckDataListener()
-
-      vi.advanceTimersByTime(9_000)
-      ackData(null, { id: spawnResult.id, charCount: 16 * 1024 })
-
-      // Past the original 10s deadline: the ACK disarmed the first timer.
-      vi.advanceTimersByTime(2_000)
-      expect(countAckStallWarnings(warnSpy)).toBe(0)
-
-      // No further ACKs while still gate-blocked: the re-armed watchdog fires
-      // one full window after the next gate-blocked send.
-      vi.advanceTimersByTime(9_000)
-      expect(countAckStallWarnings(warnSpy)).toBe(1)
-    } finally {
-      warnSpy.mockRestore()
-      vi.useRealTimers()
-    }
-  })
-
-  it('cleans up the ack-stall watchdog when the window is destroyed', async () => {
+  it('clears resync probe state when the window is destroyed', async () => {
     vi.useFakeTimers()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const mockProc = createMockProc()
@@ -7142,16 +7319,16 @@ describe('registerPtyHandlers', () => {
       for (let index = 0; index < 32; index++) {
         vi.advanceTimersByTime(1)
       }
-      expect(destroyableWindow.webContents.send).toHaveBeenCalledTimes(32)
-      expect(vi.getTimerCount()).toBe(1)
+      mockProc.emitData('stuck-output')
+      // Pending flush timer plus the outstanding probe's hygiene timeout.
+      expect(vi.getTimerCount()).toBe(2)
 
       destroyed = true
       mockProc.emitData('post-destroy output')
 
       expect(vi.getTimerCount()).toBe(0)
       vi.advanceTimersByTime(60_000)
-      expect(countAckStallWarnings(warnSpy)).toBe(0)
-      expect(destroyableWindow.webContents.send).toHaveBeenCalledTimes(32)
+      expect(countResyncUnansweredWarnings(warnSpy)).toBe(0)
     } finally {
       warnSpy.mockRestore()
       vi.useRealTimers()
@@ -7282,9 +7459,7 @@ describe('registerPtyHandlers', () => {
         vi.advanceTimersByTime(1)
       }
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(512)
-      // Why: the ack-stall watchdog stays armed while bulk delivery is
-      // gate-blocked; no flush timer remains scheduled.
-      expect(vi.getTimerCount()).toBe(1)
+      expect(vi.getTimerCount()).toBe(0)
 
       writeListener(mainWindowIpcEvent, {
         id: interactiveSpawn.id,
@@ -7314,7 +7489,10 @@ describe('registerPtyHandlers', () => {
         data: 'a'
       })
       interactiveProc.emitData(reserveChunk)
-      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(529)
+      // Why: the reserve-exhausted send stays gated, and the fully gated
+      // arrival now also emits one delivery resync probe (not pty:data).
+      expect(getPtyDataSendCalls()).toHaveLength(529)
+      expect(getDeliveryResyncProbeCalls()).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }
@@ -7397,11 +7575,16 @@ describe('registerPtyHandlers', () => {
       setActiveRendererPty(null, { id: spawns[activeIndex]!.id, active: true })
       vi.advanceTimersByTime(8)
 
-      expect(mainWindow.webContents.send).toHaveBeenCalledTimes(513)
-      expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(513, 'pty:data', {
-        id: spawns[activeIndex]!.id,
-        data: 'active-output'
-      })
+      // Why: the fully gated arrival also emits one delivery resync probe, so
+      // count pty:data sends rather than raw webContents.send calls.
+      expect(getPtyDataSendCalls()).toHaveLength(513)
+      expect(getPtyDataSendCalls()[512]).toEqual([
+        'pty:data',
+        {
+          id: spawns[activeIndex]!.id,
+          data: 'active-output'
+        }
+      ])
       expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
         activeRendererPtyCount: 1,
         pendingPtyCount: procs.length - 1,

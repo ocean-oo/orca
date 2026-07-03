@@ -2544,6 +2544,8 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     kill: () => Promise.resolve(),
     ackColdRestore: () => {},
     ackData: () => {},
+    onDeliveryResyncRequest: () => noopUnsubscribe,
+    respondDeliveryResync: () => {},
     setActiveRendererPty: () => {},
     setRendererPtyVisible: () => {},
     hasChildProcesses: () => Promise.resolve(false),
