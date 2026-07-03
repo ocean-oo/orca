@@ -41,6 +41,10 @@ function suppressReactTestRendererDeprecationWarning(): () => void {
   return () => consoleErrorSpy.mockRestore()
 }
 
+// Why: mounting TerminalWebView arms the web-ready watchdog; tests must
+// unmount so the timer can't survive into later tests and fire in teardown.
+let activeRenderer: ReactTestRenderer | null = null
+
 function createTerminalWebViewRenderer(onEngineError = vi.fn()) {
   let renderer: ReactTestRenderer | null = null
   const restoreConsoleError = suppressReactTestRendererDeprecationWarning()
@@ -54,6 +58,7 @@ function createTerminalWebViewRenderer(onEngineError = vi.fn()) {
   if (!renderer) {
     throw new Error('TerminalWebView did not render')
   }
+  activeRenderer = renderer
   return { onEngineError, renderer }
 }
 
@@ -73,6 +78,12 @@ function renderedText(renderer: ReactTestRenderer): string {
 
 describe('TerminalWebView engine errors', () => {
   afterEach(() => {
+    if (activeRenderer) {
+      act(() => {
+        activeRenderer?.unmount()
+      })
+      activeRenderer = null
+    }
     vi.restoreAllMocks()
   })
 
