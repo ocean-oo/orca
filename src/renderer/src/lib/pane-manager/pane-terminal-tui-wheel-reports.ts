@@ -106,8 +106,7 @@ function canBurstBoostWheelEvent(event: TerminalTuiWheelEventInput): boolean {
 
 function isTrackpadLikePixelWheelEvent(event: TerminalTuiWheelEventInput): boolean {
   return (
-    (event.deltaMode ?? DOM_DELTA_PIXEL) === DOM_DELTA_PIXEL &&
-    !isDiscreteTerminalTuiWheelEvent(event)
+    (event.deltaMode ?? DOM_DELTA_PIXEL) === DOM_DELTA_PIXEL && !hasDiscreteLegacyWheelDelta(event)
   )
 }
 
@@ -264,6 +263,29 @@ function shouldSuppressTrackpadMomentumTail(
   return false
 }
 
+function resolveTrackpadPixelWheelReportCount(
+  event: TerminalTuiWheelEventInput,
+  state: TerminalTuiMouseWheelDistanceState,
+  distanceRows: number
+): number | null {
+  if (!isTrackpadLikePixelWheelEvent(event)) {
+    return null
+  }
+
+  if (shouldSuppressTrackpadMomentumTail(event, state, distanceRows)) {
+    return 0
+  }
+
+  const totalRows = state.pendingRows + distanceRows
+  if (totalRows < 1) {
+    state.pendingRows = totalRows
+    return 0
+  }
+
+  state.pendingRows = 0
+  return 1
+}
+
 export function normalizeTerminalTuiMouseWheelMultiplier(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return TERMINAL_TUI_MOUSE_WHEEL_MULTIPLIER
@@ -292,8 +314,9 @@ export function resolveTerminalTuiMouseWheelReportCount(
   state.pendingDirection = direction
 
   const distanceRows = resolveWheelDistanceRows(event, metrics)
-  if (shouldSuppressTrackpadMomentumTail(event, state, distanceRows)) {
-    return 0
+  const trackpadReportCount = resolveTrackpadPixelWheelReportCount(event, state, distanceRows)
+  if (trackpadReportCount !== null) {
+    return trackpadReportCount
   }
 
   const rows =

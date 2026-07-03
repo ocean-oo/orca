@@ -270,7 +270,7 @@ describe('terminal mouse wheel multiplier', () => {
       )
     )
 
-    expect(reports).toEqual([1, 1, 2, 2, 0, 0, 0, 0])
+    expect(reports).toEqual([1, 1, 1, 1, 0, 0, 0, 0])
   })
 
   it('suppresses alternating trackpad-like momentum after direction changes', () => {
@@ -285,7 +285,22 @@ describe('terminal mouse wheel multiplier', () => {
       )
     )
 
-    expect(reports).toEqual([1, 1, 2, 1, 1, 2, 0, 0, 0, 0])
+    expect(reports).toEqual([1, 1, 1, 1, 1, 1, 0, 0, 0, 0])
+  })
+
+  it('does not batch multiple reports for one trackpad-like pixel event', () => {
+    const state = createTerminalTuiMouseWheelDistanceState()
+
+    const reports = [16 * 12, 16 * 12, 16 * 12].map((deltaY, index) =>
+      resolveTerminalTuiMouseWheelReportCount(
+        { deltaY, deltaMode: DOM_DELTA_PIXEL, timeStamp: index * 16 },
+        1,
+        state,
+        { cellHeight: 16 }
+      )
+    )
+
+    expect(reports).toEqual([1, 1, 1])
   })
 
   it('resets pending fractional distance when the user changes direction', () => {
@@ -453,6 +468,40 @@ describe('terminal mouse wheel multiplier', () => {
     }
 
     expect(dispatched.map((entry) => entry.deltaY)).toEqual([1, -1])
+  })
+
+  it('does not enqueue a synthetic report batch for a large trackpad-like pixel event', async () => {
+    vi.stubGlobal('WheelEvent', TestWheelEvent)
+    const handlers: ((event: WheelEvent) => boolean)[] = []
+    const target = Object.assign(new EventTarget(), {
+      classList: {
+        contains: (className: string) => className === 'enable-mouse-events'
+      }
+    }) as unknown as EventTarget & HTMLElement
+    const dispatched: WheelEvent[] = []
+    target.addEventListener('wheel', (event) => dispatched.push(event as WheelEvent))
+    attachTerminalMouseWheelMultiplier(
+      {
+        attachCustomWheelEventHandler: (handler) => {
+          handlers.push(handler)
+        },
+        element: target,
+        rows: 24
+      },
+      { getTuiMouseWheelMultiplier: () => 1 }
+    )
+
+    const event = new TestWheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      deltaMode: DOM_DELTA_PIXEL,
+      deltaY: 16 * 12
+    }) as WheelEvent
+
+    expect(handlers[0]?.(event)).toBe(false)
+    await Promise.resolve()
+
+    expect(dispatched.map((entry) => entry.deltaY)).toEqual([1])
   })
 
   it('drains resolved TUI wheel reports without a frame-rate cap', async () => {
