@@ -479,6 +479,36 @@ incl. stream-opcode collision (chain `Ack=12` vs main's #7205-era
 gate×drain risk; (3) cadence tuning toward the 10× line; (4) rig
 extensions + P90 telemetry (tasks #3/#8).
 
+### 2026-07-03 — PROD VERDICT: v1.4.121-rc.0 benchmarked (the headline numbers)
+
+Same rig, same protocol, same machine as the 1.4.91 baseline:
+
+| metric | 1.4.91 baseline | v1.4.121-rc.0 | change |
+|---|---|---|---|
+| DSR idle p50 | 0.69 ms | **0.44 ms** | = Terminal.app (0.45) |
+| DSR under load p50 | 134 ms | **18.6 ms** | 7.2x |
+| DSR under load p99 | 292 ms | **29.7 ms** | 9.8x |
+| agent-tui | 2.0 MB/s | **11.2 MB/s** | 5.6x |
+| styles-stress | 7.8 MB/s | **10.4 MB/s** | 1.3x |
+| ascii-log | 13 MB/s | 11.0 MB/s | ~0.85x |
+| cjk-emoji | 15 MB/s | 12.2 MB/s | ~0.81x |
+
+Reading: the anomalous TUI penalty is GONE — all four fixtures now sit at
+a uniform ~11-12 MB/s, which is the scheduler pacing ceiling, not parse
+CPU (prod ≈ dev for both latency and throughput; the pipeline is
+cadence-bound, so faster prod code changes nothing). That uniform cap
+also explains plain-text dipping slightly below baseline: ascii/cjk used
+to run unpaced ahead of the old scheduler; now everything flows through
+the same parse-clocked path. Goal line check: 18.6 ms = 41x Terminal.app
+under load (goal was 10x = 4.5 ms) — NOT met; down from 300x. Idle IS at
+parity. The remaining 4x is the named cadence stack (daemon 8 ms batch,
+scheduler drain ticks + 8x16KB per-tick budget, xterm 12 ms slices) —
+next lever, tunable, tracked as follow-up. p99 tail (the freeze class)
+is 29.7 ms — users cannot perceive it.
+
+Caveat: measured on the user's live app (this session active in it);
+idle p99 118 ms reflects that activity, not the terminal path.
+
 ## Success criteria (baseline-relative; finalize after task 1)
 
 - DSR-under-load p90 in Orca within striking distance of iTerm2 on the same
