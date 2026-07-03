@@ -85,6 +85,23 @@ function throwMissingWorkingDirectory(cwd: string): never {
 }
 
 /**
+ * Report whether a PTY working directory currently exists, using the same
+ * WSL-aware probe as validateWorkingDirectory (win32 statSync can falsely
+ * report ENOENT for a live \\wsl.localhost\... share). Unlike
+ * validateWorkingDirectory this never throws — callers use it to decide
+ * whether to fall back to a different cwd before spawn.
+ */
+export function terminalWorkingDirectoryExists(cwd: string): boolean {
+  if (isWslUncPath(cwd)) {
+    const existsInDistro = wslUncDirectoryExists(cwd)
+    if (existsInDistro !== null) {
+      return existsInDistro
+    }
+  }
+  return existsSync(cwd)
+}
+
+/**
  * Validate that a working directory exists and is a directory.
  * Throws a descriptive Error if not.
  */

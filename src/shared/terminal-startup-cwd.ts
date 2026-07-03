@@ -22,6 +22,12 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
   workspaceId?: string
   requestedCwd?: string | null
   resolveFolderWorkspacePath?: (folderWorkspaceId: string) => string | null | undefined
+  /** Why: an explorer-created terminal persists startupCwd=subdirectory. If
+   *  that subdirectory is later deleted/renamed while the worktree root still
+   *  exists, spawning at the stale path throws "Working directory ... does not
+   *  exist" and the terminal never opens. When a probe is supplied, fall back
+   *  to the workspace root (which reliably exists) instead of a dead subdir. */
+  directoryExists?: (path: string) => boolean
 }): string | undefined {
   if (!args.requestedCwd || args.requestedCwd.trim().length === 0) {
     return undefined
@@ -33,7 +39,16 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
   if (!workspacePath) {
     return args.requestedCwd
   }
-  return resolveTerminalStartupCwd(workspacePath, args.requestedCwd)
+  const resolvedCwd = resolveTerminalStartupCwd(workspacePath, args.requestedCwd)
+  if (
+    resolvedCwd !== undefined &&
+    resolvedCwd !== workspacePath &&
+    args.directoryExists &&
+    !args.directoryExists(resolvedCwd)
+  ) {
+    return workspacePath
+  }
+  return resolvedCwd
 }
 
 function resolveTerminalWorkspacePath(

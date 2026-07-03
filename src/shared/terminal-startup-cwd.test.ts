@@ -68,4 +68,27 @@ describe('resolveTerminalStartupCwd', () => {
       })
     ).toThrow('Terminal cwd must be inside the selected worktree.')
   })
+
+  it('falls back to the workspace root when a persisted startup subdir no longer exists', () => {
+    // Why: explorer-created terminals persist startupCwd=subdirectory; if that
+    // subdir is deleted while the worktree root survives, respawn must not use
+    // the dead path (node-pty throws "Working directory ... does not exist").
+    expect(
+      resolveTerminalStartupCwdForWorkspace({
+        workspaceId: 'repo-1::/repo/app',
+        requestedCwd: '/repo/app/packages/web',
+        directoryExists: (path) => path === '/repo/app'
+      })
+    ).toBe('/repo/app')
+  })
+
+  it('keeps an existing startup subdir when the probe confirms it', () => {
+    expect(
+      resolveTerminalStartupCwdForWorkspace({
+        workspaceId: 'repo-1::/repo/app',
+        requestedCwd: '/repo/app/packages/web',
+        directoryExists: () => true
+      })
+    ).toBe('/repo/app/packages/web')
+  })
 })

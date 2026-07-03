@@ -35,6 +35,7 @@ import { piTitlebarExtensionService } from '../pi/titlebar-extension-service'
 import { detectPiAgentKindFromCommand, type PiAgentKind } from '../../shared/pi-agent-kind'
 import { isPwshAvailable } from '../pwsh'
 import { LocalPtyProvider } from '../providers/local-pty-provider'
+import { terminalWorkingDirectoryExists } from '../providers/local-pty-utils'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 import { SSH_SESSION_EXPIRED_ERROR, isSshPtyNotFoundError } from '../providers/ssh-pty-provider'
@@ -1969,7 +1970,11 @@ export function registerPtyHandlers(
       workspaceId: worktreeId,
       requestedCwd: cwd,
       resolveFolderWorkspacePath: (folderWorkspaceId) =>
-        store?.getFolderWorkspace(folderWorkspaceId)?.folderPath
+        store?.getFolderWorkspace(folderWorkspaceId)?.folderPath,
+      // Why: a persisted explorer startupCwd subdirectory can be deleted while
+      // the worktree root survives; fall back to the root so restore/respawn
+      // does not throw a missing-working-directory error and fail to open.
+      directoryExists: (path) => terminalWorkingDirectoryExists(path)
     })
 
   // Why: the runtime controller must route through getProviderForPty() so that
