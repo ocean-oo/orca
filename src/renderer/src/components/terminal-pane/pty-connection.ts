@@ -78,6 +78,7 @@ import {
   scanMode2031Sequences
 } from '../../../../shared/terminal-color-scheme-protocol'
 import { warnTerminalLifecycleAnomaly } from './terminal-lifecycle-diagnostics'
+import { subscribeToTerminalUserInput } from './terminal-user-input-signal'
 import { registerPtySerializer, registerPtyTitleSource } from './pty-buffer-serializer'
 import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
@@ -101,6 +102,8 @@ import {
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { makePaneKey, parseLegacyNumericPaneKey } from '../../../../shared/stable-pane-id'
 import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
+import { createPaneForegroundAgentTracker } from './pane-foreground-agent-tracker'
+import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
 import { dispatchTerminalCommandFinishedEvent } from '@/hooks/terminal-command-finished-event'
 import { e2eConfig } from '@/lib/e2e-config'
 import {
@@ -1589,12 +1592,19 @@ export function connectPanePty(
     }
     return pendingWrite.then(() => interruptInference.flushPending())
   }
+  const paneForegroundAgentTracker = createPaneForegroundAgentTracker({
+    getPtyId: () => transport.getPtyId(),
+    isTrackablePtyId: (id) => !isRemoteRuntimePtyId(id) && parseAppSshPtyId(id) === null,
+    readForegroundProcess: (id) => window.api.pty.getForegroundProcess(id),
+    publish: (entry) => useAppStore.getState().setPaneForegroundAgent(cacheKey, entry)
+  })
   // Why: one command-finished policy whether the signal arrives as bytes
   // (remote PTYs, kill switch off) or as a main-derived pty:sideEffect fact —
   // routing both through this handler keeps the drop/interrupt semantics
   // identical across authority modes.
   const handleCommandFinished = (_bestEffortExitCode: number | null): void => {
     clearCommandInferredPaneAgentAfterPtySideEffects()
+    paneForegroundAgentTracker.onCommandFinished()
     // Why: the finished command may have moved HEAD or the index (e.g.
     // `git checkout`); nudge git UI now instead of waiting for a poll.
     dispatchTerminalCommandFinishedEvent(deps.worktreeId)
@@ -1623,6 +1633,7 @@ export function connectPanePty(
     dropCommandFinishedStatusIfSameTurn(entry)
   }
   const commandLifecycle = createTerminalCommandLifecycle({
+    onCommandStarted: () => paneForegroundAgentTracker.onCommandStarted(),
     onCommandFinished: handleCommandFinished
   })
   // Why: the xterm OSC 133 swallow is rendering hygiene, not a side effect —
@@ -1882,6 +1893,7 @@ export function connectPanePty(
     // Why: a dead terminal has no running agent — remove its explicit status
     // entry so the hover UI only shows what is running *now*.
     useAppStore.getState().removeAgentStatus(cacheKey)
+    useAppStore.getState().clearPaneForegroundAgent(cacheKey)
     // The runtime graph is the CLI's source for live terminal bindings, so
     // we must republish when a pane loses its PTY instead of waiting for a
     // broader layout change that may never happen.
@@ -2514,12 +2526,27 @@ export function connectPanePty(
   const markTerminalInputSent = (): void => {
     lastTerminalInputAt = performance.now()
   }
-  const recordAcceptedTerminalInputForHibernation = (): void => {
+  const recordTerminalInputForHibernation = (): void => {
     useAppStore.getState().recordTerminalInput(cacheKey)
+  }
+  // Why: onData mixes real user input with xterm's parser auto-replies (focus
+  // reports, DA/DSR/CPR responses). Recording those replies as activity makes
+  // the hibernation planner treat a pane hidden after its agent finished as
+  // "input after done" forever. The core user-input signal fires only for real
+  // input, so hibernation activity records from it; onData recording remains
+  // solely as the fallback when the internal API is unavailable.
+  const userInputActivityDisposable = subscribeToTerminalUserInput(
+    pane.terminal,
+    recordTerminalInputForHibernation
+  )
+  const recordTerminalInputForHibernationFallback = (): void => {
+    if (userInputActivityDisposable === null) {
+      recordTerminalInputForHibernation()
+    }
   }
   const markAcceptedTerminalInputSent = (): void => {
     markTerminalInputSent()
-    recordAcceptedTerminalInputForHibernation()
+    recordTerminalInputForHibernationFallback()
   }
   const terminalTheme = pane.terminal.options.theme
   const terminalColorQueryReplies = terminalTheme
@@ -2716,7 +2743,7 @@ export function connectPanePty(
         .sendInputAccepted(data)
         .then((accepted) => {
           if (accepted) {
-            recordAcceptedTerminalInputForHibernation()
+            recordTerminalInputForHibernationFallback()
             observeAcceptedShellCommandInput(data)
             observeAcceptedTerminalInput(data, acknowledgedIntent)
             interruptInference.observeInputIntent(acknowledgedIntent)
@@ -6473,6 +6500,7 @@ export function connectPanePty(
         connectFallbackTimer = null
       }
       onDataDisposable.dispose()
+      userInputActivityDisposable?.dispose()
       terminalCapabilityRepliesDisposable.dispose()
       onResizeDisposable.dispose()
       onBufferChangeDisposable?.dispose()
@@ -6483,6 +6511,7 @@ export function connectPanePty(
         pendingGeometryReportRaf = null
       }
       commandLifecycle.dispose()
+      paneForegroundAgentTracker.dispose()
       agentCompletionCoordinator.dispose()
     }
   }

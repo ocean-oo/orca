@@ -56,12 +56,18 @@ export type Osc133CommandFinishedScanner = {
 }
 
 export function createOsc133CommandFinishedScanner(
-  onCommandFinished: (bestEffortExitCode: number | null) => void
+  onCommandFinished: (bestEffortExitCode: number | null) => void,
+  /** OSC 133;C — the shell exec'd a command; the pane's foreground changed. */
+  onCommandStarted?: () => void
 ): Osc133CommandFinishedScanner {
   let carry = ''
 
   const handleOsc133 = (payload: string): void => {
     const [sequence, exitCode] = payload.split(';')
+    if (sequence === 'C') {
+      onCommandStarted?.()
+      return
+    }
     if (sequence === 'D') {
       onCommandFinished(parseBestEffortExitCode(exitCode))
     }

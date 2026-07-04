@@ -3,6 +3,8 @@ import { createOsc133CommandFinishedScanner } from '../../../../shared/terminal-
 
 type TerminalCommandLifecycleOptions = {
   onCommandFinished: (bestEffortExitCode: number | null) => void
+  /** OSC 133;C — the shell exec'd a command; the pane's foreground changed. */
+  onCommandStarted?: () => void
 }
 
 export function createTerminalCommandLifecycle(options: TerminalCommandLifecycleOptions): {
@@ -13,7 +15,10 @@ export function createTerminalCommandLifecycle(options: TerminalCommandLifecycle
   // Why: the byte parsing lives in shared so main's side-effect tracker emits
   // identical command-finished facts for local/SSH PTYs; this renderer wrapper
   // remains the byte path for remote-runtime PTYs and the kill-switch-off mode.
-  const scanner = createOsc133CommandFinishedScanner(options.onCommandFinished)
+  const scanner = createOsc133CommandFinishedScanner(
+    options.onCommandFinished,
+    options.onCommandStarted
+  )
   const disposables: IDisposable[] = []
 
   return {
