@@ -1066,6 +1066,7 @@ function buildPRRefreshCandidate(
     branch,
     cacheKey,
     worktreeId: worktree.id,
+    currentHeadOid: worktree.head ?? null,
     // Why: persisted linked PR metadata is exact, while PR cache numbers are
     // only fallback hints after branch lookup misses.
     linkedPRNumber: worktree.linkedPR ?? null,
@@ -2949,6 +2950,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     const request = (async () => {
       try {
         const runtimeRepo = getRuntimeRepoTarget(get(), repoPath, requestSettings)
+        const candidateWorktree = options?.worktreeId
+          ? findWorktreeById(get(), options.worktreeId)
+          : null
         const outcome = runtimeRepo
           ? await callRuntimeRpc<PRInfo | null>(
               runtimeRepo.target,
@@ -2957,6 +2961,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 repo: runtimeRepo.repo.id,
                 branch,
                 linkedPRNumber,
+                currentHeadOid: candidateWorktree?.head ?? null,
                 ...(fallbackPRNumber !== null
                   ? { fallbackPRNumber, acceptMergedFallbackPR: fallbackPRSource !== null }
                   : {})
@@ -2975,6 +2980,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 branch,
                 cacheKey,
                 worktreeId: options?.worktreeId,
+                currentHeadOid: candidateWorktree?.head ?? null,
                 linkedPRNumber,
                 fallbackPRNumber,
                 fallbackPRSource,
@@ -2996,7 +3002,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                       branch,
                       linkedPRNumber,
                       fallbackPRNumber,
-                      acceptMergedFallbackPR: fallbackPRNumber !== null && fallbackPRSource !== null
+                      acceptMergedFallbackPR:
+                        fallbackPRNumber !== null && fallbackPRSource !== null,
+                      currentHeadOid: candidateWorktree?.head ?? null
                     })
                     .then((pr) =>
                       pr

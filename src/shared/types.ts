@@ -1196,6 +1196,10 @@ export type GitHubPRRefreshCandidate = GitHubPRRefreshAlias & {
   cachedMergeable?: PRMergeableState | null
   cachedMergeStateStatus?: string | null
   localGitOptions?: { wslDistro?: string }
+  // Why: merged branch-matched PRs are only visible for heads that belong to
+  // the PR; without the worktree head, a panel-supplied fallback number would
+  // keep a merged PR alive head-blind after the branch moves on.
+  currentHeadOid?: string | null
 }
 
 export type GitHubPRRefreshSkippedReason =

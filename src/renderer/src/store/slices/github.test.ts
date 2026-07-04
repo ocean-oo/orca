@@ -3573,7 +3573,12 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     // GitHub stops reporting the deleted head by branch name.
     expect(mockApi.gh.enqueuePRRefresh).toHaveBeenCalledWith(
       expect.objectContaining({
-        candidate: expect.objectContaining({ fallbackPRNumber: 13 })
+        candidate: expect.objectContaining({
+          fallbackPRNumber: 13,
+          // Why: main can only head-gate fallback preservation when the
+          // candidate carries the worktree head it was built for.
+          currentHeadOid: 'behind-head'
+        })
       })
     )
   })
@@ -3960,7 +3965,7 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.prForBranch',
-      params: { repo: 'repo-1', branch, linkedPRNumber: 12 },
+      params: { repo: 'repo-1', branch, linkedPRNumber: 12, currentHeadOid: null },
       timeoutMs: 30_000
     })
     expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toMatchObject({
@@ -4010,7 +4015,7 @@ describe('createGitHubSlice.refreshGitHubForWorktreeIfStale', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.prForBranch',
-      params: { repo: 'repo-runtime', branch, linkedPRNumber: null },
+      params: { repo: 'repo-runtime', branch, linkedPRNumber: null, currentHeadOid: null },
       timeoutMs: 30_000
     })
     expect(store.getState().prCache[`runtime:env-1::repo-runtime::${branch}`]?.data).toMatchObject({
@@ -4247,7 +4252,7 @@ describe('createGitHubSlice.refreshAllGitHub', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.prForBranch',
-      params: { repo: 'repo-1', branch, linkedPRNumber: null },
+      params: { repo: 'repo-1', branch, linkedPRNumber: null, currentHeadOid: null },
       timeoutMs: 30_000
     })
   })
@@ -4377,7 +4382,7 @@ describe('createGitHubSlice.refreshGitHubForWorktree', () => {
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.prForBranch',
-      params: { repo: 'repo-1', branch, linkedPRNumber: null },
+      params: { repo: 'repo-1', branch, linkedPRNumber: null, currentHeadOid: null },
       timeoutMs: 30_000
     })
   })
