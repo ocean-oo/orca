@@ -10,7 +10,6 @@ import {
   scenarioTitle
 } from './terminal-perf-report-rows.mjs'
 import { basename, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const DEFAULT_OUTPUT_PATH = 'test-results/terminal-perf-impact-report.html'
 
@@ -236,7 +235,7 @@ function renderScenarioTable({ scenario, byRevision, revisions, title }) {
       .map((value) => `<td>${value == null ? '—' : escapeHtml(format(value))}</td>`)
       .join('')
     const baseline = values.find((value) => value != null)
-    const latest = [...values].reverse().find((value) => value != null)
+    const latest = values.toReversed().find((value) => value != null)
     metricRows.push(
       `<tr><th scope="row">${escapeHtml(metric.label)}</th>${cells}${deltaCell(baseline, latest, {
         zeroBudget: metric.key === 'rendererDroppedBacklogs'
@@ -469,7 +468,7 @@ export function generateTerminalPerfHtmlReport({
   return { outputPath, rowCount: totalRows, budgetFailureCount: latestFailures }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+const isMain = process.argv[1] && import.meta.filename === process.argv[1]
 if (isMain) {
   try {
     const { inputs, outputPath } = parseHtmlReportArgs(process.argv.slice(2))
