@@ -112,6 +112,26 @@ export function CopilotIcon({ size = 14 }: { size?: number }): React.JSX.Element
   )
 }
 
+export function OpenCodeIcon({ size = 14 }: { size?: number }): React.JSX.Element {
+  // SVG geometry sourced from opencode.ai/brand's official logo asset.
+  // Why: the branded fills are adapted to currentColor so the mark is visible
+  // in both Orca themes and avoids the flaky favicon proxy.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 240 300"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      className="text-current"
+    >
+      <path d="M180 240H60V120H180V240Z" fill="currentColor" fillOpacity="0.28" />
+      <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function AgentLetterIcon({
   letter,
   size = 14
