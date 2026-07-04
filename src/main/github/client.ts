@@ -2950,6 +2950,10 @@ export async function getPRForBranchOutcome(
       explicitCurrentHeadOid !== null &&
       shouldHideMergedImplicitPR(data, linkedPRNumber, explicitCurrentHeadOid) &&
       !(await mergedPRContainsHead(data, dataRepo, explicitCurrentHeadOid))
+    // Why no lazy-HEAD re-check on preservation: fallback numbers come from
+    // callers that already gated them on head equality or confirmed
+    // containment; re-hiding against the main-repo HEAD would blank
+    // deleted-head merged PRs that are deliberately kept visible.
     const shouldPreserveMergedFallback =
       !explicitHeadHidesMergedImplicitPR &&
       (fallbackConfirmedMergedBranch || options.acceptMergedFallbackPR === true)

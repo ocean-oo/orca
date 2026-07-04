@@ -1038,6 +1038,9 @@ function buildPRRefreshCandidate(
     true
   )
   const cachedFallbackPRNumber = cachedPR?.number ?? null
+  // Why: a merged PR stays a valid fallback when the worktree sits on its head
+  // or on a commit main confirmed as part of the PR; anything else means the
+  // branch moved on and the number must not resurrect the old merged PR.
   const cachedMergedPRMovedPastHead =
     worktree.linkedPR == null &&
     cachedPR?.state === 'merged' &&

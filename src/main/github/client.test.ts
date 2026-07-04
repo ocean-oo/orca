@@ -821,6 +821,15 @@ describe('getPRForBranch', () => {
     const pr = await getPRForBranch('/repo-root', 'fix-hibernation-wake')
 
     expect(pr).toBeNull()
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(3)
+
+    // A definitive "not part of this PR" answer is immutable for a merged PR:
+    // repeated polls must not re-probe GitHub.
+    mockMergedBranchPRLookupBehindHead()
+    const second = await getPRForBranch('/repo-root', 'fix-hibernation-wake')
+
+    expect(second).toBeNull()
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(5)
   })
 
   it('keeps hiding a merged branch PR when the commit membership probe fails', async () => {

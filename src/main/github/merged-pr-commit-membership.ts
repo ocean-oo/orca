@@ -4,12 +4,13 @@ import type { OwnerRepo } from './github-repository-identity'
 
 type GhExecOptions = Parameters<typeof ghExecFileAsync>[1]
 
-// Why: a merged PR's commit set is immutable, so confirmations never expire in
-// practice; the TTLs only bound memory and let "commit not on GitHub yet"
-// answers retry after a future push.
+// Why: a merged PR's commit set is immutable, so definitive answers — member
+// or not — never change; that TTL only bounds memory. Errors (a commit not on
+// GitHub yet, network) get a short TTL so a future push can flip the answer
+// without the checks-panel poll re-probing every cycle.
 const MEMBERSHIP_CACHE_MAX_ENTRIES = 200
-const MEMBERSHIP_CONFIRMED_TTL_MS = 6 * 60 * 60 * 1000
-const MEMBERSHIP_NEGATIVE_TTL_MS = 5 * 60 * 1000
+const MEMBERSHIP_DEFINITIVE_TTL_MS = 6 * 60 * 60 * 1000
+const MEMBERSHIP_ERROR_TTL_MS = 5 * 60 * 1000
 
 const membershipCache = new Map<string, { value: boolean; expiresAt: number }>()
 
@@ -80,7 +81,7 @@ export async function isCommitPartOfMergedPR(args: {
       )
     membershipCache.set(cacheKey, {
       value,
-      expiresAt: now + (value ? MEMBERSHIP_CONFIRMED_TTL_MS : MEMBERSHIP_NEGATIVE_TTL_MS)
+      expiresAt: now + MEMBERSHIP_DEFINITIVE_TTL_MS
     })
     return value
   } catch {
@@ -88,7 +89,7 @@ export async function isCommitPartOfMergedPR(args: {
     // definitive "new local work" today, but a push can change it; retry later.
     membershipCache.set(cacheKey, {
       value: false,
-      expiresAt: now + MEMBERSHIP_NEGATIVE_TTL_MS
+      expiresAt: now + MEMBERSHIP_ERROR_TTL_MS
     })
     return false
   }
