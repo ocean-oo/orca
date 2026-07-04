@@ -64,11 +64,13 @@ describe('DevinHookService', () => {
     }
     const script = readFileSync(getDevinManagedScriptPath(), 'utf8')
     expect(script).toContain('/hook/devin')
-    // Why: payload is piped to curl via stdin (`payload@-`) so it never lands
-    // on the curl command line (EDR oversized-command-line false positive).
-    expect(script).toContain('printf \'%s\' "$payload" | curl')
-    expect(script).toContain('--data-urlencode "payload@-"')
+    // Why: payload posts from a private temp file and the token streams in as a
+    // header via stdin, so neither lands on the curl command line (also avoids
+    // EDR oversized-command-line false positives). Endpoint file parsed, not sourced.
+    expect(script).toContain('--data-urlencode "payload@${__orca_payload_file}"')
+    expect(script).toContain('-H @-')
     expect(script).not.toContain('--data-urlencode "payload=${payload}"')
+    expect(script).not.toContain('. "$ORCA_AGENT_HOOK_ENDPOINT"')
   })
 
   it('preserves unrelated keys in Devin config when installing hooks', () => {
