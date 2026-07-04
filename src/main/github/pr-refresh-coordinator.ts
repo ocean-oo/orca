@@ -56,7 +56,7 @@ function hostedReviewOptionArgs(
     options.acceptMergedFallbackPR = true
   }
   if (typeof candidate.currentHeadOid === 'string' && candidate.currentHeadOid.trim().length > 0) {
-    options.currentHeadOid = candidate.currentHeadOid
+    options.currentHeadOid = candidate.currentHeadOid.trim()
   }
   return Object.keys(options).length > 0 ? [options] : []
 }
