@@ -48,6 +48,7 @@ export function MobileFileExplorerPanel(props: {
   scopeRef.current = scope
   const directoryLoadRevisionsRef = useRef<DirectoryLoadRevisions>(createDirectoryLoadRevisions())
   const pendingDirectoryRetriesRef = useRef<Set<string>>(new Set())
+  const directoryCacheRef = useRef<DirectoryCache>({})
   const [directoryCache, setDirectoryCache] = useState<DirectoryCache>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
@@ -64,8 +65,11 @@ export function MobileFileExplorerPanel(props: {
         const message =
           connState === 'connected' ? 'Connecting to desktop...' : 'Waiting for desktop...'
         if (rootLoad) {
+          const hasLoadedRoot =
+            (getDirectoryCacheState(directoryCacheRef.current, '')?.entries.length ?? 0) > 0
           setLoading(false)
-          setError(message)
+          // Why: transient reconnects should not blank an already browsable tree.
+          setError(hasLoadedRoot ? null : message)
         } else {
           setDirectoryCache((prev) => ({
             ...prev,
@@ -142,11 +146,16 @@ export function MobileFileExplorerPanel(props: {
     scopeRef.current = scope
     resetDirectoryLoadRevisions(directoryLoadRevisionsRef.current)
     pendingDirectoryRetriesRef.current.clear()
+    directoryCacheRef.current = {}
     setDirectoryCache({})
     setExpanded(new Set())
     setLoading(true)
     setError(null)
   }, [scope])
+
+  useEffect(() => {
+    directoryCacheRef.current = directoryCache
+  }, [directoryCache])
 
   useEffect(() => {
     void loadDirectory('')
