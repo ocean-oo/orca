@@ -189,8 +189,10 @@ export type AgentStatusSlice = {
 
   captureSleepingAgentSessionsByWorktree: (worktreeId: string, paneKeys?: string[]) => void
   /** Capture resumable agent sessions across every worktree. Called from the
-   *  quit flush so provider session ids survive an app restart. */
-  captureAllSleepingAgentSessions: () => void
+   *  quit flush (origin 'quit') and from the periodic safety-net capture
+   *  (origin 'live') so provider session ids survive an app restart — even a
+   *  hard kill (updater/installer/crash) that never fires beforeunload. */
+  captureAllSleepingAgentSessions: (options?: { origin?: 'quit' | 'live' }) => void
   clearSleepingAgentSession: (paneKey: string) => void
   clearSleepingAgentSessionsByWorktree: (worktreeId: string) => void
   pruneSleepingAgentSessions: (validWorktreeIds: Set<string>) => void
@@ -556,6 +558,33 @@ function recoveryRecordMatches(
     existing.tabId === next.tabId &&
     existing.providerSession.key === next.providerSession.key &&
     existing.providerSession.id === next.providerSession.id &&
+    launchConfigsEqual(existing.launchConfig, next.launchConfig)
+  )
+}
+
+// Why capturedAt is ignored: the periodic safety-net capture runs on a timer,
+// so identical session state must not count as a change — otherwise every
+// tick would rewrite the record and trigger a session persist for nothing.
+function sleepingRecordsEquivalent(
+  existing: SleepingAgentSessionRecord | undefined,
+  next: SleepingAgentSessionRecord
+): boolean {
+  if (!existing) {
+    return false
+  }
+  return (
+    existing.origin === next.origin &&
+    existing.agent === next.agent &&
+    existing.worktreeId === next.worktreeId &&
+    existing.tabId === next.tabId &&
+    existing.providerSession.key === next.providerSession.key &&
+    existing.providerSession.id === next.providerSession.id &&
+    existing.prompt === next.prompt &&
+    existing.state === next.state &&
+    existing.updatedAt === next.updatedAt &&
+    existing.terminalTitle === next.terminalTitle &&
+    existing.lastAssistantMessage === next.lastAssistantMessage &&
+    existing.interrupted === next.interrupted &&
     launchConfigsEqual(existing.launchConfig, next.launchConfig)
   )
 }
@@ -1981,7 +2010,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       })
     },
 
-    captureAllSleepingAgentSessions: () => {
+    captureAllSleepingAgentSessions: (options) => {
       // Why: the quit flush must persist provider session ids for every live
       // agent pane — otherwise agents whose daemon PTYs die while the app is
       // closed have nothing to `--resume` from (#5232). Only live entries are
@@ -2007,9 +2036,9 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             worktreeId,
             capturedAt,
             launchConfig: getLaunchConfigForEntry(s, entry),
-            origin: 'quit'
+            origin: options?.origin ?? 'quit'
           })
-          if (record && next[record.paneKey] !== record) {
+          if (record && !sleepingRecordsEquivalent(next[record.paneKey], record)) {
             next[record.paneKey] = record
             changed = true
           }

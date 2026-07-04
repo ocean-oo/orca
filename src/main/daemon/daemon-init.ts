@@ -8,9 +8,8 @@ module-level spawner/adapter singletons must stay co-located so a future
 change cannot leave them drifting out of sync. */
 import { join } from 'node:path'
 import { app } from 'electron'
-import { mkdirSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fork } from 'node:child_process'
-import { connect } from 'node:net'
 import {
   DaemonSpawner,
   getDaemonPidPath,
@@ -23,18 +22,23 @@ import {
 import { DaemonPtyAdapter } from './daemon-pty-adapter'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import { DaemonClient } from './client'
+import { PROTOCOL_VERSION, type ListSessionsResult } from './types'
+import { probeSocket } from './daemon-socket-probe'
+import { adoptLegacyDaemons } from './daemon-legacy-adoption'
 import {
-  PREVIOUS_DAEMON_PROTOCOL_VERSIONS,
-  PROTOCOL_VERSION,
-  type ListSessionsResult
-} from './types'
+  getDaemonRuntimeVersionDir,
+  pruneDaemonRuntimeStaging,
+  stageDaemonRuntime,
+  type StagedDaemonRuntime
+} from './daemon-runtime-staging'
 import {
   getMacDaemonSystemResolverHealth,
   getDaemonLaunchIdentity,
   getProcessStartedAtMs,
   checkDaemonHealth,
   isDaemonStaleForCurrentBundle,
-  killStaleDaemon
+  killStaleDaemon,
+  parseDaemonPidFile
 } from './daemon-health'
 import { DegradedDaemonPtyProvider } from './degraded-daemon-pty-provider'
 import {
@@ -89,46 +93,55 @@ function getDaemonEntryPath(): string {
   return join(basePath, 'out', 'main', 'daemon-entry.js')
 }
 
-// Why: before spawning a new daemon, check if an existing one is alive by
-// attempting a TCP connection to the socket. If it connects, the daemon
-// survived from a previous app session — reuse it instead of spawning.
-function probeSocket(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32' && !existsSync(socketPath)) {
-      resolve(false)
-      return
-    }
-    const sock = connect({ path: socketPath })
-    let settled = false
-    let timer: ReturnType<typeof setTimeout>
-    function finish(alive: boolean, options?: { destroy?: boolean }): void {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timer)
-      sock.removeListener('connect', onConnect)
-      sock.removeListener('error', onError)
-      if (options?.destroy) {
-        sock.destroy()
-      }
-      resolve(alive)
-    }
+function getDaemonRuntimeStagingRoot(): string {
+  // Why: the Windows staging includes an Electron executable copy; keep it
+  // out of userData (%APPDATA% Roaming — synced on roaming profiles) and out
+  // of the NSIS $INSTDIR sweep (%LOCALAPPDATA%\Programs\orca).
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    return join(process.env.LOCALAPPDATA, 'orca', 'daemon-runtime')
+  }
+  return join(getRuntimeDir(), 'runtime')
+}
 
-    function onConnect(): void {
-      finish(true, { destroy: true })
-    }
-
-    function onError(): void {
-      finish(false)
-    }
-
-    timer = setTimeout(() => {
-      finish(false, { destroy: true })
-    }, 1000)
-    sock.on('connect', onConnect)
-    sock.on('error', onError)
+// Why: packaged installs are replaced in-place by updaters (NSIS overwrites
+// %LOCALAPPDATA%\Programs\orca on Windows), so a detached daemon must not
+// execute files from the install dir. Dev builds fork straight from out/ —
+// entry-path identity checks already handle worktree staleness there.
+async function resolveDaemonRuntime(installEntryPath: string): Promise<StagedDaemonRuntime> {
+  if (!app.isPackaged) {
+    return { entryPath: installEntryPath, execPath: null, staged: false }
+  }
+  return stageDaemonRuntime({
+    installEntryPath,
+    stagingRoot: getDaemonRuntimeStagingRoot(),
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    execPath: process.execPath
   })
+}
+
+function collectPidFileEntryPaths(runtimeDir: string): string[] {
+  const entryPaths: string[] = []
+  let names: string[]
+  try {
+    names = readdirSync(runtimeDir)
+  } catch {
+    return entryPaths
+  }
+  for (const name of names) {
+    if (!/^daemon-v\d+\.pid$/.test(name)) {
+      continue
+    }
+    try {
+      const parsed = parseDaemonPidFile(readFileSync(join(runtimeDir, name), 'utf8'))
+      if (parsed?.entryPath) {
+        entryPaths.push(parsed.entryPath)
+      }
+    } catch {
+      // Unreadable pid file — nothing to preserve for it.
+    }
+  }
+  return entryPaths
 }
 
 async function getAliveDaemonSessionCount(
@@ -183,7 +196,9 @@ async function shouldPreserveDaemonWithLiveSessions(
 
 function createOutOfProcessLauncher(runtimeDir: string): DaemonLauncher {
   return async (socketPath, tokenPath) => {
-    const entryPath = getDaemonEntryPath()
+    const installEntryPath = getDaemonEntryPath()
+    const runtime = await resolveDaemonRuntime(installEntryPath)
+    const entryPath = runtime.entryPath
     const health = await checkDaemonHealth(socketPath, tokenPath)
     if (health === 'healthy') {
       const resolverHealth = await getMacDaemonSystemResolverHealth(socketPath, tokenPath)
@@ -259,114 +274,158 @@ function createOutOfProcessLauncher(runtimeDir: string): DaemonLauncher {
     // before respawn so the new daemon does not race the stale process.
     await killStaleDaemon(runtimeDir, socketPath, tokenPath)
 
-    const userDataPath = app.getPath('userData')
-    const child = fork(entryPath, ['--socket', socketPath, '--token', tokenPath], {
-      // Why: detached daemons can outlive dev worktrees. Starting from
-      // userData keeps process.cwd() valid after a repo/worktree is deleted.
-      cwd: userDataPath,
-      // Why: detached + unref lets the daemon outlive the Electron process.
-      // stdio 'ignore' prevents the child from holding the parent's stdout
-      // open, which would prevent Electron from exiting cleanly.
-      detached: true,
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-      // Why: ELECTRON_RUN_AS_NODE makes the forked process run as a plain
-      // Node.js process instead of an Electron renderer/main process. Without
-      // it, Electron's GPU/display initialization can interfere with native
-      // module operations like node-pty's posix_spawn of the spawn-helper.
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        // Why: the detached daemon is plain Node and cannot call Electron's
-        // app.getPath(), but shell-ready rcfiles must live outside swept tmp.
-        ORCA_USER_DATA_PATH: userDataPath
+    // Why a candidate ladder: the staged Windows executable copy is validated
+    // by the ready handshake itself. If a staged runtime cannot boot (missing
+    // Electron support file, AV quarantine), fall back to the default
+    // executable and finally to the install-dir entry — worst case is
+    // exactly today's behavior instead of no daemon at all.
+    const candidates: { entryPath: string; execPath?: string }[] = []
+    if (runtime.staged) {
+      if (runtime.execPath) {
+        candidates.push({ entryPath: runtime.entryPath, execPath: runtime.execPath })
       }
-    })
+      candidates.push({ entryPath: runtime.entryPath })
+    }
+    candidates.push({ entryPath: installEntryPath })
 
-    // Wait for the daemon to signal readiness via IPC
-    await new Promise<void>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      let settled = false
-      function cleanupStartupListeners(): void {
-        if (timer) {
-          clearTimeout(timer)
+    let lastError: Error | null = null
+    for (const candidate of candidates) {
+      try {
+        return await forkDaemonUntilReady(candidate, socketPath, tokenPath, runtimeDir)
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+        if (candidate !== candidates[candidates.length - 1]) {
+          console.warn(
+            `[daemon] Daemon launch failed via ${candidate.execPath ?? 'default exec'} + ${candidate.entryPath} — trying next fallback: ${lastError.message}`
+          )
         }
-        child.off('message', onReadyMessage)
-        child.off('error', onStartupError)
-        child.off('exit', onStartupExit)
       }
-      function fail(error: Error): void {
+    }
+    throw lastError ?? new Error('Daemon launch failed with no candidates')
+  }
+}
+
+async function forkDaemonUntilReady(
+  candidate: { entryPath: string; execPath?: string },
+  socketPath: string,
+  tokenPath: string,
+  runtimeDir: string
+): Promise<DaemonProcessHandle> {
+  const userDataPath = app.getPath('userData')
+  const child = fork(candidate.entryPath, ['--socket', socketPath, '--token', tokenPath], {
+    // Why: detached daemons can outlive dev worktrees. Starting from
+    // userData keeps process.cwd() valid after a repo/worktree is deleted.
+    cwd: userDataPath,
+    // Why: detached + unref lets the daemon outlive the Electron process.
+    // stdio 'ignore' prevents the child from holding the parent's stdout
+    // open, which would prevent Electron from exiting cleanly.
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    // Why execPath: on Windows the staged executable copy lives outside the
+    // install dir under a non-Orca.exe image name, which is what lets the
+    // daemon escape the NSIS updater's kill sweep (it stops processes by
+    // install-dir path, or by Orca.exe image name when PowerShell is absent).
+    ...(candidate.execPath ? { execPath: candidate.execPath } : {}),
+    ...(process.platform === 'win32' ? { windowsHide: true } : {}),
+    // Why: ELECTRON_RUN_AS_NODE makes the forked process run as a plain
+    // Node.js process instead of an Electron renderer/main process. Without
+    // it, Electron's GPU/display initialization can interfere with native
+    // module operations like node-pty's posix_spawn of the spawn-helper.
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      // Why: the detached daemon is plain Node and cannot call Electron's
+      // app.getPath(), but shell-ready rcfiles must live outside swept tmp.
+      ORCA_USER_DATA_PATH: userDataPath
+    }
+  })
+
+  // Wait for the daemon to signal readiness via IPC
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let settled = false
+    function cleanupStartupListeners(): void {
+      if (timer) {
+        clearTimeout(timer)
+      }
+      child.off('message', onReadyMessage)
+      child.off('error', onStartupError)
+      child.off('exit', onStartupExit)
+    }
+    function fail(error: Error): void {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanupStartupListeners()
+      if (child.pid) {
+        try {
+          process.kill(child.pid, 'SIGTERM')
+        } catch {
+          // Already dead
+        }
+      }
+      reject(error)
+    }
+    function onReadyMessage(msg: unknown): void {
+      if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'ready') {
         if (settled) {
           return
         }
         settled = true
+        // Why: the daemon process is detached after readiness; leaving
+        // startup listeners attached retains this launch promise closure.
         cleanupStartupListeners()
         if (child.pid) {
-          try {
-            process.kill(child.pid, 'SIGTERM')
-          } catch {
-            // Already dead
-          }
+          // Why: JSON pid file carries pid + process start time so later
+          // killStaleDaemon() can verify the pid still belongs to the daemon
+          // we forked before SIGTERMing it. Prevents pid-recycling hazard
+          // where the OS hands the daemon's old pid to an unrelated process.
+          // entryPath records the path actually forked (staged or install)
+          // so runtime-staging pruning never deletes a live daemon's files.
+          writeFileSync(
+            getDaemonPidPath(runtimeDir),
+            serializeDaemonPidFile({
+              pid: child.pid,
+              startedAtMs: getProcessStartedAtMs(child.pid),
+              entryPath: candidate.entryPath,
+              appVersion: app.getVersion()
+            }),
+            { mode: 0o600 }
+          )
         }
-        reject(error)
+        // Why: disconnect IPC channel and unref so Electron can exit
+        // without waiting for the daemon. The daemon keeps running.
+        child.disconnect()
+        child.unref()
+        resolve()
       }
-      function onReadyMessage(msg: unknown): void {
-        if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'ready') {
-          if (settled) {
-            return
-          }
-          settled = true
-          // Why: the daemon process is detached after readiness; leaving
-          // startup listeners attached retains this launch promise closure.
-          cleanupStartupListeners()
-          if (child.pid) {
-            // Why: JSON pid file carries pid + process start time so later
-            // killStaleDaemon() can verify the pid still belongs to the daemon
-            // we forked before SIGTERMing it. Prevents pid-recycling hazard
-            // where the OS hands the daemon's old pid to an unrelated process.
-            writeFileSync(
-              getDaemonPidPath(runtimeDir),
-              serializeDaemonPidFile({
-                pid: child.pid,
-                startedAtMs: getProcessStartedAtMs(child.pid),
-                entryPath,
-                appVersion: app.getVersion()
-              }),
-              { mode: 0o600 }
-            )
-          }
-          // Why: disconnect IPC channel and unref so Electron can exit
-          // without waiting for the daemon. The daemon keeps running.
-          child.disconnect()
-          child.unref()
-          resolve()
-        }
-      }
+    }
 
-      function onStartupError(err: Error): void {
-        fail(err)
-      }
+    function onStartupError(err: Error): void {
+      fail(err)
+    }
 
-      function onStartupExit(code: number | null): void {
-        fail(new Error(`Daemon exited during startup with code ${code}`))
-      }
+    function onStartupExit(code: number | null): void {
+      fail(new Error(`Daemon exited during startup with code ${code}`))
+    }
 
-      timer = setTimeout(() => {
-        fail(new Error('Daemon startup timed out'))
-      }, 10000)
+    timer = setTimeout(() => {
+      fail(new Error('Daemon startup timed out'))
+    }, 10000)
 
-      child.on('message', onReadyMessage)
-      child.on('error', onStartupError)
-      child.on('exit', onStartupExit)
-    })
+    child.on('message', onReadyMessage)
+    child.on('error', onStartupError)
+    child.on('exit', onStartupExit)
+  })
 
-    return {
-      shutdown: async () => {
-        if (child.pid) {
-          try {
-            process.kill(child.pid, 'SIGTERM')
-          } catch {
-            // Already dead
-          }
+  return {
+    shutdown: async () => {
+      if (child.pid) {
+        try {
+          process.kill(child.pid, 'SIGTERM')
+        } catch {
+          // Already dead
         }
       }
     }
@@ -417,7 +476,16 @@ export async function initDaemonPtyProvider(signal?: AbortSignal): Promise<void>
     }
   })
 
-  const legacyAdapters = await createLegacyDaemonAdapters(runtimeDir)
+  const adoption = await adoptLegacyDaemons(runtimeDir, getHistoryDir())
+  const legacyAdapters = adoption.adapters
+  if (adoption.unreachableVersions.length > 0 && legacyAdapters.length === 0) {
+    // Why so loud: this is the exact signature of the update-crossing bug —
+    // sessions exist behind a previous-protocol daemon but none were adopted,
+    // so every terminal will silently cold-restore instead of reattaching.
+    console.error(
+      `[daemon] Previous-version daemon(s) v${adoption.unreachableVersions.join(', v')} appear live but zero legacy adapters were created — their sessions will NOT reattach this launch`
+    )
+  }
   const routedAdapter =
     launchMode === 'degraded-new-pty-fallback'
       ? new DegradedDaemonPtyProvider({
@@ -452,7 +520,22 @@ export async function initDaemonPtyProvider(signal?: AbortSignal): Promise<void>
   // before daemon init finishes. Rebind here so daemon PTYs still fan out
   // data/exit events through the renderer and runtime listeners.
   rebindLocalProviderListeners()
-  logDaemonMilestone('daemon-init-done', { legacyAdapters: legacyAdapters.length })
+  logDaemonMilestone('daemon-init-done', {
+    legacyAdapters: legacyAdapters.length,
+    unreachableLegacyVersions: adoption.unreachableVersions
+  })
+
+  if (app.isPackaged) {
+    // Why fire-and-forget: pruning stale staged runtimes is pure disk
+    // hygiene; it must never delay startup or fail init. Pid-file entry
+    // paths guard runtimes that may still back a live (legacy) daemon.
+    const stagingRoot = getDaemonRuntimeStagingRoot()
+    void pruneDaemonRuntimeStaging({
+      stagingRoot,
+      keepVersionDir: getDaemonRuntimeVersionDir(stagingRoot, app.getVersion()),
+      referencedEntryPaths: collectPidFileEntryPaths(runtimeDir)
+    }).catch(() => {})
+  }
 }
 
 // Why: the Manage Sessions IPC handlers need read access to the current
@@ -708,55 +791,3 @@ export async function cleanupDaemonForProtocol(
   return { cleaned: didRequestShutdown || didKillStaleDaemon, killedCount }
 }
 
-async function createLegacyDaemonAdapters(runtimeDir: string): Promise<DaemonPtyAdapter[]> {
-  const adapters: DaemonPtyAdapter[] = []
-  for (const protocolVersion of PREVIOUS_DAEMON_PROTOCOL_VERSIONS) {
-    const socketPath = getDaemonSocketPath(runtimeDir, protocolVersion)
-    const tokenPath = getDaemonTokenPath(runtimeDir, protocolVersion)
-    if (!(await probeSocket(socketPath))) {
-      // Why: dead legacy daemons leave pid/token files behind forever (one per
-      // protocol bump). A stale pid eventually gets recycled by an unrelated
-      // process, turning any future identity check into a PowerShell spawn.
-      // The socket is provably dead, so remove the leftovers — mirrors what
-      // cleanupDaemonForProtocol already does for the current version.
-      for (const stalePath of [
-        getDaemonPidPath(runtimeDir, protocolVersion),
-        getDaemonTokenPath(runtimeDir, protocolVersion)
-      ]) {
-        try {
-          unlinkSync(stalePath)
-        } catch {
-          // Best-effort
-        }
-      }
-      if (process.platform !== 'win32' && existsSync(socketPath)) {
-        try {
-          unlinkSync(socketPath)
-        } catch {
-          // Best-effort
-        }
-      }
-      continue
-    }
-    // Why: old daemon PTYs can be running long-lived agents during an app
-    // upgrade. Keep those sessions routed to their original daemon while new
-    // terminals use the current protocol, instead of killing background work.
-    // Legacy adapters intentionally do not respawn: respawning an old protocol
-    // daemon from new code would recreate stale env semantics and can be less
-    // predictable than letting the session fail if that old daemon dies.
-    // Why historyPath is still passed: checkpoint writes will fail silently
-    // (pre-v4 daemons don't support getSnapshot), but the HistoryManager is
-    // still needed for cleanup — close/exit events must remove history dirs
-    // and mark meta.json as ended. Without it, a later v4 session reusing
-    // the same ID could false-restore stale scrollback.bin.
-    adapters.push(
-      new DaemonPtyAdapter({
-        socketPath,
-        tokenPath,
-        protocolVersion,
-        historyPath: getHistoryDir()
-      })
-    )
-  }
-  return adapters
-}

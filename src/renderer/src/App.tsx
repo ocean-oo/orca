@@ -106,6 +106,7 @@ import { useWebSessionTabsSync } from './runtime/web-session-tabs-sync'
 import { useGlobalFileDrop } from './hooks/useGlobalFileDrop'
 import { useRadixBodyPointerEventsRecovery } from './hooks/useRadixBodyPointerEventsRecovery'
 import { registerUpdaterBeforeUnloadBypass } from './lib/updater-beforeunload'
+import { startSleepingAgentPeriodicCapture } from './lib/sleeping-agent-periodic-capture'
 import {
   buildWorkspaceSessionPayload,
   shouldPersistWorkspaceSession
@@ -1304,6 +1305,15 @@ function App(): React.JSX.Element {
     }
     window.addEventListener('beforeunload', captureAndFlush)
     return () => window.removeEventListener('beforeunload', captureAndFlush)
+  }, [])
+
+  // Why: beforeunload never fires when the app is hard-killed (Windows NSIS
+  // updater kill sweep, crashes), so also refresh resumable-agent quit-state
+  // on a timer. The capture skips the store write when nothing changed.
+  useEffect(() => {
+    return startSleepingAgentPeriodicCapture({
+      capture: () => useAppStore.getState().captureAllSleepingAgentSessions({ origin: 'live' })
+    })
   }, [])
 
   // Own the single window-close-request subscription at the always-mounted App

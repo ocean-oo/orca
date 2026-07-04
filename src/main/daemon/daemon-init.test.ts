@@ -210,7 +210,13 @@ vi.mock('fs', () => ({
   mkdirSync: vi.fn(),
   existsSync: (p: string) => probeSocketExistsMock(p) || p.includes('.pid'),
   unlinkSync: vi.fn(),
-  writeFileSync: writeFileSyncMock
+  writeFileSync: writeFileSyncMock,
+  // Why: legacy adoption reads pid files and runtime pruning lists the
+  // daemon dir; both are no-ops in these tests (no evidence files exist).
+  readFileSync: vi.fn(() => {
+    throw new Error('ENOENT')
+  }),
+  readdirSync: vi.fn(() => [])
 }))
 
 vi.mock('child_process', () => ({ fork: forkMock }))
@@ -224,7 +230,8 @@ vi.mock('./daemon-health', () => ({
   healthCheckDaemon: healthCheckDaemonMock,
   isDaemonStaleForCurrentBundle: isDaemonStaleForCurrentBundleMock,
   killStaleDaemon: killStaleDaemonMock,
-  getProcessStartedAtMs: getProcessStartedAtMsMock
+  getProcessStartedAtMs: getProcessStartedAtMsMock,
+  parseDaemonPidFile: vi.fn(() => null)
 }))
 
 vi.mock('./client', () => ({ DaemonClient: daemonClientMock }))
