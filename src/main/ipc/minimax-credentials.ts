@@ -15,6 +15,8 @@ function getMiniMaxCredentialsStatus(): MiniMaxCredentialsStatus {
   return { configured: hasMiniMaxSessionCookie() }
 }
 
+// Why: fire-and-forget — callers get the persisted cookie status immediately;
+// the rate-limit refresh runs in the background and only logs on failure.
 function refreshAfterMiniMaxCredentialChange(
   rateLimits: RateLimitService | null,
   action: 'save' | 'clear'
@@ -28,21 +30,23 @@ function refreshAfterMiniMaxCredentialChange(
 export function registerMiniMaxCredentialsHandlers(rateLimits: RateLimitService | null): void {
   ipcMain.handle('minimaxCredentials:getStatus', () => getMiniMaxCredentialsStatus())
   ipcMain.handle('minimaxCredentials:saveCookie', (_event, cookie: string) => {
+    // Validate the IPC argument in the main process; the renderer-declared type
+    // is compile-time only and the value arrives as unknown over IPC.
+    if (typeof cookie !== 'string') {
+      throw new Error('MiniMax session cookie must be a string')
+    }
     saveMiniMaxSessionCookie(cookie)
     refreshAfterMiniMaxCredentialChange(rateLimits, 'save')
     return getMiniMaxCredentialsStatus()
   })
   ipcMain.handle('minimaxCredentials:clearCookie', async () => {
     clearMiniMaxSessionCookie()
-    rateLimits?.invalidateMiniMaxCredentialState()
     try {
       await clearMiniMaxSessionCookieJar()
     } catch (error) {
       console.error('[minimax] failed to clear session cookie jar after credential clear:', error)
     }
-    void rateLimits?.refresh().catch((error: unknown) => {
-      console.error('[minimax] failed to trigger rate-limit refresh after clear:', error)
-    })
+    refreshAfterMiniMaxCredentialChange(rateLimits, 'clear')
     return getMiniMaxCredentialsStatus()
   })
 }

@@ -26,6 +26,8 @@ export type MiniMaxFetchResponse = {
   transport: MiniMaxFetchTransport
 }
 
+// Why: MiniMax's usage endpoint rejects non-browser clients, so we send a real
+// per-platform Firefox UA instead of a custom agent string. Don't "clean up".
 function getMiniMaxBrowserUserAgent(): string {
   if (process.platform === 'win32') {
     return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0'

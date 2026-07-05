@@ -46,6 +46,9 @@ function decodeCookieEnvelope(raw: Buffer): MiniMaxCookieEnvelope | null {
   }
 }
 
+// Why: migrates cookies saved before the envelope format existed. Older files
+// hold raw bytes (safeStorage-encrypted or plaintext), so we sniff the content
+// to tell the two apart rather than removing this as seemingly dead code.
 function looksLikeCookieHeader(value: string): boolean {
   const trimmed = value.trim()
   if (!trimmed) {
@@ -138,13 +141,20 @@ export function readMiniMaxSessionCookie(): string | null {
   if (!existsSync(keyPath)) {
     return null
   }
+  // Why: keep hardening out of the decode/decrypt try below so a chmod/ACL
+  // failure isn't misreported as a decrypt failure (matches hasMiniMaxSessionCookie).
   try {
     hardenExistingSecureFile(keyPath)
+  } catch (error) {
+    console.warn('[minimax] Failed to harden MiniMax cookie file while reading', error)
+  }
+  try {
     const raw = readFileSync(keyPath)
     const envelope = decodeCookieEnvelope(raw)
     cachedMiniMaxCookie = envelope ? readEnvelope(envelope) : readLegacyCookie(raw)
     return cachedMiniMaxCookie
-  } catch {
+  } catch (error) {
+    console.error('[minimax] failed to decode/decrypt session cookie', error)
     throw new Error('MiniMax session cookie could not be decrypted')
   }
 }
