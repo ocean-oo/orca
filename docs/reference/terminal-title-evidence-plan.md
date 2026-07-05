@@ -16,8 +16,8 @@ are added.
 ## Current Shape
 
 - OSC title bytes are parsed by `src/renderer/src/components/terminal-pane/pty-transport.ts`.
-  `applyObservedTerminalTitle` normalizes the display title and separately feeds
-  the raw title to the title status tracker.
+  Its internal `applyObservedTerminalTitle` closure normalizes the display title
+  and separately feeds the raw title to the title status tracker.
 - `src/renderer/src/components/terminal-pane/pty-connection.ts` receives both
   normalized and raw title strings in `onTitleChange`. It currently:
   - normalizes compatible wrapped-agent titles against the authoritative owner;
@@ -44,11 +44,16 @@ are added.
 - Sidebar smart attention and title-derived agent rows still use title fallback for
   hookless panes, while suppressing panes already covered by fresh hook rows.
 - Hook payload handling in `src/renderer/src/hooks/useIpcEvents.ts` is mostly
-  authoritative, but has a compatibility shim where OpenClaude identity can be
-  corrected from title text because OpenClaude emits Claude-compatible hooks.
+  authoritative, but has a compatibility shim (`resolveHookPayloadAgentType`)
+  that rewrites a `claude` hook payload's agent type to `openclaude` when the
+  terminal title names OpenClaude, because OpenClaude emits Claude-compatible
+  hooks.
 - Shared detection helpers in `src/shared/agent-detection.ts` still combine
   display normalization, status inference, label extraction, and a Gemini renderer
-  predicate in one title-string API surface.
+  predicate in one title-string API surface. Title-based agent-type extraction
+  (`resolveExplicitTerminalTitleAgentType`, aliased as `resolveTabAgentFromTitle`
+  by `use-tab-agent.ts`) lives separately in
+  `src/shared/terminal-title-agent-type.ts`.
 
 ## Broad App Consistency Audit
 
@@ -291,7 +296,9 @@ calling `detectAgentStatusFromTitle` directly:
 - title-derived agent rows;
 - Workspace Space active-agent count;
 - workspace cleanup blockers/liveness;
-- Native Chat leaf/title fallback and availability;
+- Native Chat leaf/title fallback and availability (an identity consumer via
+  `resolveTabAgentFromTitle`, not `detectAgentStatusFromTitle`; migrate it under
+  the identity/owner resolver, not the status resolver);
 - prompt-cache timer seeding;
 - synthetic hook title replacement;
 - `deriveRunningAgentSendTargets`;
@@ -315,6 +322,26 @@ Mechanical migration gate:
 - The implementation PR should include an `rg` audit in validation output showing
   any remaining direct imports and why each is approved.
 
+Audit scoping caveats (verified against the tree on 2026-07-05):
+
+- `getAgentLabel` is a name collision. Only the export from
+  `src/shared/agent-detection.ts` is the title predicate. An unrelated display
+  helper `getAgentLabel(agent: TuiAgent)` lives in
+  `src/renderer/src/lib/agent-catalog.tsx` (plus a local variant in
+  `AutomationsPage.tsx`) with its own consumers. The migration audit must match
+  on import source, not bare identifier, or it will flag innocent sites.
+- `detectAgentStatusFromTitle` also has main-process authority call sites:
+  `src/main/stats/agent-detector.ts` and multiple sites in
+  `src/main/runtime/orca-runtime.ts` (including a runtime-side
+  `getWorktreeStatus` and an agent-readiness wait). The Phase 2 consumer list is
+  renderer-scoped, so the "no product authority path imports it" gate is only
+  reachable if those main/runtime sites are migrated in their own slice or
+  explicitly carried on the allowlist with an owner and a follow-up.
+- The expected surviving direct call sites match the approved allowlist today:
+  `pty-transport.ts` title coalescing (transport parsing),
+  `agent-completion-coordinator.ts` and `agent-decorative-title-signature.ts`
+  (completion/decorative filtering), and tests.
+
 ### Phase 3: Separate Display Normalization From Identity Detection
 
 Split `src/shared/agent-detection.ts` into clearer domains:
@@ -331,9 +358,16 @@ Avoid vague module names. Candidate names:
 - `terminal-title-display.ts`;
 - `terminal-renderer-policy.ts`.
 
+`src/shared/terminal-title-agent-type.ts` already exists as the title agent-type
+extraction module; the split should fold into or align with it rather than
+creating a competing identity module.
+
 This phase should also retire public call sites that use `isGeminiTerminalTitle`
 for anything other than Gemini title compatibility detection. Renderer policy
-should call a renderer-policy function, not an agent-title function.
+should call a renderer-policy function, not an agent-title function. As of
+2026-07-05 the only renderer-policy use is the `setPaneGpuRendering` toggle in
+`pty-connection.ts`; the `title-agent-identity.ts` use is identity detection and
+stays with the identity domain.
 
 ### Phase 4: Persist Only Stable Evidence
 
@@ -515,3 +549,42 @@ Per-PR process checklist:
   manual matrix items for local, split-pane, sleep/wake, and SSH/remote behavior.
 - Gap reporting: for any skipped platform/manual path, record owner, reason,
   risk, and when it must be closed.
+
+## Appendix: Verified Baseline Inventory
+
+Verified against the tree on 2026-07-05: every file, function, store map, and
+test gate named in this plan exists. Direct non-test call sites of the gated
+predicates, grouped by consumer intent, for the Phase 2 audit to diff against:
+
+- `detectAgentStatusFromTitle` (defined in `src/shared/agent-detection.ts`,
+  re-exported by `src/renderer/src/lib/agent-status.ts`):
+  - status: `agent-status.ts`, `worktree-status.ts`, `worktree-card-status.ts`,
+    `smart-attention.ts`, `workspace-space-presentation.ts`, the `terminals.ts`
+    store slice, `src/main/stats/agent-detector.ts`, and
+    `src/main/runtime/orca-runtime.ts`;
+  - identity: `agent-title-owner.ts`, `title-agent-identity.ts`,
+    `worktree-title-derived-agent-rows.ts`;
+  - safety: `workspace-cleanup.ts`;
+  - timer: `cache-timer-seeding.ts`;
+  - display: `terminal-helpers.ts`, `agent-status-terminal-title.ts`;
+  - send/readiness: `agent-ready-wait.ts`, `active-agent-note-target.ts`,
+    `agent-send-title-status.ts` (feeds `deriveRunningAgentSendTargets`);
+  - transport/completion (expected allowlist survivors): `pty-transport.ts`,
+    `pty-connection.ts`, `agent-completion-coordinator.ts`,
+    `agent-decorative-title-signature.ts`.
+- `getAgentLabel` (the `agent-detection.ts` title predicate only; see the
+  name-collision caveat above): `agent-title-owner.ts`,
+  `terminal-title-agent-type.ts`, `active-agent-note-target.ts`,
+  `agent-status.ts`, `agent-send-title-status.ts`,
+  `worktree-title-derived-agent-rows.ts`.
+- `resolveExplicitTerminalTitleAgentType`: `use-tab-agent.ts`,
+  `use-notification-dispatch.ts`, and
+  `mobile/src/session/mobile-terminal-tab-agent.ts`. Mobile is a standalone
+  package, so the Phase 3 module split must keep the mobile consumer's import
+  path or copy in sync.
+- `resolveTabAgentFromTitle` (alias of the above via `use-tab-agent.ts`):
+  `TabBar.tsx`, `native-chat-leaf-title-agent.ts`,
+  `use-native-chat-toggle-shortcut.ts`.
+- `isGeminiTerminalTitle`: `pty-connection.ts` GPU toggle (the single Phase 3
+  renderer-policy retirement target) and `title-agent-identity.ts` (identity
+  use; stays with the identity domain).
