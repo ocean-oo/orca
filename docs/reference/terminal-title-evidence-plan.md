@@ -116,10 +116,15 @@ Title and identity evidence enters Orca through these flows:
 - Safety/timer consumers: cleanup blockers, prompt-cache seeding, and synthetic
   title replacement use title status as conservative runtime evidence.
 
-Status labels and ordering:
+Activity and surface status taxonomy:
 
-- User-visible statuses are effectively `permission > working > done > active >
-  inactive`.
+- Title-derived activity states are only `working`, `permission`, `idle`, or
+  `null`.
+- Explicit hook states are mapped separately: `blocked`/`waiting` become
+  user-visible `permission`, `working` remains `working`, and `done` remains
+  `done`.
+- Worktree/card surfaces then apply visual ordering:
+  `permission > working > done > active > inactive`.
 - Fresh explicit rows should suppress same-pane title fallback.
 - Stale explicit rows may be re-enabled only by live, pane-mapped title evidence.
 - Tab-title fallback is allowed only when no pane titles/hook mapping exists.
@@ -241,11 +246,14 @@ Renderer policy precedence:
 
 1. Explicit user setting `off` disables GPU.
 2. Explicit user setting `on` enables GPU unless WebGL is unavailable or the pane
-   is in context-loss/crash containment.
+   is in context-loss/crash containment. Agent compatibility exclusions must not
+   override explicit `on` unless the setting is redefined as "force on except
+   known crashers" in a separate user-facing product decision.
 3. `auto` follows platform/WebGL capability, context-loss recovery, and known
    compatibility exclusions.
 4. Known Gemini compatibility fallback may disable GPU only when resolved owner or
-   high-confidence title evidence identifies a genuine Gemini terminal.
+   high-confidence title evidence identifies a genuine Gemini terminal and the
+   effective user setting is `auto`.
 5. Fallback title evidence must not disable GPU when stronger owner evidence says
    the pane is another agent or shell.
 6. Remote/SSH runtime paths must use the same resolved policy and must not require
