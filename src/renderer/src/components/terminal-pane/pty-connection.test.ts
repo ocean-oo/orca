@@ -1140,6 +1140,81 @@ describe('connectPanePty', () => {
     expect(manager.setPaneGpuRendering).toHaveBeenCalledWith(1, false)
   })
 
+  it('DOM-gates a genuine Gemini title when the only pane row is a done non-Gemini agent', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+    mockStoreState = {
+      ...mockStoreState,
+      agentStatusByPaneKey: {
+        [paneKey]: {
+          paneKey,
+          agentType: 'claude',
+          state: 'done',
+          prompt: '',
+          updatedAt: Date.now(),
+          stateStartedAt: Date.now(),
+          stateHistory: []
+        }
+      }
+    } as StoreState
+    const pane = createPane(1)
+    const transport = createMockTransport('pty-reused-done-row')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1, 1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks()
+    const onTitleChange = createdTransportOptions[0]?.onTitleChange as
+      | ((title: string, rawTitle: string) => void)
+      | undefined
+    if (!onTitleChange) {
+      throw new Error('missing title callback')
+    }
+    onTitleChange('✦ Gemini CLI', '✦ Gemini CLI')
+
+    // A `done` row is a leftover from a prior agent, so it must not veto.
+    expect(manager.setPaneGpuRendering).toHaveBeenCalledWith(1, false)
+  })
+
+  it('DOM-gates a genuine Gemini title when the only pane row is a stale non-Gemini agent', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const paneKey = makePaneKey('tab-1', LEAF_1)
+    const staleAt = Date.now() - 60 * 60 * 1000
+    mockStoreState = {
+      ...mockStoreState,
+      agentStatusByPaneKey: {
+        [paneKey]: {
+          paneKey,
+          agentType: 'claude',
+          state: 'working',
+          prompt: '',
+          updatedAt: staleAt,
+          stateStartedAt: staleAt,
+          stateHistory: []
+        }
+      }
+    } as StoreState
+    const pane = createPane(1)
+    const transport = createMockTransport('pty-reused-stale-row')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1, 1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks()
+    const onTitleChange = createdTransportOptions[0]?.onTitleChange as
+      | ((title: string, rawTitle: string) => void)
+      | undefined
+    if (!onTitleChange) {
+      throw new Error('missing title callback')
+    }
+    onTitleChange('✦ Gemini CLI', '✦ Gemini CLI')
+
+    // A stale working row (older than AGENT_STATUS_STALE_AFTER_MS) must not veto.
+    expect(manager.setPaneGpuRendering).toHaveBeenCalledWith(1, false)
+  })
+
   it('normalizes after shell word deletion edits a typed command to omp', async () => {
     const { connectPanePty } = await import('./pty-connection')
     enableActiveRuntimeEnvironment()

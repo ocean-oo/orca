@@ -1392,15 +1392,22 @@ export function connectPanePty(
     )?.title
     return runtimeTitle ?? tabTitle ?? null
   }
-  const hasFreshPaneAgentSurface = (): boolean => {
-    const state = useAppStore.getState()
-    const entry = state.agentStatusByPaneKey[cacheKey]
-    const now = Date.now()
-    const entryIsFresh =
-      entry &&
+  // Why: a pane-scoped explicit row only counts as current ownership evidence
+  // when it is fresh and not already `done` — a stale or completed row is a
+  // leftover from a prior agent that may no longer own the shell.
+  const isFreshActivePaneAgentEntry = (
+    entry: AgentStatusEntry | undefined
+  ): entry is AgentStatusEntry => {
+    return (
+      !!entry &&
       typeof entry.updatedAt === 'number' &&
-      now - entry.updatedAt <= AGENT_STATUS_STALE_AFTER_MS
-    if (entryIsFresh && entry.state !== 'done') {
+      Date.now() - entry.updatedAt <= AGENT_STATUS_STALE_AFTER_MS &&
+      entry.state !== 'done'
+    )
+  }
+  const hasFreshPaneAgentSurface = (): boolean => {
+    const entry = useAppStore.getState().agentStatusByPaneKey[cacheKey]
+    if (isFreshActivePaneAgentEntry(entry)) {
       return true
     }
     const liveTitle = getLivePaneAgentTitle()
@@ -1496,20 +1503,20 @@ export function connectPanePty(
     )
   }
   // Why: the renderer veto (owner evidence beating a Gemini-looking title) must
-  // use only pane-scoped, current ownership. getAuthoritativePaneAgent leads
+  // use only pane-scoped, CURRENT ownership. getAuthoritativePaneAgent leads
   // with the tab-shared `tab.launchAgent` and a never-cleared
   // `paneStartup.launchAgent`, which would let a sibling split pane or a reused
-  // pane keep WebGL for a genuine Gemini terminal (#7428 regression class). So
-  // exclude launch identity here: foreground command inference and the live
-  // hook row track the current agent and clear on exit; the pane's own initial
-  // status is a last-resort startup seed. A launched OMP/Pi pane is still
-  // protected by the isGeminiTerminalTitle Pi/OMP guard, not this owner.
+  // pane keep WebGL for a genuine Gemini terminal (#7428 regression class).
+  // Launch identity is excluded, and the never-clearing startup seed
+  // (`paneStartup.initialAgentStatus`) too; a stale or `done` explicit row is
+  // ignored via the freshness predicate so a reused pane cannot inherit a prior
+  // agent's veto. Only live foreground command inference and a fresh, active
+  // hook row count. A genuine OMP/Pi pane stays protected owner-independently by
+  // the isPiAgentTitle guard inside isGeminiTerminalTitle.
   const getPaneScopedRendererOwner = (): AgentType | undefined => {
-    const state = useAppStore.getState()
+    const entry = useAppStore.getState().agentStatusByPaneKey[cacheKey]
     return (
-      commandInferredPaneAgent ??
-      state.agentStatusByPaneKey[cacheKey]?.agentType ??
-      paneStartup?.initialAgentStatus?.agent
+      commandInferredPaneAgent ?? (isFreshActivePaneAgentEntry(entry) ? entry.agentType : undefined)
     )
   }
   const clearInferredInterruptWorkingTitle = (): void => {
