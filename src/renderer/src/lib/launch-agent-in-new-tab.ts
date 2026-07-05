@@ -268,10 +268,19 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   // lands after mount the agent binary never starts; the user sees a bare shell.
   // Since both calls happen synchronously in the same React batch, the queue
   // is in place by the time the pane commits.
+  // Why: the followup path pastes the prompt as an unsubmitted draft (submit
+  // stays false), so gate the initial chat view like a `draft` launch —
+  // otherwise a default `auto-submit` followup would open native chat with no
+  // submitted turn to render.
+  const viewModePromptDelivery =
+    hasPrompt && isFollowupPath && promptDelivery === 'auto-submit' ? 'draft' : promptDelivery
   const tab = store.createTab(worktreeId, groupId, undefined, {
     launchAgent: agent,
     quickCommandLabel,
-    ...initialAgentTabViewModeProps(store.settings, { agent, promptDelivery })
+    ...initialAgentTabViewModeProps(store.settings, {
+      agent,
+      promptDelivery: viewModePromptDelivery
+    })
   })
   store.queueTabStartupCommand(tab.id, {
     command: startupPlan.launchCommand,

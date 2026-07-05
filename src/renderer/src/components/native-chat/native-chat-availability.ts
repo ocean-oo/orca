@@ -2,7 +2,7 @@ import type { Tab, TuiAgent } from '../../../../shared/types'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import { isNativeChatSupportedAgent } from '@/lib/native-chat-supported-agent'
 
-export { isNativeChatSupportedAgent } from '@/lib/native-chat-supported-agent'
+export { isNativeChatSupportedAgent }
 
 /** Inputs that decide whether a tab may toggle into the native chat view.
  *  Kept as a plain shape (not the live store) so the decision stays pure and

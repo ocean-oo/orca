@@ -176,6 +176,9 @@ export function launchPromptAsMessage(
   }
 }
 
+// Why: prune only once an assistant turn has landed after the matching user
+// text — keeping the optimistic bubble through the user-only phase avoids a
+// first-turn flash before the transcript's own copy of the turn catches up.
 export function shouldPruneLaunchPrompt(
   entry: NativeChatLaunchPrompt,
   messages: NativeChatMessage[]
