@@ -3,11 +3,8 @@ import type { PaneManager, ManagedPane } from '@/lib/pane-manager/pane-manager'
 import type { ManagedPaneInternal } from '@/lib/pane-manager/pane-manager-types'
 import type { IBuffer, IDisposable } from '@xterm/xterm'
 import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anchor'
-import {
-  detectAgentStatusFromTitle,
-  isGeminiTerminalTitle,
-  isClaudeAgent
-} from '@/lib/agent-status'
+import { detectAgentStatusFromTitle, isClaudeAgent } from '@/lib/agent-status'
+import { resolvePaneTitleDecision } from './terminal-title-evidence'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
 import { getWorktreeMapFromState } from '@/store/selectors'
@@ -2089,7 +2086,16 @@ export function connectPanePty(
   let allowInitialIdleCacheSeed = false
 
   const onTitleChange = (title: string, rawTitle: string): void => {
-    const paneTitle = normalizeCompatibleAgentTitleForOwner(title, getAuthoritativePaneAgent())
+    // Why: one owner-aware decision drives the display label, the runtime/tab
+    // title, task-completion tracking, and the renderer gate, so raw title text
+    // can no longer disable GPU behind stronger owner evidence (#7428/#7447).
+    const decision = resolvePaneTitleDecision({
+      normalizedTitle: title,
+      rawTitle,
+      ownerAgentType: getAuthoritativePaneAgent(),
+      userGpuMode: useAppStore.getState().settings?.terminalGpuAcceleration ?? 'auto'
+    })
+    const paneTitle = decision.displayTitle
     if (
       shouldSuppressCodexAutoApprovalSyntheticTitle(paneTitle, {
         paneKey: cacheKey,
@@ -2099,10 +2105,10 @@ export function connectPanePty(
     ) {
       return
     }
-    manager.setPaneGpuRendering(pane.id, !isGeminiTerminalTitle(rawTitle))
+    manager.setPaneGpuRendering(pane.id, decision.rendererPolicy.gpuEnabled)
     deps.setRuntimePaneTitle(deps.tabId, pane.id, paneTitle)
     if (syncAgentTaskCompleteTrackingEnabled()) {
-      agentCompletionCoordinator.observeTitle(rawTitle)
+      agentCompletionCoordinator.observeTitle(decision.rawTitle)
     }
     // Why: only the focused pane should drive the tab title — otherwise two
     // agents in split panes cause rapid title flickering as each emits OSC
