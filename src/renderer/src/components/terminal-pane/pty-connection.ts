@@ -1495,6 +1495,23 @@ export function connectPanePty(
       state.agentStatusByPaneKey[cacheKey]?.agentType
     )
   }
+  // Why: the renderer veto (owner evidence beating a Gemini-looking title) must
+  // use only pane-scoped, current ownership. getAuthoritativePaneAgent leads
+  // with the tab-shared `tab.launchAgent` and a never-cleared
+  // `paneStartup.launchAgent`, which would let a sibling split pane or a reused
+  // pane keep WebGL for a genuine Gemini terminal (#7428 regression class). So
+  // exclude launch identity here: foreground command inference and the live
+  // hook row track the current agent and clear on exit; the pane's own initial
+  // status is a last-resort startup seed. A launched OMP/Pi pane is still
+  // protected by the isGeminiTerminalTitle Pi/OMP guard, not this owner.
+  const getPaneScopedRendererOwner = (): AgentType | undefined => {
+    const state = useAppStore.getState()
+    return (
+      commandInferredPaneAgent ??
+      state.agentStatusByPaneKey[cacheKey]?.agentType ??
+      paneStartup?.initialAgentStatus?.agent
+    )
+  }
   const clearInferredInterruptWorkingTitle = (): void => {
     const state = useAppStore.getState()
     const currentTitle = state.runtimePaneTitlesByTabId?.[deps.tabId]?.[pane.id]
@@ -2092,7 +2109,8 @@ export function connectPanePty(
     const decision = resolvePaneTitleDecision({
       normalizedTitle: title,
       rawTitle,
-      ownerAgentType: getAuthoritativePaneAgent(),
+      displayOwnerAgentType: getAuthoritativePaneAgent(),
+      rendererOwnerAgentType: getPaneScopedRendererOwner(),
       userGpuMode: useAppStore.getState().settings?.terminalGpuAcceleration ?? 'auto'
     })
     const paneTitle = decision.displayTitle

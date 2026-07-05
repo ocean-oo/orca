@@ -41,25 +41,41 @@ describe('resolveTerminalTitleEvidence', () => {
 })
 
 describe('resolvePaneTitleDecision', () => {
-  it('derives display label and renderer policy from one owner value', () => {
+  it('derives the display label and the renderer veto from a pane-scoped OMP owner', () => {
     const decision = resolvePaneTitleDecision({
       normalizedTitle: 'Pi ready',
-      rawTitle: '✦ gemini in ~/omp',
-      ownerAgentType: 'omp',
+      rawTitle: '✦ Gemini CLI',
+      displayOwnerAgentType: 'omp',
+      rendererOwnerAgentType: 'omp',
       userGpuMode: 'auto'
     })
     expect(decision.displayTitle).toBe('OMP ready')
-    expect(decision.rawTitle).toBe('✦ gemini in ~/omp')
-    // Why: the same OMP owner that renames the label also keeps GPU on despite
-    // the Gemini glyph in the raw title.
+    expect(decision.rawTitle).toBe('✦ Gemini CLI')
+    // Why: the OMP owner renames the label and vetoes the Gemini glyph fallback.
     expect(decision.rendererPolicy.gpuEnabled).toBe(true)
+  })
+
+  it('uses the renderer owner, not the display owner, for the GPU veto', () => {
+    const decision = resolvePaneTitleDecision({
+      normalizedTitle: 'Pi ready',
+      rawTitle: '✦ Gemini CLI',
+      // Display label follows the sticky/tab-scoped owner, but the renderer veto
+      // sees no current pane-scoped owner, so the genuine Gemini pane goes DOM.
+      displayOwnerAgentType: 'omp',
+      rendererOwnerAgentType: undefined,
+      userGpuMode: 'auto'
+    })
+    expect(decision.displayTitle).toBe('OMP ready')
+    expect(decision.rendererPolicy.gpuEnabled).toBe(false)
+    expect(decision.rendererPolicy.reason).toBe('agent-compatibility')
   })
 
   it('DOM-gates a genuine Gemini pane while preserving its raw title', () => {
     const decision = resolvePaneTitleDecision({
       normalizedTitle: '✦ Gemini CLI',
       rawTitle: '✦ Gemini CLI',
-      ownerAgentType: 'gemini',
+      displayOwnerAgentType: 'gemini',
+      rendererOwnerAgentType: 'gemini',
       userGpuMode: 'auto'
     })
     expect(decision.rawTitle).toBe('✦ Gemini CLI')

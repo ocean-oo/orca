@@ -78,7 +78,13 @@ export function resolvePaneRendererPolicy(
     // title/owner content gate so a genuine Gemini pane stays DOM-gated while
     // other panes keep the gate open for a later switch to `auto`/`on`.
     const fallback = resolveGeminiCompatFallback(rawTitle, ownerAgentType)
-    return { gpuEnabled: !fallback.disable, reason: 'user-setting', confidence: 'authoritative' }
+    // Why: carry the fallback's own confidence so identical inputs report the
+    // same confidence whether the effective mode is `off` or `auto`.
+    return {
+      gpuEnabled: !fallback.disable,
+      reason: 'user-setting',
+      confidence: fallback.confidence
+    }
   }
 
   if (input.inContextLossContainment) {

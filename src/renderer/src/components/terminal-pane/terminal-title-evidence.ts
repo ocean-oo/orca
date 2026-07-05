@@ -99,22 +99,26 @@ export type ResolvePaneTitleDecisionInput = {
   /** Normalized title from the transport (may already be display-shaped). */
   normalizedTitle: string
   rawTitle: string
-  ownerAgentType: AgentType | null | undefined
+  /** Owner used for the display label — may include sticky/tab-scoped launch
+   *  identity, which is correct for the visible label. */
+  displayOwnerAgentType: AgentType | null | undefined
+  /** Owner used for the renderer veto — must be pane-scoped and current so a
+   *  sibling/reused pane's launch identity cannot keep GPU for a genuine
+   *  Gemini pane. */
+  rendererOwnerAgentType: AgentType | null | undefined
   userGpuMode: TerminalGpuAccelerationMode
   webglUnavailable?: boolean
   inContextLossContainment?: boolean
 }
 
 export function resolvePaneTitleDecision(input: ResolvePaneTitleDecisionInput): PaneTitleDecision {
-  const displayTitle = resolvePaneDisplayTitle(input.normalizedTitle, input.ownerAgentType)
+  const displayTitle = resolvePaneDisplayTitle(input.normalizedTitle, input.displayOwnerAgentType)
   const rendererPolicy = resolvePaneRendererPolicy({
     rawTitle: input.rawTitle,
-    ownerAgentType: input.ownerAgentType,
+    ownerAgentType: input.rendererOwnerAgentType,
     userGpuMode: input.userGpuMode,
-    ...(input.webglUnavailable !== undefined ? { webglUnavailable: input.webglUnavailable } : {}),
-    ...(input.inContextLossContainment !== undefined
-      ? { inContextLossContainment: input.inContextLossContainment }
-      : {})
+    webglUnavailable: input.webglUnavailable,
+    inContextLossContainment: input.inContextLossContainment
   })
   return { displayTitle, rawTitle: input.rawTitle, rendererPolicy }
 }
