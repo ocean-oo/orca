@@ -3405,6 +3405,67 @@ describe('connectPanePty', () => {
     }
   })
 
+  it('restores a claimed eviction remount from the seq-aligned mirror, not the sequence-less daemon reattach snapshot (STA-1282)', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const { __resetEvictedPaneRegistryForTest, registerEvictedPane } =
+      await import('./evicted-pane-registry')
+    __resetEvictedPaneRegistryForTest()
+
+    let currentPtyId: string | null = null
+    const transport = createMockTransport()
+    transport.getPtyId.mockImplementation(() => currentPtyId)
+    transport.connect.mockImplementation(async () => {
+      currentPtyId = 'pty-reattach'
+      // A daemon reattach snapshot is a bare string with no sequence — its tail
+      // overlaps the first live chunk and the renderer cannot trim it.
+      return { id: currentPtyId, isReattach: true, snapshot: 'daemon-snapshot-tail\r\n' }
+    })
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      ptyIdsByTabId: { 'tab-1': [] }
+    }
+
+    const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+      typeof vi.fn
+    >
+    getMainBufferSnapshot.mockResolvedValue({
+      data: 'mirror-history\r\n',
+      cols: 100,
+      rows: 30,
+      seq: 42
+    })
+
+    // A parked registry entry marks this remount as an eviction claim.
+    registerEvictedPane({
+      paneKey: makePaneKey('tab-1', LEAF_1),
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      getPtyId: () => 'pty-reattach',
+      destroy: vi.fn(),
+      releaseForClaim: vi.fn()
+    })
+
+    const pane = createPane(1)
+    const binding = connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+    try {
+      await flushAsyncTicks(30)
+      // The seq-aligned mirror restores this evicted pane...
+      expect(getMainBufferSnapshot).toHaveBeenCalled()
+      expect(pane.terminal.write).toHaveBeenCalledWith('mirror-history\r\n', expect.any(Function))
+      // ...and the sequence-less daemon reattach snapshot is never painted, so it
+      // cannot duplicate the boundary line when live output resumes.
+      expect(pane.terminal.write).not.toHaveBeenCalledWith(
+        'daemon-snapshot-tail\r\n',
+        expect.any(Function)
+      )
+    } finally {
+      binding.dispose()
+      __resetEvictedPaneRegistryForTest()
+    }
+  })
+
   it('binds a fresh spawn that resolves as a daemon reattach', async () => {
     const { connectPanePty } = await import('./pty-connection')
     let currentPtyId: string | null = null

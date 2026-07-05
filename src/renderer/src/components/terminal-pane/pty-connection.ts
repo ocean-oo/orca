@@ -5530,7 +5530,22 @@ export function connectPanePty(
       // newer than disk-recorded scrollback. If we ever return all three,
       // the daemon and relay are by definition tracking the same session
       // and only the freshest source belongs on screen.
-      if (connectResult?.snapshot) {
+      //
+      // STA-1282: an eviction remount re-subscribes to a still-live session, so
+      // the daemon/relay reattach payload's tail overlaps the first live chunk.
+      // That payload carries no sequence, so the renderer cannot trim the overlap
+      // and the boundary line duplicates. Restore such remounts from the local
+      // main-buffer mirror instead, whose snapshot seq shares the pty:data
+      // meta.seq domain (both advance from onPtyData's outputSequence), so
+      // drainPendingLiveChunksAfterSnapshot drops the overlap. coldRestore
+      // (fresh shell, no live-tail overlap) and remote relay-replay (not
+      // exercised by eviction yet) keep their existing paint.
+      const preferEvictionMirrorRestore =
+        evictionRemountReplayPending &&
+        !connectResult?.coldRestore &&
+        (Boolean(connectResult?.snapshot) || Boolean(connectResult?.replay)) &&
+        canUseMainBufferSnapshot(transport.getPtyId())
+      if (!preferEvictionMirrorRestore && connectResult?.snapshot) {
         rememberReattachPayloadAgentSignal(connectResult.snapshot, { fullScreenReplay: true })
         writeReplayData('\x1b[2J\x1b[3J\x1b[H')
         writeReplayData(connectResult.snapshot)
@@ -5546,7 +5561,7 @@ export function connectPanePty(
             window.api.pty.ackColdRestore(ptyId)
           }
         }
-      } else if (connectResult?.replay) {
+      } else if (!preferEvictionMirrorRestore && connectResult?.replay) {
         rememberReattachPayloadAgentSignal(connectResult.replay, { fullScreenReplay: true })
         // Relay replay holds the last 100 KB of raw output. The xterm may
         // already hold pre-disconnect content; clear first to avoid
@@ -5598,7 +5613,12 @@ export function connectPanePty(
       // silent evicted pane would remount history-blank and a later mirror
       // failure could never be charged. Structural reattach failures (no pty /
       // expired) charge 'error' in the early-return branches above.
-      if (connectResult?.snapshot || connectResult?.replay || connectResult?.coldRestore) {
+      if (preferEvictionMirrorRestore) {
+        // The sequence-less daemon/relay paint was skipped above; the mirror
+        // snapshot (seq-aligned) restores this evicted pane and its outcome
+        // resolves the fail-open counter, same as the no-paint case below.
+        markHiddenOutputRestoreNeeded()
+      } else if (connectResult?.snapshot || connectResult?.replay || connectResult?.coldRestore) {
         reportEvictionRemountReplayOutcome('ok')
       } else if (evictionRemountReplayPending) {
         if (canUseHiddenOutputSnapshot(transport.getPtyId())) {
