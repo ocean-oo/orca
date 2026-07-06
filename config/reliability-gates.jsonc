@@ -2,13 +2,7 @@
   "schemaVersion": 1,
   "updatedAt": "2026-07-03",
   "policy": {
-    "maturityLevels": [
-      "experimental",
-      "soak",
-      "blocking",
-      "accepted-gap",
-      "deprecated"
-    ],
+    "maturityLevels": ["experimental", "soak", "blocking", "accepted-gap", "deprecated"],
     "blockingPromotion": {
       "minimumSoakRuns": 100,
       "minimumSoakDays": 14,
@@ -23,23 +17,10 @@
       "protection": "partial",
       "owner": "terminal-runtime",
       "layer": "renderer-unit",
-      "surfaces": [
-        "terminal lifecycle",
-        "dead-session reconciliation",
-        "tab creation"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "surfaces": ["terminal lifecycle", "dead-session reconciliation", "tab creation"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the reconcile guards that exist on main@1282f5c2d. Broader targeted-hasPty resume paths, no-hot listing counts, and live Electron survival arrive with the pending reliability stack.",
       "motivatingLinks": [
@@ -119,21 +100,9 @@
         "provider session dedupe",
         "sidebar and mobile identity"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "wsl",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the ownership/dedupe suite on main@1282f5c2d. Queued/pending resume-claim indexing, same-session and wrong-session hook proofs, and Electron repeat-activation coverage arrive with the pending stack (#7008).",
       "motivatingLinks": [
@@ -147,9 +116,7 @@
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/resume-sleeping-agent-session.test.ts"
       ],
-      "testFiles": [
-        "src/renderer/src/lib/resume-sleeping-agent-session.test.ts"
-      ],
+      "testFiles": ["src/renderer/src/lib/resume-sleeping-agent-session.test.ts"],
       "assertionRefs": [
         {
           "file": "src/renderer/src/lib/resume-sleeping-agent-session.test.ts",
@@ -207,26 +174,10 @@
       "protection": "partial",
       "owner": "terminal-rendering",
       "layer": "renderer-provider-contract",
-      "surfaces": [
-        "PTY sizing",
-        "split layout",
-        "restore",
-        "hidden-to-visible transitions"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "surfaces": ["PTY sizing", "split layout", "restore", "hidden-to-visible transitions"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence on main@1282f5c2d, including #7192's runtime-mirror geometry authority slice. Shell-visible size, SSH/remote geometry, Windows ConPTY readback, and resume-time reassertion coverage arrive with the pending stack and #7006.",
       "motivatingLinks": [
@@ -328,27 +279,10 @@
       "protection": "partial",
       "owner": "terminal-rendering",
       "layer": "renderer-unit",
-      "surfaces": [
-        "terminal search",
-        "links",
-        "WebGL",
-        "decorations",
-        "keyboard navigation"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "surfaces": ["terminal search", "links", "WebGL", "decorations", "keyboard navigation"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the WebGL/link/search containment suites on main@1282f5c2d, adopting the #6949 atlas-recovery rename and #7133's reveal hardening tests. Core addon-load throw containment and live typed-input survival arrive with #7004 and a live follow-up.",
       "motivatingLinks": [
@@ -465,23 +399,9 @@
       "protection": "none",
       "owner": "startup-persistence",
       "layer": "upgrade-fixture",
-      "surfaces": [
-        "startup",
-        "upgrade",
-        "session restore",
-        "daemon restore"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "wsl"
-      ],
+      "surfaces": ["startup", "upgrade", "session restore", "daemon restore"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -517,9 +437,7 @@
         "Run second restart after current code writes upgraded state.",
         "Record startup timing and failure artifact."
       ],
-      "knownGaps": [
-        "No fixture corpus or command yet."
-      ],
+      "knownGaps": ["No fixture corpus or command yet."],
       "demotionRule": "Cannot promote without old production fixture provenance."
     },
     {
@@ -538,13 +456,8 @@
         "resize",
         "exit cleanup"
       ],
-      "platforms": [
-        "linux",
-        "macos"
-      ],
-      "providers": [
-        "local"
-      ],
+      "platforms": ["linux", "macos"],
+      "providers": ["local"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The live Electron Playwright slice exists only on the pending reliability stack. It registers here with its owning split PR.",
@@ -603,14 +516,8 @@
         "CJK repaint",
         "cursor and resize"
       ],
-      "platforms": [
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "wsl"
-      ],
+      "platforms": ["windows"],
+      "providers": ["local", "daemon", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -671,18 +578,8 @@
         "resize",
         "render"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "wsl",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The targeted-hasPty product hardening and no-hot count assertions exist only on the pending reliability stack. It registers here with its owning split PR.",
@@ -738,18 +635,8 @@
         "provider ownership",
         "diagnostics bundle"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "wsl",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The crash-breadcrumb recording and its test exist only on the pending reliability stack. It registers here with its owning split PR.",
@@ -806,20 +693,9 @@
         "xterm scheduler",
         "hidden output"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the main-process pending-output caps that exist on main@1282f5c2d. Daemon stream write(false)/drain contracts, cross-session drain priority, and bounded queued tails arrive with the pending perf slice; live flood/latency artifacts remain gaps.",
       "motivatingLinks": [
@@ -833,9 +709,7 @@
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts"
       ],
-      "testFiles": [
-        "src/main/ipc/pty.test.ts"
-      ],
+      "testFiles": ["src/main/ipc/pty.test.ts"],
       "assertionRefs": [
         {
           "file": "src/main/ipc/pty.test.ts",
@@ -899,15 +773,8 @@
         "provider ownership",
         "startup restore"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "daemon",
-        "local"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["daemon", "local"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The fail-closed degraded-daemon hardening and its contracts exist only on the pending reliability stack. It registers here with its owning split PR.",
@@ -964,16 +831,8 @@
         "reattach",
         "unknown liveness"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "ssh",
-        "remote-runtime",
-        "wsl"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["ssh", "remote-runtime", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The SSH unknown-liveness hardening and deferred-reattach contracts exist only on the pending reliability stack. It registers here with its owning split PR.",
@@ -1035,12 +894,8 @@
         "provider liveness",
         "restore"
       ],
-      "platforms": [
-        "windows"
-      ],
-      "providers": [
-        "wsl"
-      ],
+      "platforms": ["windows"],
+      "providers": ["wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -1098,17 +953,8 @@
         "metadata-only replay",
         "WebGL recovery"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The replay FIFO/burst coalescing product change and its tests exist only on the pending reliability stack; main still uses a single pendingReplayData slot. It registers here with its owning split PR.",
@@ -1167,20 +1013,9 @@
         "keyboard bypass",
         "JIS yen"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence on main@1282f5c2d; identical files to the pending stack. Real OS IME automation, Windows ConPTY post-agent reset, and the CJK/Vietnamese/Arabic matrix remain registered gaps.",
       "motivatingLinks": [
@@ -1215,9 +1050,7 @@
         },
         {
           "file": "src/renderer/src/components/terminal-pane/terminal-paste-runtime.test.ts",
-          "assertions": [
-            "paste/runtime forwarding avoids duplicate terminal payloads"
-          ]
+          "assertions": ["paste/runtime forwarding avoids duplicate terminal payloads"]
         }
       ],
       "evidenceRuns": [
@@ -1272,14 +1105,8 @@
         "TUI exit",
         "standard key input"
       ],
-      "platforms": [
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "wsl"
-      ],
+      "platforms": ["windows"],
+      "providers": ["local", "daemon", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -1335,14 +1162,8 @@
         "cursor repaint",
         "rewrite output"
       ],
-      "platforms": [
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "wsl"
-      ],
+      "platforms": ["windows"],
+      "providers": ["local", "daemon", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -1378,10 +1199,7 @@
         "Keep stress cases non-blocking until Windows runtime history is stable.",
         "Fail promotion on silent Windows environment skips."
       ],
-      "knownGaps": [
-        "No manifest command yet.",
-        "No Windows CJK/emoji repaint command is wired."
-      ],
+      "knownGaps": ["No manifest command yet.", "No Windows CJK/emoji repaint command is wired."],
       "demotionRule": "Cannot promote if the oracle is screenshot-only or environment-skipped."
     },
     {
@@ -1399,14 +1217,8 @@
         "local provider",
         "daemon provider"
       ],
-      "platforms": [
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "wsl"
-      ],
+      "platforms": ["windows"],
+      "providers": ["local", "daemon", "wsl"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -1461,17 +1273,8 @@
         "renderer CPU",
         "resize churn"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
@@ -1519,21 +1322,9 @@
       "protection": "none",
       "owner": "terminal-performance",
       "layer": "daemon-provider-contract",
-      "surfaces": [
-        "daemon stream",
-        "socket write",
-        "drain",
-        "hidden output",
-        "input starvation"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "daemon"
-      ],
+      "surfaces": ["daemon stream", "socket write", "drain", "hidden output", "input starvation"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["daemon"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The daemon batcher write(false)/drain contracts exist only on the pending reliability stack. It registers here with its owning split PR.",
@@ -1591,23 +1382,12 @@
         "workspace switch",
         "agent status"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap on main. The boot-hydration counters and their tests exist only on the pending reliability stack. It registers here with its owning split PR.",
-      "motivatingLinks": [
-        "https://github.com/stablyai/orca/pull/7002"
-      ],
+      "motivatingLinks": ["https://github.com/stablyai/orca/pull/7002"],
       "invariant": "Terminal typing, focus, resize, tab/workspace switch, and agent/session restore must not trigger unbounded store projection, git status, provider listing, or per-pane polling work.",
       "oracle": "The current executable slice instruments boot-time local PTY registry hydration with repo counts, local-vs-remote repo skips, worktree enumeration counts, adapter/session listing counts, registration/skipped-session counts, duration, and failure phase. The broader oracle still needs instrumentation that counts store selector recomputes, git status requests, provider listings, and session scans during scripted hot interactions with many worktrees and terminal panes.",
       "commands": [],
@@ -1656,20 +1436,9 @@
         "metadata-only replay",
         "clear semantics"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the merged #7133/#7173 restore and hidden-output ordering tests on main@1282f5c2d. The dirty-state exactness contract, normal-buffer clear semantics, and metadata-only replay remain pending-stack work.",
       "motivatingLinks": [
@@ -1684,9 +1453,7 @@
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts"
       ],
-      "testFiles": [
-        "src/renderer/src/components/terminal-pane/pty-connection.test.ts"
-      ],
+      "testFiles": ["src/renderer/src/components/terminal-pane/pty-connection.test.ts"],
       "assertionRefs": [
         {
           "file": "src/renderer/src/components/terminal-pane/pty-connection.test.ts",
@@ -1754,23 +1521,12 @@
         "renderer stream",
         "terminal colors"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; no executable coverage is wired yet.",
-      "motivatingLinks": [
-        "https://github.com/stablyai/orca/pull/6949"
-      ],
+      "motivatingLinks": ["https://github.com/stablyai/orca/pull/6949"],
       "invariant": "Startup OSC 10/11 color queries are answered out of band at startup only, never leak into shell/provider output streams, and ordinary runtime OSC color queries remain renderer-handled.",
       "oracle": "A provider-contract fixture records startup query replies, shell-visible bytes, renderer-visible bytes, and later runtime OSC behavior to prove no query leakage or color deadlock.",
       "commands": [],
@@ -1798,10 +1554,7 @@
         "Cover startup-only and runtime OSC paths separately.",
         "Keep screenshot evidence diagnostic only."
       ],
-      "knownGaps": [
-        "No manifest command yet.",
-        "No startup color-query contract is wired."
-      ],
+      "knownGaps": ["No manifest command yet.", "No startup color-query contract is wired."],
       "demotionRule": "Cannot promote if success is based only on absence of visible artifacts."
     },
     {
@@ -1818,21 +1571,9 @@
         "JSON subscribe fallback",
         "snapshot buffering"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows",
-        "mobile"
-      ],
-      "providers": [
-        "remote-runtime",
-        "ssh",
-        "local",
-        "daemon"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows", "mobile"],
+      "providers": ["remote-runtime", "ssh", "local", "daemon"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over the runtime-RPC stream budgets on main@1282f5c2d. The pending stack adds byte-exact 512KB/2MB/256KB/48KB budget assertions; legacy JSON subscribe parity remains undecided.",
       "motivatingLinks": [
@@ -1928,20 +1669,9 @@
         "unicode width",
         "parser configuration"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
-      "coveredPlatforms": [
-        "macos"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
       "coveredProviders": [],
       "coverageNotes": "Local macOS evidence over #7148's width-parity oracle on main@1282f5c2d. A broader byte corpus, a shared parser-construction assertion over terminal-unicode-provider.ts/pane-terminal-options.ts, and recorded agent-session corpora remain gaps.",
       "motivatingLinks": [
@@ -1953,9 +1683,7 @@
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/headless-emulator-unicode-width.test.ts"
       ],
-      "testFiles": [
-        "src/main/daemon/headless-emulator-unicode-width.test.ts"
-      ],
+      "testFiles": ["src/main/daemon/headless-emulator-unicode-width.test.ts"],
       "assertionRefs": [
         {
           "file": "src/main/daemon/headless-emulator-unicode-width.test.ts",
@@ -2012,23 +1740,9 @@
       "protection": "none",
       "owner": "terminal-rendering",
       "layer": "renderer-observability",
-      "surfaces": [
-        "hidden-output restore",
-        "snapshot replay",
-        "anomaly breadcrumbs",
-        "telemetry"
-      ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon",
-        "ssh",
-        "remote-runtime"
-      ],
+      "surfaces": ["hidden-output restore", "snapshot replay", "anomaly breadcrumbs", "telemetry"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; the anomaly-breadcrumb machinery exists in this branch but no convergence probe is implemented.",
@@ -2085,15 +1799,8 @@
         "window wake",
         "render model"
       ],
-      "platforms": [
-        "macos",
-        "linux",
-        "windows"
-      ],
-      "providers": [
-        "local",
-        "daemon"
-      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon"],
       "coveredPlatforms": [],
       "coveredProviders": [],
       "coverageNotes": "Registered gap only; the live repro harness with a refresh-repair oracle exists but is not productized into the release-blocking terminal-rendering-golden suite.",
@@ -2134,6 +1841,109 @@
         "Buffer-clean, pixels-stale variants are otherwise invisible to every buffer oracle in the manifest."
       ],
       "demotionRule": "Drop from the golden suite back to nightly diagnostic if diff thresholds cannot be kept stable across CI runners."
+    },
+    {
+      "id": "agent-hooks.cli-presence-gating",
+      "title": "Managed agent hooks only install when the target CLI is present",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "agent-hooks",
+      "layer": "main-relay-provider-contract",
+      "surfaces": [
+        "startup shell PATH probing",
+        "settings hook toggle",
+        "CLI offline hook toggle",
+        "SSH remote provider contract",
+        "agent hook ownership"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "ssh"],
+      "coverageNotes": "Deterministic main/relay tests cover local PATH gating, command overrides, PATHEXT, symlinks, config-authoritative status, ungated removal, SSH provider registration before remote presence/install, no-SFTP all-missing/version-skew paths, remote presence validation, relay timeout cleanup, and Windows remote no POSIX mutation. No live SSH host or real Windows runner evidence yet.",
+      "motivatingLinks": ["https://github.com/stablyai/orca/issues/829"],
+      "invariant": "Startup, Settings, runtime RPC, offline CLI, and SSH enable paths must not mutate third-party managed hook config without positive CLI presence or a resolvable explicit command override; disabling hooks remains ungated so stale Orca-managed hooks can be removed.",
+      "oracle": "Presence-gated install calls only installers with found local or remote CLI evidence; missing or unknown CLIs return skipped statuses and do not write config; status reads remain config-authoritative; SSH all-missing/unknown presence avoids opening SFTP.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/managed-agent-hook-manifest.test.ts src/main/agent-hooks/local-agent-cli-presence.test.ts src/main/agent-hooks/managed-agent-hook-controls.test.ts src/main/agent-hooks/install-telemetry.test.ts src/main/agent-hooks/remote-managed-hook-installers.test.ts src/main/ssh/ssh-relay-session.test.ts src/relay/agent-hook-cli-presence.test.ts src/relay/agent-hook-cli-presence-timeout.test.ts src/cli/handlers/agent-hooks.test.ts src/main/runtime/rpc/methods/client-ui.test.ts src/main/runtime/orca-runtime.test.ts"
+      ],
+      "testFiles": [
+        "src/main/agent-hooks/managed-agent-hook-manifest.test.ts",
+        "src/main/agent-hooks/local-agent-cli-presence.test.ts",
+        "src/main/agent-hooks/managed-agent-hook-controls.test.ts",
+        "src/main/agent-hooks/install-telemetry.test.ts",
+        "src/main/agent-hooks/remote-managed-hook-installers.test.ts",
+        "src/main/ssh/ssh-relay-session.test.ts",
+        "src/relay/agent-hook-cli-presence.test.ts",
+        "src/relay/agent-hook-cli-presence-timeout.test.ts",
+        "src/cli/handlers/agent-hooks.test.ts",
+        "src/main/runtime/rpc/methods/client-ui.test.ts",
+        "src/main/runtime/orca-runtime.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/agent-hooks/local-agent-cli-presence.test.ts",
+          "assertions": [
+            "deduped PATH scan only installs found CLIs",
+            "explicit override paths, Windows paths, tilde paths, PATHEXT, and symlinks are resolved before install eligibility"
+          ]
+        },
+        {
+          "file": "src/main/ssh/ssh-relay-session.test.ts",
+          "assertions": [
+            "remote presence is requested before SFTP",
+            "SSH providers register before waiting on remote CLI presence",
+            "relay presence method unavailability skips remote mutation without blocking provider registration",
+            "all-missing remote presence avoids SFTP",
+            "safe quoted override executable tokens are sent to the relay",
+            "Windows remotes skip POSIX managed hook installers"
+          ]
+        },
+        {
+          "file": "src/relay/agent-hook-cli-presence-timeout.test.ts",
+          "assertions": [
+            "login-shell PATH probes are force-killed and listeners are removed when the SSH startup budget expires"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-07-05",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-hooks/managed-agent-hook-manifest.test.ts src/main/agent-hooks/local-agent-cli-presence.test.ts src/main/agent-hooks/managed-agent-hook-controls.test.ts src/main/agent-hooks/install-telemetry.test.ts src/main/agent-hooks/remote-managed-hook-installers.test.ts src/main/ssh/ssh-relay-session.test.ts src/relay/agent-hook-cli-presence.test.ts src/relay/agent-hook-cli-presence-timeout.test.ts src/cli/handlers/agent-hooks.test.ts src/main/runtime/rpc/methods/client-ui.test.ts src/main/runtime/orca-runtime.test.ts",
+          "result": "passed",
+          "durationSeconds": 12,
+          "summary": "11 test files passed, 639 tests passed locally for managed hook CLI presence gating."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 45,
+        "scope": "focused main/relay/CLI unit tests"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "New gate; needs soak history before promotion."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "Tests fail if installer calls ignore presence maps, if offline/runtime toggles do not await application, or if SSH all-missing presence still opens SFTP. Needs saved intentional-break artifact before blocking promotion."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Local detection is bounded by deduped PATH entries times deduped executable candidates plus explicit override path probes; SSH adds one relay request and skips SFTP when no remote CLI is found. No polling, timers, or subprocess fanout."
+      },
+      "promotionCriteria": [
+        "Run in soak for at least 100 consecutive passes or 14 days across required CI platforms.",
+        "Add real Windows runner evidence for PATHEXT and Windows override paths.",
+        "Add live SSH evidence if relay transport or SSH startup ordering changes beyond the request/response contract."
+      ],
+      "knownGaps": [
+        "No live SSH host validation in this gate.",
+        "No real Windows CI runner evidence yet.",
+        "Remote relay detection uses a bounded login-shell PATH probe with relay PATH fallback, not full PTY startup overlay state."
+      ],
+      "demotionRule": "Demote or quarantine if deterministic presence fixtures flake or if a missing-CLI install escape is reported outside the modeled matrix."
     }
   ]
 }

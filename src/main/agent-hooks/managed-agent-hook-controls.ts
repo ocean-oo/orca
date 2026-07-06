@@ -1,75 +1,16 @@
-import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
-import type { HookInstallAgent } from '../../shared/telemetry-events'
+import type { AgentHookInstallStatus, AgentHookTarget } from '../../shared/agent-hook-types'
 import type { GlobalSettings } from '../../shared/types'
-import { ampHookService } from '../amp/hook-service'
-import { antigravityHookService } from '../antigravity/hook-service'
-import { claudeHookService } from '../claude/hook-service'
-import { codexHookService } from '../codex/hook-service'
-import { copilotHookService } from '../copilot/hook-service'
-import { cursorHookService } from '../cursor/hook-service'
-import { droidHookService } from '../droid/hook-service'
-import { commandCodeHookService } from '../command-code/hook-service'
-import { geminiHookService } from '../gemini/hook-service'
-import { devinHookService } from '../devin/hook-service'
-import { grokHookService } from '../grok/hook-service'
-import { hermesHookService } from '../hermes/hook-service'
-import { kimiHookService } from '../kimi/hook-service'
-import { openClaudeHookService } from '../openclaude/hook-service'
+import { MANAGED_AGENT_HOOK_MANIFEST } from './managed-agent-hook-manifest'
+import { detectLocalManagedAgentCliPresence } from './local-agent-cli-presence'
 
-export type ManagedAgentHookInstaller = readonly [HookInstallAgent, () => void]
-type ManagedHookRemover = readonly [HookInstallAgent, () => AgentHookInstallStatus]
-type ManagedHookStatusReader = readonly [HookInstallAgent, () => AgentHookInstallStatus]
+type InstallOptions = {
+  shouldHydrateShellPath?: boolean
+  onInstallError?: (agent: AgentHookInstallStatus['agent'], error: unknown) => void
+  shouldContinue?: () => boolean
+  agents?: readonly AgentHookTarget[]
+}
 
-export const MANAGED_AGENT_HOOK_INSTALLERS: readonly ManagedAgentHookInstaller[] = [
-  ['claude', () => claudeHookService.install()],
-  ['openclaude', () => openClaudeHookService.install()],
-  ['codex', () => codexHookService.install()],
-  ['gemini', () => geminiHookService.install()],
-  ['antigravity', () => antigravityHookService.install()],
-  ['amp', () => ampHookService.install()],
-  ['cursor', () => cursorHookService.install()],
-  ['droid', () => droidHookService.install()],
-  ['command-code', () => commandCodeHookService.install()],
-  ['grok', () => grokHookService.install()],
-  ['copilot', () => copilotHookService.install()],
-  ['hermes', () => hermesHookService.install()],
-  ['devin', () => devinHookService.install()],
-  ['kimi', () => kimiHookService.install()]
-]
-
-const LOCAL_MANAGED_HOOK_REMOVERS: readonly ManagedHookRemover[] = [
-  ['claude', () => claudeHookService.remove()],
-  ['openclaude', () => openClaudeHookService.remove()],
-  ['codex', () => codexHookService.remove()],
-  ['gemini', () => geminiHookService.remove()],
-  ['antigravity', () => antigravityHookService.remove()],
-  ['amp', () => ampHookService.remove()],
-  ['cursor', () => cursorHookService.remove()],
-  ['droid', () => droidHookService.remove()],
-  ['command-code', () => commandCodeHookService.remove()],
-  ['grok', () => grokHookService.remove()],
-  ['copilot', () => copilotHookService.remove()],
-  ['hermes', () => hermesHookService.remove()],
-  ['devin', () => devinHookService.remove()],
-  ['kimi', () => kimiHookService.remove()]
-]
-
-const LOCAL_MANAGED_HOOK_STATUS_READERS: readonly ManagedHookStatusReader[] = [
-  ['claude', () => claudeHookService.getStatus()],
-  ['openclaude', () => openClaudeHookService.getStatus()],
-  ['codex', () => codexHookService.getStatus()],
-  ['gemini', () => geminiHookService.getStatus()],
-  ['antigravity', () => antigravityHookService.getStatus()],
-  ['amp', () => ampHookService.getStatus()],
-  ['cursor', () => cursorHookService.getStatus()],
-  ['droid', () => droidHookService.getStatus()],
-  ['grok', () => grokHookService.getStatus()],
-  ['command-code', () => commandCodeHookService.getStatus()],
-  ['copilot', () => copilotHookService.getStatus()],
-  ['hermes', () => hermesHookService.getStatus()],
-  ['devin', () => devinHookService.getStatus()],
-  ['kimi', () => kimiHookService.getStatus()]
-]
+type ManagedHookInstaller = readonly [AgentHookInstallStatus['agent'], () => AgentHookInstallStatus]
 
 export function isAgentStatusHooksEnabled(
   settings: Pick<GlobalSettings, 'agentStatusHooksEnabled'> | null | undefined
@@ -77,17 +18,66 @@ export function isAgentStatusHooksEnabled(
   return settings?.agentStatusHooksEnabled !== false
 }
 
-export function installManagedAgentHooks(): void {
-  for (const [agent, install] of MANAGED_AGENT_HOOK_INSTALLERS) {
-    try {
-      install()
-    } catch (error) {
-      console.warn(`[agent-hooks] Failed to install ${agent} managed hooks:`, error)
-    }
+export async function installManagedAgentHooks(
+  settings?: Pick<GlobalSettings, 'agentCmdOverrides'> | null,
+  options: InstallOptions = {}
+): Promise<AgentHookInstallStatus[]> {
+  const allowedAgents = options.agents ? new Set(options.agents) : null
+  const manifestEntries = allowedAgents
+    ? MANAGED_AGENT_HOOK_MANIFEST.filter((entry) => allowedAgents.has(entry.target.agent))
+    : MANAGED_AGENT_HOOK_MANIFEST
+  let presenceByAgent
+  try {
+    presenceByAgent = await detectLocalManagedAgentCliPresence(
+      manifestEntries.map((entry) => entry.target),
+      settings,
+      { shouldHydrateShellPath: options.shouldHydrateShellPath }
+    )
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return manifestEntries.map((entry) => ({
+      agent: entry.target.agent,
+      state: 'skipped',
+      configPath: '',
+      managedHooksPresent: false,
+      detail,
+      skipReason: 'cli_presence_unknown'
+    }))
   }
+  if (options.shouldContinue && !options.shouldContinue()) {
+    return manifestEntries.map((entry) => ({
+      agent: entry.target.agent,
+      state: 'skipped',
+      configPath: '',
+      managedHooksPresent: false,
+      detail: 'Agent status hooks were disabled before install completed.',
+      skipReason: 'hooks_disabled'
+    }))
+  }
+  const installers: ManagedHookInstaller[] = []
+  const skipped: AgentHookInstallStatus[] = []
+  for (const entry of manifestEntries) {
+    const presence = presenceByAgent[entry.target.agent]
+    if (presence?.state === 'found') {
+      installers.push([entry.target.agent, entry.install])
+      continue
+    }
+    skipped.push({
+      agent: entry.target.agent,
+      state: 'skipped',
+      configPath: '',
+      managedHooksPresent: false,
+      detail: 'CLI not found; managed hook install skipped.',
+      skipReason: presence?.state === 'unknown' ? 'cli_presence_unknown' : 'cli_not_found'
+    })
+  }
+  return [...runManagedHookInstallers(installers, options.onInstallError), ...skipped]
 }
 
-function errorStatus(agent: HookInstallAgent, error: unknown): AgentHookInstallStatus {
+function errorStatus(
+  agent: AgentHookInstallStatus['agent'],
+  error: unknown
+): AgentHookInstallStatus {
   return {
     agent,
     state: 'error',
@@ -97,30 +87,54 @@ function errorStatus(agent: HookInstallAgent, error: unknown): AgentHookInstallS
   }
 }
 
-export function removeManagedAgentHooks(): AgentHookInstallStatus[] {
-  return LOCAL_MANAGED_HOOK_REMOVERS.map(([agent, remove]) => {
+function runManagedHookInstallers(
+  installers: readonly ManagedHookInstaller[],
+  onInstallError: InstallOptions['onInstallError']
+): AgentHookInstallStatus[] {
+  const results: AgentHookInstallStatus[] = []
+  for (const [agent, install] of installers) {
     try {
-      return remove()
+      results.push(install())
     } catch (error) {
-      return errorStatus(agent, error)
+      console.error(`[agent-hooks] Failed to install ${agent} managed hooks:`, error)
+      try {
+        onInstallError?.(agent, error)
+      } catch (telemetryError) {
+        console.error('[agent-hooks] Failed to record install-failure telemetry:', telemetryError)
+      }
+      results.push(errorStatus(agent, error))
+    }
+  }
+  return results
+}
+
+export function removeManagedAgentHooks(): AgentHookInstallStatus[] {
+  return MANAGED_AGENT_HOOK_MANIFEST.map((entry) => {
+    try {
+      return entry.remove()
+    } catch (error) {
+      return errorStatus(entry.target.agent, error)
     }
   })
 }
 
 export function getManagedAgentHookStatuses(): AgentHookInstallStatus[] {
-  return LOCAL_MANAGED_HOOK_STATUS_READERS.map(([agent, getStatus]) => {
+  return MANAGED_AGENT_HOOK_MANIFEST.map((entry) => {
     try {
-      return getStatus()
+      return entry.getStatus()
     } catch (error) {
-      return errorStatus(agent, error)
+      return errorStatus(entry.target.agent, error)
     }
   })
 }
 
-export function applyAgentStatusHooksEnabled(enabled: boolean): AgentHookInstallStatus[] {
+export async function applyAgentStatusHooksEnabled(
+  enabled: boolean,
+  settings?: Pick<GlobalSettings, 'agentCmdOverrides'> | null,
+  options?: InstallOptions
+): Promise<AgentHookInstallStatus[]> {
   if (enabled) {
-    installManagedAgentHooks()
-    return getManagedAgentHookStatuses()
+    return await installManagedAgentHooks(settings, options)
   }
   return removeManagedAgentHooks()
 }

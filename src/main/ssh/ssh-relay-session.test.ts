@@ -7,6 +7,7 @@ import type { SshConnection } from './ssh-connection'
 import type { Store } from '../persistence'
 import type { SshPortForwardManager } from './ssh-port-forward'
 import { AGENT_HOOK_INSTALL_PLUGINS_METHOD } from '../../shared/agent-hook-relay'
+import { REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD } from '../../shared/managed-agent-hook-targets'
 import { SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD } from '../../shared/ssh-types'
 
 const { muxRequestMock, installRemoteManagedAgentHooksMock } = vi.hoisted(() => ({
@@ -37,7 +38,10 @@ vi.mock('./ssh-channel-multiplexer', () => {
 })
 
 vi.mock('../agent-hooks/remote-managed-hook-installers', () => ({
-  installRemoteManagedAgentHooks: installRemoteManagedAgentHooksMock
+  installRemoteManagedAgentHooks: installRemoteManagedAgentHooksMock,
+  hasRemoteManagedHookInstallCandidate: (
+    presenceByAgent: Record<string, { state: 'found' | 'missing' | 'unknown' }>
+  ) => Object.values(presenceByAgent).some((presence) => presence.state === 'found')
 }))
 
 vi.mock('../providers/ssh-pty-provider', () => ({
@@ -110,6 +114,7 @@ function createMockDeps() {
   const mockConn = {} as SshConnection
   const mockStore = {
     getRepos: vi.fn().mockReturnValue([]),
+    getSettings: vi.fn().mockReturnValue({ agentCmdOverrides: {} }),
     getSshRemotePtyLeases: vi.fn().mockReturnValue([]),
     markSshRemotePtyLease: vi.fn(),
     markSshRemotePtyLeases: vi.fn()
@@ -169,9 +174,16 @@ describe('SshRelaySession', () => {
     expect(registerSshGitProvider).toHaveBeenCalledWith('target-1', expect.anything())
   })
 
-  it('installs remote managed hooks and relay-owned plugin assets before registering the SSH PTY provider', async () => {
+  it('registers SSH providers before waiting on remote managed hook presence', async () => {
     process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    let resolvePresence!: (value: { presence: { claude: { state: 'found' } } }) => void
+    const presencePromise = new Promise<{ presence: { claude: { state: 'found' } } }>((resolve) => {
+      resolvePresence = resolve
+    })
     muxRequestMock.mockImplementation(async (method: string) => {
+      if (method === REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD) {
+        return await presencePromise
+      }
       if (method === 'session.resolveHome') {
         return { resolvedPath: '/home/orca' }
       }
@@ -195,15 +207,55 @@ describe('SshRelaySession', () => {
       piExtensionSource: expect.stringContaining('/hook/pi'),
       ompExtensionSource: expect.stringContaining('/hook/omp')
     })
-    expect(mockConn.sftp).toHaveBeenCalledTimes(1)
-    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca')
-    expect(sftp.end).toHaveBeenCalledTimes(1)
-    expect(installRemoteManagedAgentHooksMock.mock.invocationCallOrder[0]).toBeLessThan(
-      muxRequestMock.mock.invocationCallOrder[installPluginsCallIndex]
+    expect(muxRequestMock).toHaveBeenCalledWith(
+      REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD,
+      expect.objectContaining({ agents: expect.arrayContaining(['claude', 'codex']) })
     )
+    expect(registerSshPtyProvider).toHaveBeenCalledWith('target-1', expect.anything())
     expect(muxRequestMock.mock.invocationCallOrder[installPluginsCallIndex]).toBeLessThan(
       vi.mocked(registerSshPtyProvider).mock.invocationCallOrder[0]
     )
+    expect(installRemoteManagedAgentHooksMock).not.toHaveBeenCalled()
+
+    resolvePresence({ presence: { claude: { state: 'found' } } })
+    await vi.waitFor(() => expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledTimes(1))
+
+    expect(mockConn.sftp).toHaveBeenCalledTimes(1)
+    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca', {
+      claude: { state: 'found' }
+    })
+    expect(sftp.end).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps SSH providers registered when remote CLI presence is unavailable', async () => {
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    muxRequestMock.mockImplementation(async (method: string) => {
+      if (method === REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD) {
+        throw new Error('method not found')
+      }
+      return { ok: true }
+    })
+    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const mockConn = {
+      sftp: vi.fn()
+    } as unknown as SshConnection
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+
+    await session.establish(mockConn)
+    await vi.waitFor(() =>
+      expect(muxRequestMock).toHaveBeenCalledWith(
+        REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD,
+        expect.anything()
+      )
+    )
+
+    expect(registerSshPtyProvider).toHaveBeenCalledWith('target-1', expect.anything())
+    expect(registerSshFilesystemProvider).toHaveBeenCalledWith('target-1', expect.anything())
+    expect(registerSshGitProvider).toHaveBeenCalledWith('target-1', expect.anything())
+    expect(mockConn.sftp).not.toHaveBeenCalled()
+    expect(installRemoteManagedAgentHooksMock).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 
   it('does not run POSIX managed hook installers on Windows remotes', async () => {
@@ -233,6 +285,66 @@ describe('SshRelaySession', () => {
     expect(
       muxRequestMock.mock.calls.some(([method]) => method === AGENT_HOOK_INSTALL_PLUGINS_METHOD)
     ).toBe(true)
+  })
+
+  it('does not open SFTP when remote CLI presence is all missing', async () => {
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    muxRequestMock.mockImplementation(async (method: string) => {
+      if (method === REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD) {
+        return { presence: { claude: { state: 'missing' }, codex: { state: 'unknown' } } }
+      }
+      if (method === 'session.resolveHome') {
+        return { resolvedPath: '/home/orca' }
+      }
+      return { ok: true }
+    })
+    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const mockConn = {
+      sftp: vi.fn()
+    } as unknown as SshConnection
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+
+    await session.establish(mockConn)
+
+    expect(mockConn.sftp).not.toHaveBeenCalled()
+    expect(installRemoteManagedAgentHooksMock).not.toHaveBeenCalled()
+  })
+
+  it('passes safe quoted override executable paths to remote CLI presence detection', async () => {
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    const overridePath = '/home/orca/AI Tools/codex'
+    muxRequestMock.mockImplementation(async (method: string) => {
+      if (method === REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD) {
+        return { presence: { codex: { state: 'found' } } }
+      }
+      if (method === 'session.resolveHome') {
+        return { resolvedPath: '/home/orca' }
+      }
+      return { ok: true }
+    })
+    const sftp = { end: vi.fn() }
+    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    vi.mocked(mockStore.getSettings).mockReturnValue({
+      agentCmdOverrides: { codex: `"${overridePath}" --profile work` }
+    } as never)
+    const mockConn = {
+      sftp: vi.fn().mockResolvedValue(sftp)
+    } as unknown as SshConnection
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+
+    await session.establish(mockConn)
+
+    expect(muxRequestMock).toHaveBeenCalledWith(
+      REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD,
+      expect.objectContaining({
+        overrideExecutableTokens: expect.objectContaining({ codex: overridePath })
+      })
+    )
+    await vi.waitFor(() =>
+      expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca', {
+        codex: { state: 'found' }
+      })
+    )
   })
 
   it('does not register providers if dispose wins during initial plugin sync', async () => {

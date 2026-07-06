@@ -61,6 +61,8 @@ import { resolveSetupAgentSequenceLaunchCommand } from '../shared/setup-agent-se
 import { pickRemoteCliEnv } from './remote-cli-env'
 import { remoteCliRequestTimeoutMs } from './remote-cli-timeout'
 import { shouldReadRemoteCliStdin } from './remote-cli-stdin'
+import { detectAgentHookCliPresence } from './agent-hook-cli-presence'
+import { REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD } from '../shared/managed-agent-hook-targets'
 
 const DEFAULT_GRACE_MS = DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS * 1000
 const SOCK_NAME = 'relay.sock'
@@ -420,6 +422,10 @@ async function main(): Promise<void> {
       return { resolvedPath: resolve(homedir(), inputPath.slice(2)) }
     }
     return { resolvedPath: inputPath }
+  })
+
+  dispatcher.onRequest(REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD, async (params) => {
+    return await detectAgentHookCliPresence(params)
   })
 
   const ptyHandler = new PtyHandler(dispatcher, graceTimeMs)

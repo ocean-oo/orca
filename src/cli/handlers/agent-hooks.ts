@@ -7,7 +7,7 @@ import { printResult } from '../format'
 import { RuntimeClientError, type RuntimeClient, type RuntimeRpcSuccess } from '../runtime-client'
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import { getDefaultPersistedState } from '../../shared/constants'
-import type { PersistedState } from '../../shared/types'
+import type { GlobalSettings, PersistedState } from '../../shared/types'
 import {
   applyAgentStatusHooksEnabled,
   getManagedAgentHookStatuses
@@ -80,7 +80,12 @@ function readEnabledFromDisk(): boolean {
   return state.settings?.agentStatusHooksEnabled !== false
 }
 
-function updateEnabledOnDisk(enabled: boolean): string {
+type OfflineSettingsUpdateResult = {
+  settingsPath: string
+  settings: Pick<GlobalSettings, 'agentCmdOverrides'>
+}
+
+function updateEnabledOnDisk(enabled: boolean): OfflineSettingsUpdateResult {
   const dataPath = getDataPath()
   const state = readPersistedState(dataPath)
   const experimentalNewWorktreeCardStyle =
@@ -94,7 +99,12 @@ function updateEnabledOnDisk(enabled: boolean): string {
     agentStatusHooksEnabled: enabled
   }
   writePersistedState(dataPath, state)
-  return dataPath
+  return {
+    settingsPath: dataPath,
+    settings: {
+      agentCmdOverrides: state.settings.agentCmdOverrides ?? {}
+    }
+  }
 }
 
 async function updateRunningRuntime(client: RuntimeClient, enabled: boolean): Promise<boolean> {
@@ -127,7 +137,12 @@ function localSuccess<TResult>(result: TResult): RuntimeRpcSuccess<TResult> {
 
 function formatAgentHookCommandResult(result: AgentHookCommandResult): string {
   const statusSummary = result.statuses
-    .map((status) => `${status.agent}: ${status.state}`)
+    .map((status) => {
+      const reason = status.skipReason ?? status.detail
+      return reason
+        ? `${status.agent}: ${status.state} (${reason})`
+        : `${status.agent}: ${status.state}`
+    })
     .join('\n')
   return [
     `agentStatusHooksEnabled: ${result.enabled}`,
@@ -144,10 +159,15 @@ async function setAgentHooksEnabled(
   enabled: boolean
 ): Promise<AgentHookCommandResult> {
   const updatedRuntime = await updateRunningRuntime(client, enabled)
-  const settingsPath = updatedRuntime ? getDataPath() : updateEnabledOnDisk(enabled)
-  const statuses = updatedRuntime
-    ? getManagedAgentHookStatuses()
-    : applyAgentStatusHooksEnabled(enabled)
+  let settingsPath = getDataPath()
+  let statuses: AgentHookInstallStatus[]
+  if (updatedRuntime) {
+    statuses = getManagedAgentHookStatuses()
+  } else {
+    const offlineUpdate = updateEnabledOnDisk(enabled)
+    settingsPath = offlineUpdate.settingsPath
+    statuses = await applyAgentStatusHooksEnabled(enabled, offlineUpdate.settings)
+  }
   return {
     enabled,
     settingsPath,

@@ -19,7 +19,11 @@ import { toAppSshPtyId, toRelaySshPtyId } from '../providers/ssh-pty-id'
 import { SshFilesystemProvider } from '../providers/ssh-filesystem-provider'
 import { SshGitProvider } from '../providers/ssh-git-provider'
 import { agentHookServer } from '../agent-hooks/server'
-import { installRemoteManagedAgentHooks } from '../agent-hooks/remote-managed-hook-installers'
+import {
+  hasRemoteManagedHookInstallCandidate,
+  installRemoteManagedAgentHooks,
+  type RemoteManagedHookPresenceByAgent
+} from '../agent-hooks/remote-managed-hook-installers'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import {
   AGENT_HOOK_INSTALL_PLUGINS_METHOD,
@@ -27,6 +31,15 @@ import {
   AGENT_HOOK_REQUEST_REPLAY_METHOD,
   isRemoteAgentHooksEnabled
 } from '../../shared/agent-hook-relay'
+import {
+  MANAGED_AGENT_HOOK_TARGETS,
+  REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD,
+  type AgentHookCliPresenceResponse
+} from '../../shared/managed-agent-hook-targets'
+import {
+  extractExecutableToken,
+  isSafeOverrideExecutableToken
+} from '../../shared/managed-agent-command-token'
 import { _internals as openCodeInternals } from '../opencode/hook-service'
 import { getPiAgentStatusExtensionSource } from '../pi/agent-status-extension-source'
 import {
@@ -545,11 +558,6 @@ export class SshRelaySession {
       return false
     }
 
-    await this.installManagedHooksOnRemote(mux)
-    if (shouldContinue && !shouldContinue()) {
-      return false
-    }
-
     await this.installPluginsOnRelay(mux)
     if (shouldContinue && !shouldContinue()) {
       return false
@@ -592,6 +600,9 @@ export class SshRelaySession {
     this.wireUpPtyEvents(ptyProvider)
     this.wireUpAgentHookEvents(mux)
     this.wireUpRemoteWorkspaceEvents(mux)
+    // Why: remote CLI presence may need a slow login-shell PATH probe. Keep
+    // SSH providers usable while hook installation remains best-effort.
+    void this.installManagedHooksOnRemote(mux, shouldContinue)
     return true
   }
 
@@ -606,10 +617,11 @@ export class SshRelaySession {
 
   // Why: the relay can inject ORCA_AGENT_HOOK_* env into SSH PTYs, but
   // hook-script agents (Claude/Codex/Gemini/etc.) still need their config
-  // files on the remote host to call Orca's managed script. Install those
-  // configs before registering the PTY provider so newly spawned agent panes
-  // report status from their first prompt.
-  private async installManagedHooksOnRemote(mux: SshChannelMultiplexer): Promise<void> {
+  // files on the remote host to call Orca's managed script.
+  private async installManagedHooksOnRemote(
+    mux: SshChannelMultiplexer,
+    shouldContinue?: () => boolean
+  ): Promise<void> {
     if (!isRemoteAgentHooksEnabled() || !this.areAgentStatusHooksEnabled()) {
       return
     }
@@ -619,6 +631,34 @@ export class SshRelaySession {
     ) {
       // Why: managed hook installers currently emit POSIX hook scripts and paths.
       // Windows remotes still get relay-injected env plus plugin overlays.
+      return
+    }
+
+    let presenceByAgent: RemoteManagedHookPresenceByAgent
+    try {
+      const response = (await mux.request(REMOTE_AGENT_HOOK_CLI_PRESENCE_METHOD, {
+        agents: MANAGED_AGENT_HOOK_TARGETS.filter(
+          (target) => target.supportsRemoteManagedHooks
+        ).map((target) => target.agent),
+        overrideExecutableTokens: this.getRemoteHookOverrideExecutableTokens()
+      })) as AgentHookCliPresenceResponse
+      if (typeof response.presence !== 'object' || response.presence === null) {
+        throw new Error('invalid remote CLI presence response')
+      }
+      presenceByAgent = response.presence
+    } catch (error) {
+      console.warn(
+        `[ssh-relay-session] skipped remote managed hook install: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+      return
+    }
+    if (shouldContinue && !shouldContinue()) {
+      return
+    }
+
+    if (!hasRemoteManagedHookInstallCandidate(presenceByAgent)) {
       return
     }
 
@@ -642,11 +682,14 @@ export class SshRelaySession {
       )
       return
     }
+    if (shouldContinue && !shouldContinue()) {
+      return
+    }
 
     let sftp: Awaited<ReturnType<SshConnection['sftp']>> | null = null
     try {
       sftp = await this.requireReadyConnection().sftp()
-      await installRemoteManagedAgentHooks(sftp, remoteHome)
+      await installRemoteManagedAgentHooks(sftp, remoteHome, presenceByAgent)
     } catch (error) {
       console.warn(
         `[ssh-relay-session] remote managed hook install failed for ${this.targetId}: ${
@@ -656,6 +699,21 @@ export class SshRelaySession {
     } finally {
       ;(sftp as { end?: () => void } | null)?.end?.()
     }
+  }
+
+  private getRemoteHookOverrideExecutableTokens(): Record<string, string> {
+    const overrides = this.store.getSettings?.().agentCmdOverrides ?? {}
+    const result: Record<string, string> = {}
+    for (const target of MANAGED_AGENT_HOOK_TARGETS) {
+      if (!target.supportsRemoteManagedHooks) {
+        continue
+      }
+      const token = extractExecutableToken(overrides[target.tuiAgent], { platform: 'linux' })
+      if (token && isSafeOverrideExecutableToken(token)) {
+        result[target.agent] = token
+      }
+    }
+    return result
   }
 
   private async installRemoteOrcaCliShim(): Promise<void> {

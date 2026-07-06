@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import type { Store } from '../persistence'
 import type { GlobalSettings, PersistedState } from '../../shared/types'
 import { listSystemFontFamilies } from '../system-fonts'
@@ -11,6 +11,7 @@ import { SETTINGS_CHANGED_WHITELIST, type SettingsChangedKey } from '../../share
 import type { AgentAwakeService } from '../agent-awake-service'
 import { sanitizeFloatingWorkspaceDirectorySetting } from './floating-workspace-directory'
 import { applyAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
+import { recordManagedHookInstallFailure } from '../agent-hooks/install-telemetry'
 import { applyElectronProxySettings } from '../network/proxy-settings'
 import { normalizeProxyBypassRules, normalizeProxyUrl } from '../../shared/network-proxy'
 import { normalizeAppIconId } from '../../shared/app-icon'
@@ -118,7 +119,10 @@ export function registerSettingsHandlers(
       before.agentStatusHooksEnabled !== result.agentStatusHooksEnabled
     ) {
       try {
-        applyAgentStatusHooksEnabled(result.agentStatusHooksEnabled)
+        await applyAgentStatusHooksEnabled(result.agentStatusHooksEnabled, result, {
+          shouldHydrateShellPath: app.isPackaged && process.platform !== 'win32',
+          onInstallError: recordManagedHookInstallFailure
+        })
       } catch (error) {
         console.warn('[settings] failed to apply agentStatusHooksEnabled:', error)
       }

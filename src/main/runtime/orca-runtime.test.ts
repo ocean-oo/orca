@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Why: runtime behavior is stateful and cross-cutting, so these tests stay in one file to preserve the end-to-end invariants around handles, waits, and graph sync. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as GitUsernameModule from '../git/git-username'
+import type * as ManagedAgentHookControlsModule from '../agent-hooks/managed-agent-hook-controls'
 import { performance } from 'node:perf_hooks'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
@@ -202,7 +203,8 @@ const {
   getGitLabWorkItemDetailsMock,
   updateGitLabMRReviewersMock,
   getIssueMock,
-  deleteWorktreeHistoryDirMock
+  deleteWorktreeHistoryDirMock,
+  applyAgentStatusHooksEnabledMock
 } = vi.hoisted(() => {
   // Why: SSH runtime tests register providers through the public dispatcher API,
   // so the mock needs the same registry semantics as the real module.
@@ -296,7 +298,8 @@ const {
     getGitLabWorkItemDetailsMock: vi.fn(),
     updateGitLabMRReviewersMock: vi.fn(),
     getIssueMock: vi.fn(),
-    deleteWorktreeHistoryDirMock: vi.fn()
+    deleteWorktreeHistoryDirMock: vi.fn(),
+    applyAgentStatusHooksEnabledMock: vi.fn()
   }
 })
 
@@ -338,6 +341,14 @@ vi.mock('../ipc/preflight', () => ({
   detectInstalledAgentsWithShellPathHydration: detectInstalledAgentsWithShellPathHydrationMock,
   detectRemoteAgents: detectRemoteAgentsMock
 }))
+
+vi.mock('../agent-hooks/managed-agent-hook-controls', async (importOriginal) => {
+  const actual = await importOriginal<typeof ManagedAgentHookControlsModule>()
+  return {
+    ...actual,
+    applyAgentStatusHooksEnabled: applyAgentStatusHooksEnabledMock
+  }
+})
 
 vi.mock('../agent-trust-presets', () => ({
   markCodexProjectTrusted: markCodexProjectTrustedMock,
@@ -706,6 +717,8 @@ function resetRuntimeTestMocks(): void {
   updateGitLabMRReviewersMock.mockResolvedValue({ ok: true, reviewers: [] })
   getIssueMock.mockReset()
   getIssueMock.mockResolvedValue(null)
+  applyAgentStatusHooksEnabledMock.mockReset()
+  applyAgentStatusHooksEnabledMock.mockResolvedValue([])
 }
 
 beforeEach(resetRuntimeTestMocks)
@@ -1248,7 +1261,7 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
-  it('accepts runtime-backed setting updates from paired clients', () => {
+  it('accepts runtime-backed setting updates from paired clients', async () => {
     let settings = {
       ...store.getSettings(),
       experimentalNewWorktreeCardStyle: false,
@@ -1267,7 +1280,7 @@ describe('OrcaRuntimeService', () => {
     } as never)
 
     expect(
-      runtime.updateClientSettings({
+      await runtime.updateClientSettings({
         experimentalNewWorktreeCardStyle: true,
         compactWorktreeCards: true,
         minimaxGroupId: 'group-42',
@@ -1294,6 +1307,49 @@ describe('OrcaRuntimeService', () => {
       minimaxGroupId: 'group-42',
       minimaxUsageModels: 'general,abab6.5'
     })
+  })
+
+  it('awaits hook application when paired clients toggle agent status hooks', async () => {
+    let settings = {
+      ...store.getSettings(),
+      agentCmdOverrides: { codex: 'codex --profile work' },
+      agentStatusHooksEnabled: true
+    }
+    const updateSettings = vi.fn((updates: Partial<typeof settings>) => {
+      settings = { ...settings, ...updates }
+      return settings
+    })
+    const runtime = new OrcaRuntimeService({
+      ...store,
+      getSettings: () => settings,
+      updateSettings
+    } as never)
+    let resolveHookApplication!: () => void
+    applyAgentStatusHooksEnabledMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveHookApplication = resolve
+      })
+    )
+
+    let resolved = false
+    const updatePromise = runtime
+      .updateClientSettings({ agentStatusHooksEnabled: false })
+      .then((result) => {
+        resolved = true
+        return result
+      })
+
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+    expect(applyAgentStatusHooksEnabledMock).toHaveBeenCalledWith(
+      false,
+      { agentCmdOverrides: { codex: 'codex --profile work' } },
+      expect.objectContaining({ onInstallError: expect.any(Function) })
+    )
+
+    resolveHookApplication()
+
+    await expect(updatePromise).resolves.toMatchObject({ agentStatusHooksEnabled: false })
   })
 
   it('rejects relative paths for runtime nested repo scan/import', async () => {

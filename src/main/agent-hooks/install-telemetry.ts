@@ -5,6 +5,7 @@
 // closure-style loop lost it.
 
 import type { HookInstallAgent } from '../../shared/telemetry-events'
+import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import { track } from '../telemetry/client'
 
 // Why: install errors are about config-file shape (malformed JSON, ACL
@@ -14,7 +15,8 @@ import { track } from '../telemetry/client'
 // so truncation must happen here at the call site.
 const ERROR_MESSAGE_MAX_LEN = 200
 
-export type ManagedHookInstaller = readonly [HookInstallAgent, () => void]
+export type ManagedHookInstaller = readonly [HookInstallAgent, () => AgentHookInstallStatus]
+export type ManagedHookInstallErrorRecorder = (agent: HookInstallAgent, error: unknown) => void
 
 function describeError(error: unknown): string {
   if (error instanceof Error) {
@@ -31,23 +33,47 @@ function describeError(error: unknown): string {
   }
 }
 
-export function runManagedHookInstallers(installers: readonly ManagedHookInstaller[]): void {
+function errorStatus(agent: HookInstallAgent, error: unknown): AgentHookInstallStatus {
+  return {
+    agent,
+    state: 'error',
+    configPath: '',
+    managedHooksPresent: false,
+    detail: describeError(error)
+  }
+}
+
+export function recordManagedHookInstallFailure(agent: HookInstallAgent, error: unknown): void {
+  // Why: telemetry must not break fail-open. A throw inside `track` (e.g.
+  // a corrupted settings store the resolveConsent path reads from) would
+  // otherwise abort the for-loop and skip later agents' installers.
+  try {
+    track('agent_hook_install_failed', {
+      agent,
+      error_message: describeError(error).slice(0, ERROR_MESSAGE_MAX_LEN)
+    })
+  } catch (telemetryError) {
+    console.error('[agent-hooks] Failed to record install-failure telemetry:', telemetryError)
+  }
+}
+
+export function runManagedHookInstallers(
+  installers: readonly ManagedHookInstaller[],
+  onInstallError: ManagedHookInstallErrorRecorder = recordManagedHookInstallFailure
+): AgentHookInstallStatus[] {
+  const results: AgentHookInstallStatus[] = []
   for (const [agent, install] of installers) {
     try {
-      install()
+      results.push(install())
     } catch (error) {
       console.error(`[agent-hooks] Failed to install ${agent} managed hooks:`, error)
-      // Why: telemetry must not break fail-open. A throw inside `track` (e.g.
-      // a corrupted settings store the resolveConsent path reads from) would
-      // otherwise abort the for-loop and skip later agents' installers.
       try {
-        track('agent_hook_install_failed', {
-          agent,
-          error_message: describeError(error).slice(0, ERROR_MESSAGE_MAX_LEN)
-        })
+        onInstallError(agent, error)
       } catch (telemetryError) {
         console.error('[agent-hooks] Failed to record install-failure telemetry:', telemetryError)
       }
+      results.push(errorStatus(agent, error))
     }
   }
+  return results
 }

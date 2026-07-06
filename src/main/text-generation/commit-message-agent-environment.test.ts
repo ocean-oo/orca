@@ -124,6 +124,19 @@ describe('prepareLocalCommitMessageAgentEnv', () => {
     })
   })
 
+  it('awaits async Codex launch preparation before setting CODEX_HOME', async () => {
+    const result = await prepareLocalCommitMessageAgentEnv('codex', {
+      prepareForCodexLaunch: async () => '/managed/codex-home'
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      env: expect.objectContaining({
+        CODEX_HOME: '/managed/codex-home'
+      })
+    })
+  })
+
   it('does not pass WSL managed Codex homes to host-local commit generation', async () => {
     process.env.CODEX_HOME = 'C:\\Users\\tester\\.codex'
 

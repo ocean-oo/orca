@@ -73,12 +73,22 @@ async function runAgentHooksOff(userDataPath: string): Promise<void> {
   await main(['agent', 'hooks', 'off', '--json'], userDataPath)
 }
 
+async function runAgentHooksOn(userDataPath: string): Promise<void> {
+  getDefaultUserDataPathMock.mockReturnValue(userDataPath)
+  await main(['agent', 'hooks', 'on', '--json'], userDataPath)
+}
+
+async function runAgentHooksOnText(userDataPath: string): Promise<void> {
+  getDefaultUserDataPathMock.mockReturnValue(userDataPath)
+  await main(['agent', 'hooks', 'on'], userDataPath)
+}
+
 describe('agent hooks CLI handler', () => {
   let userDataPath: string
 
   beforeEach(() => {
     userDataPath = mkdtempSync(join(tmpdir(), 'orca-agent-hooks-cli-'))
-    applyAgentStatusHooksEnabledMock.mockReturnValue([])
+    applyAgentStatusHooksEnabledMock.mockResolvedValue([])
     callMock.mockReset()
     getCliStatusMock.mockClear()
     getManagedAgentHookStatusesMock.mockReturnValue([])
@@ -119,5 +129,59 @@ describe('agent hooks CLI handler', () => {
     await runAgentHooksOff(userDataPath)
 
     expect(readDataFile(userDataPath).settings.experimentalNewWorktreeCardStyle).toBe(false)
+  })
+
+  it('awaits offline hook application before formatting the command result', async () => {
+    applyAgentStatusHooksEnabledMock.mockResolvedValue([
+      {
+        agent: 'claude',
+        state: 'skipped',
+        skipReason: 'cli_not_found'
+      }
+    ])
+
+    await runAgentHooksOff(userDataPath)
+
+    const printed = vi.mocked(console.log).mock.calls.at(-1)?.[0]
+    const parsed = JSON.parse(String(printed)) as {
+      result: { statuses: { agent: string; state: string; skipReason: string }[] }
+    }
+    expect(parsed.result.statuses).toEqual([
+      {
+        agent: 'claude',
+        state: 'skipped',
+        skipReason: 'cli_not_found'
+      }
+    ])
+  })
+
+  it('passes persisted command overrides into offline hook application', async () => {
+    const existing = getDefaultPersistedState(userDataPath)
+    existing.settings.agentCmdOverrides = { codex: '/custom/bin/codex --profile work' }
+    writeDataFile(userDataPath, existing)
+
+    await runAgentHooksOn(userDataPath)
+
+    expect(applyAgentStatusHooksEnabledMock).toHaveBeenCalledWith(true, {
+      agentCmdOverrides: { codex: '/custom/bin/codex --profile work' }
+    })
+  })
+
+  it('includes skipped hook reasons in human-readable output', async () => {
+    applyAgentStatusHooksEnabledMock.mockResolvedValue([
+      {
+        agent: 'claude',
+        state: 'skipped',
+        configPath: '',
+        managedHooksPresent: false,
+        detail: 'CLI not found; managed hook install skipped.',
+        skipReason: 'cli_not_found'
+      }
+    ])
+
+    await runAgentHooksOnText(userDataPath)
+
+    const printed = vi.mocked(console.log).mock.calls.at(-1)?.[0]
+    expect(String(printed)).toContain('claude: skipped (cli_not_found)')
   })
 })
