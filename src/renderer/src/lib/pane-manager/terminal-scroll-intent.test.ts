@@ -270,6 +270,56 @@ describe('terminal scroll intent', () => {
     disposable.dispose()
   })
 
+  it.each(['xterm-scrollbar', 'xterm-slider'])(
+    'tracks pointer-driven xterm %s scrolls as user intent',
+    (scrollbarClassName) => {
+      vi.stubGlobal('Element', TestElement)
+      const terminal = createTerminal({ viewportY: 100, baseY: 100 })
+      const hostElement = new TestElement()
+      const scrollbarTarget = new TestElement(scrollbarClassName)
+      const scrollbarChild = new TestElement('xterm-scrollbar-child')
+      hostElement.append(scrollbarTarget)
+      scrollbarTarget.append(scrollbarChild)
+      const host = hostElement as unknown as HTMLElement
+      const disposable = attachTerminalScrollIntentTracking(terminal, host)
+
+      terminal.buffer.active.viewportY = 50
+      host.dispatchEvent(new Event('scroll'))
+      expect(getTerminalScrollIntentKind(terminal)).toBe('followOutput')
+
+      scrollbarChild.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      scrollbarChild.dispatchEvent(new Event('scroll', { bubbles: true }))
+      expect(getTerminalScrollIntentKind(terminal)).toBe('pinnedViewport')
+
+      disposable.dispose()
+    }
+  )
+
+  it('restores a scrollbar-dragged viewport instead of stale top intent', () => {
+    vi.stubGlobal('Element', TestElement)
+    const terminal = createTerminal({ viewportY: 0, baseY: 600 })
+    const hostElement = new TestElement()
+    const scrollbar = new TestElement('xterm-scrollbar')
+    const slider = new TestElement('xterm-slider')
+    hostElement.append(scrollbar)
+    scrollbar.append(slider)
+    const host = hostElement as unknown as HTMLElement
+    const disposable = attachTerminalScrollIntentTracking(terminal, host, 'terminal-1')
+
+    expect(getTerminalScrollIntentKind(terminal)).toBe('pinnedViewport')
+
+    terminal.buffer.active.viewportY = 572
+    slider.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    slider.dispatchEvent(new Event('scroll', { bubbles: true }))
+
+    terminal.buffer.active.viewportY = 0
+    enforceTerminalCurrentScrollIntent(terminal)
+
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(572)
+    expect(terminal.buffer.active.viewportY).toBe(572)
+    disposable.dispose()
+  })
+
   it('does not treat terminal body pointer activity as scrollbar intent', () => {
     vi.stubGlobal('Element', TestElement)
     const terminal = createTerminal({ viewportY: 100, baseY: 100 })

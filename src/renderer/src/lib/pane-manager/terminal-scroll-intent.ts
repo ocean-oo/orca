@@ -42,6 +42,11 @@ const terminalScrollIntentKeyByTerminal = new WeakMap<
 const terminalScrollIntentByKey = new Map<TerminalScrollIntentKey, TerminalScrollIntent>()
 
 const BOTTOM_TOLERANCE_ROWS = 1
+const XTERM_SCROLL_INTENT_POINTER_TARGET_CLASSES = [
+  'xterm-viewport',
+  'xterm-scrollbar',
+  'xterm-slider'
+] as const
 
 function readBufferSnapshot(
   terminal: TerminalScrollIntentTarget
@@ -118,6 +123,16 @@ function safeScrollCall(fn: () => void): boolean {
     }
     throw err
   }
+}
+
+function isTerminalScrollIntentPointerTarget(target: EventTarget | null): target is Element {
+  if (typeof Element === 'undefined' || !(target instanceof Element)) {
+    return false
+  }
+  // xterm's custom scrollbar uses separate thumb/track nodes from the viewport.
+  return XTERM_SCROLL_INTENT_POINTER_TARGET_CLASSES.some(
+    (className) => target.classList.contains(className) || target.closest(`.${className}`) !== null
+  )
 }
 
 export function markTerminalFollowOutput(terminal: TerminalScrollIntentTarget): void {
@@ -255,11 +270,7 @@ export function attachTerminalScrollIntentTracking(
   }
 
   const onPointerDown = (event: PointerEvent): void => {
-    const target = event.target
-    pointerScrollActive =
-      typeof Element !== 'undefined' &&
-      target instanceof Element &&
-      (target.classList.contains('xterm-viewport') || target.closest('.xterm-viewport') !== null)
+    pointerScrollActive = isTerminalScrollIntentPointerTarget(event.target)
   }
 
   const onPointerDone = (): void => {
