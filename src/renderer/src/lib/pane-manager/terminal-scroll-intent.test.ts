@@ -53,12 +53,15 @@ class TestElement extends EventTarget {
   }
 
   closest(selector: string): TestElement | null {
-    if (!selector.startsWith('.')) {
-      return null
-    }
-    const className = selector.slice(1)
-    if (this.classList.contains(className)) {
-      return this
+    for (const candidate of selector.split(',')) {
+      const trimmed = candidate.trim()
+      if (!trimmed.startsWith('.')) {
+        continue
+      }
+      const className = trimmed.slice(1)
+      if (this.classList.contains(className)) {
+        return this
+      }
     }
     return this.parentElement?.closest(selector) ?? null
   }

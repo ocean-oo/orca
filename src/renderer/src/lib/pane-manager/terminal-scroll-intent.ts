@@ -47,6 +47,9 @@ const XTERM_SCROLL_INTENT_POINTER_TARGET_CLASSES = [
   'xterm-scrollbar',
   'xterm-slider'
 ] as const
+const XTERM_SCROLL_INTENT_POINTER_TARGET_SELECTOR = XTERM_SCROLL_INTENT_POINTER_TARGET_CLASSES.map(
+  (className) => `.${className}`
+).join(',')
 
 function readBufferSnapshot(
   terminal: TerminalScrollIntentTarget
@@ -130,9 +133,7 @@ function isTerminalScrollIntentPointerTarget(target: EventTarget | null): target
     return false
   }
   // xterm's custom scrollbar uses separate thumb/track nodes from the viewport.
-  return XTERM_SCROLL_INTENT_POINTER_TARGET_CLASSES.some(
-    (className) => target.classList.contains(className) || target.closest(`.${className}`) !== null
-  )
+  return target.closest(XTERM_SCROLL_INTENT_POINTER_TARGET_SELECTOR) !== null
 }
 
 export function markTerminalFollowOutput(terminal: TerminalScrollIntentTarget): void {
