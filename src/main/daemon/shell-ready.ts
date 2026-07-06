@@ -195,6 +195,23 @@ if [[ -n "$__orca_debug_trap_spec" ]]; then
 fi
 unset __orca_debug_trap_spec __orca_debug_trap_command
 unset -f __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
+# Why: bash-preexec (pulled in by iTerm2/starship setups) re-arms its own DEBUG
+# trap at the first prompt, silencing ours. Register with its preexec_functions
+# array too. Bash holds exactly one DEBUG trap, so only one dispatch path is
+# ever live and C cannot double-emit; the __orca_in_command gate is a backstop.
+__orca_osc133_preexec_bp() {
+  [[ -z "\${__orca_in_command:-}" ]] || return
+  [[ -z "\${__orca_in_prompt_command:-}" ]] || return
+  case "\${1:-}" in
+    *__orca_osc133_precmd*|*__orca_osc133_prompt_done*|*__orca_prompt_mark*) return ;;
+  esac
+  printf "\\033]133;C\\007"
+  __orca_in_command=1
+}
+case " \${preexec_functions[*]:-} " in
+  *" __orca_osc133_preexec_bp "*) ;;
+  *) preexec_functions+=(__orca_osc133_preexec_bp) ;;
+esac
 # Why: arm DEBUG after wrapper setup; otherwise bash treats our own rcfile
 # commands as a foreground command and emits a fake C/D before the first prompt.
 trap '__orca_osc133_preexec' DEBUG

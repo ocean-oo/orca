@@ -5,6 +5,7 @@ import type { IBuffer, IDisposable } from '@xterm/xterm'
 import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anchor'
 import {
   detectAgentStatusFromTitle,
+  agentTypeToIconAgent,
   isGeminiTerminalTitle,
   isClaudeAgent
 } from '@/lib/agent-status'
@@ -164,6 +165,7 @@ import {
   normalizeCompatibleAgentTitleForOwner,
   resolveCompatibleAgentTypeForOwner
 } from '../../../../shared/agent-title-owner'
+import { resolveExplicitTerminalTitleAgentType } from '../../../../shared/terminal-title-agent-type'
 import {
   isExpectedAgentProcess,
   recognizeAgentProcessFromCommandLine
@@ -666,6 +668,10 @@ let inactiveForegroundImmediateBudgetWindowStart = 0
 type PanePtyBinding = IDisposable & {
   syncProcessTracking: () => void
   noteVisibilityResume: () => void
+  /** Re-sample process identity when the pane gains intra-tab focus: the tab
+   *  icon follows the active leaf, and a shell-marked entry on a still-running
+   *  agent pane has no OSC boundary left to correct it. */
+  sampleForegroundAgentOnFocus: () => void
   reconcileIfSessionDead: (liveSessionIds: Set<string>, snapshotRequestedAt?: number) => void
   reconcileIfSessionMissing: (hasPty: HasPty, livenessRequestedAt?: number) => void
 }
@@ -1751,12 +1757,81 @@ export function connectPanePty(
     }
     return pendingWrite.then(() => interruptInference.flushPending())
   }
+  // Why: a launched/hook-known agent pane must confirm — not trust — a 133;D so a
+  // full-screen agent's leaked nested-shell 133;D can't clear its tab identity,
+  // even on a restore where no command-start read has recorded evidence yet.
+  const paneHasKnownAgentIdentity = (): boolean => {
+    const state = useAppStore.getState()
+    const entry = state.agentStatusByPaneKey[cacheKey]
+    if (entry?.state !== 'done' && agentTypeToIconAgent(entry?.agentType)) {
+      return true
+    }
+    const tab = (state.tabsByWorktree[deps.worktreeId] ?? []).find(
+      (candidate) => candidate.id === deps.tabId
+    )
+    return Boolean(
+      tab?.launchAgent ?? paneStartup?.launchAgent ?? paneStartup?.initialAgentStatus?.agent
+    )
+  }
+  // Why: a plain `codex`/`grok` sets its OSC title and the shell never repaints
+  // it on exit, so a confirmed return-to-shell must clear a title that still
+  // names an agent — otherwise the tab reads "grok" over a bare prompt. Only
+  // reset an agent-named title; user/shell-set titles are left untouched.
+  const clearStaleAgentTabTitleOnConfirmedShell = (): void => {
+    const state = useAppStore.getState()
+    const currentTitle = state.runtimePaneTitlesByTabId?.[deps.tabId]?.[pane.id]
+    const tab = (state.tabsByWorktree[deps.worktreeId] ?? []).find(
+      (entry) => entry.id === deps.tabId
+    )
+    const title = currentTitle ?? tab?.title
+    if (!title || resolveExplicitTerminalTitleAgentType(title) === null) {
+      return
+    }
+    const neutralTitle = neutralTerminalTitle()
+    deps.setRuntimePaneTitle(deps.tabId, pane.id, neutralTitle)
+    if (manager.getActivePane()?.id === pane.id) {
+      deps.updateTabTitle(deps.tabId, neutralTitle)
+    }
+  }
   const paneForegroundAgentTracker = createPaneForegroundAgentTracker({
     getPtyId: () => transport.getPtyId(),
     isTrackablePtyId: (id) => !isRemoteRuntimePtyId(id) && parseAppSshPtyId(id) === null,
     readForegroundProcess: (id) => window.api.pty.getForegroundProcess(id),
-    publish: (entry) => useAppStore.getState().setPaneForegroundAgent(cacheKey, entry)
+    publish: (entry) => useAppStore.getState().setPaneForegroundAgent(cacheKey, entry),
+    hasKnownAgentIdentity: paneHasKnownAgentIdentity,
+    onConfirmedShellForeground: clearStaleAgentTabTitleOnConfirmedShell
   })
+  const sampleVisiblePaneForegroundAgent = (): void => {
+    if (!deps.isVisibleRef.current) {
+      return
+    }
+    const state = useAppStore.getState()
+    const foreground = state.paneForegroundAgentByPaneKey[cacheKey]
+    // Why: live process identity already paints the icon — nothing to read.
+    if (foreground?.agent) {
+      return
+    }
+    const entry = state.agentStatusByPaneKey[cacheKey]
+    if (entry?.state !== 'done' && agentTypeToIconAgent(entry?.agentType)) {
+      return
+    }
+    const tab = (state.tabsByWorktree[deps.worktreeId] ?? []).find(
+      (candidate) => candidate.id === deps.tabId
+    )
+    const expectsAgent = Boolean(
+      tab?.launchAgent ?? paneStartup?.launchAgent ?? paneStartup?.initialAgentStatus?.agent
+    )
+    // Why: with no shell mark yet, launchAgent bootstrap already paints the icon,
+    // so a read is pointless. Otherwise probe the foreground: a shell mark (from a
+    // reattach or a full-screen agent's leaked nested-shell 133;D) can hide a
+    // still-running agent — including a manually started one with no launchAgent or
+    // hook, which no later 133;C will reseed. A genuinely idle shell just returns a
+    // shell name and publishes nothing, so the probe is self-limiting.
+    if (!foreground?.shellForeground && expectsAgent) {
+      return
+    }
+    paneForegroundAgentTracker.onVisiblePtyBound()
+  }
   const commandLifecycle = createTerminalCommandLifecycle({
     onCommandStarted: () => paneForegroundAgentTracker.onCommandStarted(),
     onCommandFinished: () => {
@@ -1828,6 +1903,14 @@ export function connectPanePty(
       pane.terminal.hasSelection()
     ) {
       return
+    }
+    // Why: user shell frameworks (bash-preexec/iTerm2) can replace Orca's
+    // OSC 133;C hook, so a manually launched agent produces no command-start
+    // signal at all. Enter at a shell-foreground prompt is the user-side
+    // equivalent; the sample is gated to panes with no live agent identity
+    // and publishes nothing for an idle shell.
+    if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      sampleVisiblePaneForegroundAgent()
     }
     deps.clearTerminalTabUnread(deps.tabId)
     deps.clearTerminalPaneUnread(cacheKey)
@@ -2225,7 +2308,11 @@ export function connectPanePty(
   }
   const bindActivePanePty = (
     ptyId: string,
-    options: { seedInitialAgentStatus?: boolean; updateTabPtyId?: 'always' | 'if-missing' } = {}
+    options: {
+      seedInitialAgentStatus?: boolean
+      updateTabPtyId?: 'always' | 'if-missing'
+      sampleVisibleForegroundAgent?: boolean
+    } = {}
   ): void => {
     if (activePanePtyBinding && activePanePtyBinding !== ptyId) {
       reportPanePtyVisibility(activePanePtyBinding, false)
@@ -2248,6 +2335,11 @@ export function connectPanePty(
     // frame-level sync often runs before that async result arrives.
     scheduleRuntimeGraphSync()
     agentCompletionCoordinator.startProcessTracking()
+    // Why: fresh spawns receive future OSC command-start events; only adopted or
+    // restored PTYs may already be inside Codex with no new foreground signal.
+    if (options.sampleVisibleForegroundAgent === true) {
+      sampleVisiblePaneForegroundAgent()
+    }
   }
 
   const onPtySpawn = (ptyId: string): void => {
@@ -3657,7 +3749,10 @@ export function connectPanePty(
           ) {
             // Why: daemon createOrAttach can turn an apparent fresh spawn into
             // a reattach; the transport skips onPtySpawn there to preserve recency.
-            bindActivePanePty(resolvedPtyId, { updateTabPtyId: 'if-missing' })
+            bindActivePanePty(resolvedPtyId, {
+              updateTabPtyId: 'if-missing',
+              sampleVisibleForegroundAgent: true
+            })
           }
           if (resolvedPtyId) {
             reconcilePtySizeAfterSpawn(resolvedPtyId, cols, rows)
@@ -5223,6 +5318,7 @@ export function connectPanePty(
       deps.syncPanePtyLayoutBinding(pane.id, ptyId)
       deps.updateTabPtyId(deps.tabId, ptyId)
       agentCompletionCoordinator.startProcessTracking()
+      sampleVisiblePaneForegroundAgent()
 
       // Why: mobile terminal streaming needs the exact screen state from
       // xterm.js. The shared helper installs both the SerializeAddon-backed
@@ -5784,7 +5880,10 @@ export function connectPanePty(
             onError: reportError
           }
         })
-        bindActivePanePty(attachPtyId, { updateTabPtyId: 'if-missing' })
+        bindActivePanePty(attachPtyId, {
+          updateTabPtyId: 'if-missing',
+          sampleVisibleForegroundAgent: true
+        })
         if (attachPtyId === eagerLivePtyId) {
           registerPaneSerializerFor(attachPtyId)
         }
@@ -5838,7 +5937,10 @@ export function connectPanePty(
             })
             // Why: this path reuses a PTY spawned by an earlier mount, so no
             // later spawn event will bind this remounted pane's DOM/container.
-            bindActivePanePty(spawnedPtyId, { updateTabPtyId: 'if-missing' })
+            bindActivePanePty(spawnedPtyId, {
+              updateTabPtyId: 'if-missing',
+              sampleVisibleForegroundAgent: true
+            })
           })
           .catch((err) => {
             reportError(err instanceof Error ? err.message : String(err))
@@ -5948,6 +6050,10 @@ export function connectPanePty(
     noteVisibilityResume() {
       ptySizeReassertion.request({ fit: false })
       consumeHibernatedAgentWake()
+      sampleVisiblePaneForegroundAgent()
+    },
+    sampleForegroundAgentOnFocus() {
+      sampleVisiblePaneForegroundAgent()
     },
     reconcileIfSessionDead,
     reconcileIfSessionMissing,

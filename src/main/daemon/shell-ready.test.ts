@@ -556,6 +556,34 @@ describePosix('daemon shell-ready launch config', () => {
     }
   )
 
+  itWithBash(
+    'still emits 133;C when bash-preexec re-arms the DEBUG trap at first prompt',
+    async () => {
+      const { getDaemonBashShellReadyRcfileContent } = await importFreshShellReady()
+      // Minimal bash-preexec imitation (iTerm2/starship setups): re-arms its own
+      // DEBUG trap from PROMPT_COMMAND at the first prompt — silencing Orca's
+      // trap — and dispatches preexec_functions with the command as $1.
+      writeFileSync(
+        join(userDataPath, '.bash_profile'),
+        [
+          'preexec_functions=()',
+          '__bp_preexec_invoke_exec() {',
+          '  [[ -n "${__bp_interactive_mode:-}" ]] || return',
+          '  __bp_interactive_mode=""',
+          '  local f',
+          '  for f in "${preexec_functions[@]}"; do "$f" "$BASH_COMMAND"; done',
+          '}',
+          "__bp_arm() { __bp_interactive_mode=1; trap '__bp_preexec_invoke_exec' DEBUG; }",
+          'PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}__bp_arm"'
+        ].join('\n')
+      )
+
+      const output = runInteractiveBashRcfile(getDaemonBashShellReadyRcfileContent(), userDataPath)
+
+      expectBashOsc133Lifecycle(output)
+    }
+  )
+
   itWithBash('normalizes array PROMPT_COMMAND hooks so bash 3.2 still runs cleanup', async () => {
     const { getDaemonBashShellReadyRcfileContent } = await importFreshShellReady()
     writeFileSync(
